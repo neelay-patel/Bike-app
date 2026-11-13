@@ -1,5 +1,10 @@
 # Ride story share card
 
+**Update 13 Nov 2026:** the look changed to direction D (docs/design.md). The share card is now the
+collectible ride card (`rideengine/card/ride_card.py`): name strip with the ride's number in the year,
+real route on a cobalt field, stripe band, serif headline, dot-matrix stats. The graphite card below
+(`make_card.py`) is kept for reference; its story ideas (headline from stops, towns, HR peak) carry over.
+
 Canvas with the current prototypes: https://claude.ai/artifact/6vEqXrfwo3ozkCh8byzDin
 (Scugog loop, 19 Oct 2026; Durham Forest loop, 3 Oct 2026). Generator: `rideengine/card/make_card.py`.
 

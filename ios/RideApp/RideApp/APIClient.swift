@@ -109,6 +109,20 @@ struct RideSummary: Decodable, Identifiable {
     var date: Date { Date(timeIntervalSince1970: summary.start) }
 }
 
+/// One ride with its per-second samples (for the elevation profile and heart-rate peak).
+struct RideTrace: Decodable {
+    let totals: [String: Double]
+    let samples: [Point]
+
+    struct Point: Decodable {
+        let t: Double
+        let lat: Double?
+        let lon: Double?
+        let ele: Double?
+        let hr: Double?
+    }
+}
+
 struct SyncResult: Decodable {
     let new: Int
     let skipped: Int
@@ -169,6 +183,10 @@ struct APIClient {
     /// Every ride, false starts included (marked `hidden`), so the app can show or hide them.
     func rides() async throws -> [RideSummary] {
         try await get("v1/rides", query: [URLQueryItem(name: "include_hidden", value: "true")])
+    }
+
+    func trace(_ rideId: String) async throws -> RideTrace {
+        try await get("v1/rides/\(rideId)", query: [URLQueryItem(name: "samples", value: "true")])
     }
 
     func connect(_ provider: String, credentials: [String: String], since: Date?) async throws {

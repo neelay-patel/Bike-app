@@ -67,9 +67,13 @@ struct ContentView: View {
     var body: some View {
         TabView {
             RidesView().tabItem { Label("Rides", systemImage: "bicycle") }
-            ConnectionsView().tabItem { Label("Connections", systemImage: "link") }
+            ConnectionsView().tabItem { Label("Sources", systemImage: "link") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .tint(Theme.cobalt)
+        .font(Theme.text())
+        .foregroundStyle(Theme.ink)
+        .preferredColorScheme(.light)  // the D look is light-only for now; a dark variant comes later
         .task { await model.refresh() }
     }
 }

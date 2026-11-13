@@ -5,6 +5,16 @@
 	<!-- Merged with the keys Xcode generates from build settings (GENERATE_INFOPLIST_FILE). -->
 	<key>NSHealthShareUsageDescription</key>
 	<string>Ride reads your cycling workouts, their routes, and the heart rate, calories and distance recorded during them, to build your rides. It reads nothing else and never writes to Health.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InstrumentSerif-Regular.ttf</string>
+		<string>IBMPlexSans-Regular.ttf</string>
+		<string>IBMPlexSans-Medium.ttf</string>
+		<string>IBMPlexSans-SemiBold.ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
+		<string>Doto-Black.ttf</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Ride connects to your development server on this network to send and show your rides.</string>
 	<key>NSAppTransportSecurity</key>

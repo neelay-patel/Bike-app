@@ -7,6 +7,9 @@
   python -m backend upload --user 1 data/apple_watch_2026-10-03.json
   python -m backend rides --user 1
   python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
+  python -m backend card --user 1 <ride_id> [--name "Durham Forest"] [--headline "..."] [--place "Uxbridge,44.10,-79.12"]
+                                                      # towns are found automatically unless --place / --no-places
+                                                      # collectible ride card (HTML) in data/cards/
   python -m backend serve                             # HTTP API on http://127.0.0.1:8000 (docs at /docs)
 """
 from __future__ import annotations
@@ -42,6 +45,14 @@ def main(argv=None) -> int:
     r.add_argument("--all", action="store_true", help="include false starts and empty recordings")
     rb = sub.add_parser("rebuild")
     rb.add_argument("--user", type=int, required=True)
+    cd = sub.add_parser("card")
+    cd.add_argument("--user", type=int, required=True)
+    cd.add_argument("ride_id")
+    cd.add_argument("--name")
+    cd.add_argument("--headline")
+    cd.add_argument("--place", action="append", default=[], help="label,lat,lon (repeatable)")
+    cd.add_argument("--no-places", action="store_true", help="don't label towns")
+    cd.add_argument("--out")
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
@@ -74,6 +85,31 @@ def main(argv=None) -> int:
                 rec = be.upload(a.user, "apple_health", open(f, "rb").read())
                 print(f"{f}: {rec.source} {datetime.fromtimestamp(rec.start):%Y-%m-%d %H:%M} "
                       f"-> ride {be.ride_id_for(a.user, rec.start, rec.end)}")
+        elif a.cmd == "card":
+            from rideengine.card.ride_card import ride_card
+            from rideengine.sources import blocked_sources
+            ride = be.ride(a.user, a.ride_id)
+            if ride is None:
+                print(f"error: no ride {a.ride_id}", file=sys.stderr)
+                return 1
+            year = datetime.fromtimestamp(ride.start).year
+            same_year = sorted(d["ride_id"] for d in be.rides(a.user)
+                               if datetime.fromtimestamp(d["summary"]["start"]).year == year)
+            number = same_year.index(a.ride_id) + 1 if a.ride_id in same_year else None
+            places = []
+            for p in a.place:
+                label, la, lo = p.rsplit(",", 2)
+                places.append([label, float(la), float(lo)])
+            out = a.out or os.path.join("data", "cards", f"ride_{a.ride_id}.html")
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(ride_card(ride, number=number, name=a.name, headline=a.headline,
+                                   places=[] if a.no_places else (places or None)))
+            print(f"Ride card written to {out}" + (f" (ride {number} of {year})" if number else ""))
+            blocked = blocked_sources(ride.provenance, "share")
+            if blocked:
+                print(f"Note: sharing isn't cleared yet for data from {', '.join(sorted(blocked))} "
+                      f"(provider terms not reviewed). Fine for you to look at; check before posting.")
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":

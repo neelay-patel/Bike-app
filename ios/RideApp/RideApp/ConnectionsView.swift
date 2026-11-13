@@ -1,71 +1,82 @@
 import SwiftUI
 
-/// One row per provider: connect once, then rides arrive on their own.
+/// One card per source: connect once, then rides arrive on their own.
 struct ConnectionsView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         NavigationStack {
-            List {
-                if let error = model.error {
-                    Text(error).foregroundStyle(.red).font(.footnote)
-                }
-                Section {
-                    AppleHealthRow()
-                }
-                Section("Accounts") {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        MonoLabel("Where your rides come from")
+                        Text("Sources").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                    }
+                    .padding(.horizontal, 4).padding(.top, 8)
+                    if let error = model.error {
+                        Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
+                    }
+                    AppleHealthCard()
+                    MonoLabel("Accounts").padding(.horizontal, 4).padding(.top, 8)
                     ForEach(model.connections.filter { $0.auth != "device" }) { c in
-                        ProviderRow(connection: c)
+                        ProviderCard(connection: c)
                     }
                 }
+                .padding(.horizontal, 16).padding(.bottom, 24)
             }
-            .navigationTitle("Connections")
+            .background(Theme.ground.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
         }
     }
 }
 
-struct AppleHealthRow: View {
+struct AppleHealthCard: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
     @State private var since = Calendar.current.date(from: DateComponents(year: 2025, month: 1, day: 1))!
     @State private var confirmDisconnect = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Apple Health", systemImage: "heart.text.square.fill").font(.headline)
+                Label("Apple Health", systemImage: "heart.text.square.fill")
+                    .font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
                 Spacer()
                 StateBadge(state: health.isConnected ? "connected" : "not_connected")
             }
             Text("Cycling workouts, their routes, and the heart rate, calories and distance recorded during them.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
             if !health.isConnected {
                 Text("On the Health screen, turn on all five and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Ride.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
             }
             DatePicker("Import rides since", selection: $since, displayedComponents: .date)
+                .font(Theme.text(15)).tint(Theme.cobalt)
             if let p = health.progress {
                 ProgressView(value: Double(p.done), total: Double(max(p.total, 1))) {
-                    Text("Sending \(p.done) of \(p.total)").font(.footnote)
+                    Text("Sending \(p.done) of \(p.total)").font(Theme.mono(12))
                 }
+                .tint(Theme.cobalt)
             }
             if let message = health.lastMessage {
-                Text(message).font(.footnote)
+                Text(message).font(Theme.text(13)).foregroundStyle(Theme.inkSoft)
             }
             HStack {
                 if health.isConnected {
                     Button("Import history") { Task { await health.importHistory(since: since); await model.refresh() } }
+                        .buttonStyle(SecondaryButton())
                     Spacer()
                     Button("Disconnect", role: .destructive) { confirmDisconnect = true }
+                        .buttonStyle(SecondaryButton(color: Theme.heart))
                 } else {
                     Button("Connect Apple Health") { Task { await health.connect(importSince: since); await model.refresh() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(PrimaryButton())
                 }
             }
             .disabled(health.isWorking)
-            .buttonStyle(.bordered)
         }
+        .padding(16).surfaceCard()
         .confirmationDialog("Disconnect Apple Health?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
             Button("Disconnect and delete its rides", role: .destructive) {
                 Task { await health.disconnect(); await model.refresh() }
@@ -76,7 +87,7 @@ struct AppleHealthRow: View {
     }
 }
 
-struct ProviderRow: View {
+struct ProviderCard: View {
     @EnvironmentObject var model: AppModel
     let connection: Connection
     @State private var showKeySheet = false
@@ -86,32 +97,35 @@ struct ProviderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(connection.name).font(.headline)
+            HStack(alignment: .firstTextBaseline) {
+                Text(connection.name).font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
                 Spacer()
                 StateBadge(state: connection.availability == "available" ? connection.state : connection.availability)
             }
-            Text(connection.gives).font(.footnote)
+            Text(connection.gives).font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
             if !connection.notes.isEmpty {
-                Text(connection.notes).font(.footnote).foregroundStyle(.secondary)
+                Text(connection.notes).font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
             }
             if let detail = connection.detail {
-                Text(detail).font(.footnote).foregroundStyle(.red)
+                Text(detail).font(Theme.text(13)).foregroundStyle(Theme.heart)
             }
             if connection.availability == "available" {
                 HStack {
                     if connected {
-                        Text("\(connection.recordings) rides").font(.footnote).foregroundStyle(.secondary)
+                        Text("\(connection.recordings) rides").font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
                         Spacer()
                         Button("Sync now") { Task { await model.run { _ = try await APIClient().sync(connection.provider) } } }
+                            .buttonStyle(SecondaryButton())
                         Button("Disconnect", role: .destructive) { confirmDisconnect = true }
+                            .buttonStyle(SecondaryButton(color: Theme.heart))
                     } else if connection.auth == "api_key" {
-                        Button("Connect") { showKeySheet = true }.buttonStyle(.borderedProminent)
+                        Button("Connect") { showKeySheet = true }.buttonStyle(PrimaryButton())
                     }
                 }
-                .buttonStyle(.bordered)
+                .padding(.top, 4)
             }
         }
+        .padding(16).surfaceCard()
         .sheet(isPresented: $showKeySheet) { APIKeySheet(connection: connection) }
         .confirmationDialog("Disconnect \(connection.name)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
             Button("Disconnect and delete its rides", role: .destructive) {
@@ -141,8 +155,11 @@ struct APIKeySheet: View {
                 } footer: {
                     Text("Create the key in Garmin Connect on the web: Settings → Personal API. It's stored encrypted on the server.")
                 }
-                if let error { Text(error).foregroundStyle(.red) }
+                if let error { Text(error).foregroundStyle(Theme.heart) }
             }
+            .font(Theme.text(15))
+            .scrollContentBackground(.hidden)
+            .background(Theme.ground)
             .navigationTitle(connection.name)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -164,6 +181,7 @@ struct APIKeySheet: View {
                 }
             }
         }
+        .tint(Theme.cobalt)
     }
 }
 
@@ -172,12 +190,35 @@ struct StateBadge: View {
 
     var body: some View {
         let (text, color): (String, Color) = switch state {
-        case "connected": ("Connected", .green)
-        case "error": ("Problem", .red)
-        case "planned": ("Coming soon", .secondary)
-        case "blocked": ("Not available yet", .secondary)
-        default: ("Not connected", .secondary)
+        case "connected": ("Connected", Theme.cobalt)
+        case "error": ("Problem", Theme.heart)
+        case "planned": ("Coming soon", Theme.label)
+        case "blocked": ("Not available yet", Theme.label)
+        default: ("Not connected", Theme.label)
         }
-        Text(text).font(.caption.weight(.semibold)).foregroundStyle(color)
+        MonoLabel(text, color: color)
+    }
+}
+
+struct PrimaryButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.text(15, .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18).frame(minHeight: 44)
+            .background(Theme.cobalt.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
+    }
+}
+
+struct SecondaryButton: ButtonStyle {
+    var color: Color = Theme.ink
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.text(14, .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 14).frame(minHeight: 44)
+            .background(configuration.isPressed ? Theme.surfaceSelected : Theme.surface, in: Capsule())
+            .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
     }
 }
