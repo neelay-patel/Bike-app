@@ -39,6 +39,7 @@ def main(argv=None) -> int:
     u.add_argument("files", nargs="+")
     r = sub.add_parser("rides")
     r.add_argument("--user", type=int, required=True)
+    r.add_argument("--all", action="store_true", help="include false starts and empty recordings")
     rb = sub.add_parser("rebuild")
     rb.add_argument("--user", type=int, required=True)
     v = sub.add_parser("serve")
@@ -76,12 +77,17 @@ def main(argv=None) -> int:
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":
-            for d in be.rides(a.user):
+            every = be.rides(a.user, include_hidden=True)
+            for d in (every if a.all else [d for d in every if not d["hidden"]]):
                 s = d["summary"]
                 hr = f"{s['avg_hr']:.0f}/{s['max_hr']:.0f} bpm" if s["avg_hr"] else "no HR"
                 cut = "".join(f"  (left out {e['km']} km in a vehicle)" for e in d["excluded"])
                 print(f"{d['ride_id']}  {datetime.fromtimestamp(s['start']):%Y-%m-%d %H:%M}  {s['km']:6.1f} km  "
-                      f"{s['ascent_m'] or 0:5.0f} m  {hr:>12}  {', '.join(d['sources'])}{cut}")
+                      f"{s['ascent_m'] or 0:5.0f} m  {hr:>12}  {', '.join(d['sources'])}{cut}"
+                      f"{'  [hidden: ' + d['hidden'].replace('_', ' ') + ']' if d['hidden'] else ''}")
+            n_hidden = sum(1 for d in every if d["hidden"])
+            if n_hidden and not a.all:
+                print(f"({n_hidden} false starts and empty recordings hidden; --all shows them)")
     except ConnectorError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

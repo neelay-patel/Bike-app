@@ -210,3 +210,15 @@ def test_rebuild_and_excluded_in_api(env):
     assert be.rebuild_all(uid) == 1
     d = client.get("/v1/rides").json()[0]
     assert d["excluded"] == []
+
+
+def test_rides_hide_false_starts_unless_asked(env):
+    be, uid, client, _ = env
+    tiny = phone_json(start=T0 - 30 * 60, minutes=3)
+    tiny["origin"] = "healthkit:tiny"
+    tiny["totals"] = {"distance_m": 900.0}
+    client.post("/v1/uploads/apple_health", content=json.dumps(tiny))
+    client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert len(client.get("/v1/rides").json()) == 1
+    every = client.get("/v1/rides?include_hidden=true").json()
+    assert sorted(str(d["hidden"]) for d in every) == ["None", "false_start"]

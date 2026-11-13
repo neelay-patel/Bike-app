@@ -76,6 +76,8 @@ struct RideSummary: Decodable, Identifiable {
     let sources: [String]
     let provenance: [String: String]
     let use: [String: UsePolicy]
+    /// Why the server would leave this ride out of lists ("false_start", "empty"), or nil.
+    let hidden: String?
     let excluded: [Excluded]?
 
     /// A stretch left out because it wasn't riding (e.g. the bike computer left on in a car).
@@ -158,13 +160,16 @@ struct APIClient {
         return data
     }
 
-    private func get<T: Decodable>(_ path: String) async throws -> T {
-        try Self.decoder.decode(T.self, from: await send(request("GET", path)))
+    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        try Self.decoder.decode(T.self, from: await send(request("GET", path, query: query)))
     }
 
     func connections() async throws -> [Connection] { try await get("v1/connections") }
 
-    func rides() async throws -> [RideSummary] { try await get("v1/rides") }
+    /// Every ride, false starts included (marked `hidden`), so the app can show or hide them.
+    func rides() async throws -> [RideSummary] {
+        try await get("v1/rides", query: [URLQueryItem(name: "include_hidden", value: "true")])
+    }
 
     func connect(_ provider: String, credentials: [String: String], since: Date?) async throws {
         let body = try JSONEncoder().encode(credentials)

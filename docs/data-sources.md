@@ -40,6 +40,13 @@ Implemented in `rideengine/sources.py`.
 - On Neelay's 97 Garmin rides since 2025 this caught two: 30 Jul 2026 (41.7 km in a car at up to 115 km/h;
   the ride is 105.7 km, not 146.9) and 11 May 2025 (38.5 km at up to 117 km/h). Nothing else was touched.
 
+## False starts and empty recordings: hidden, not deleted (13 Nov 2026)
+- Empty: under 0.1 km or a minute of riding. False start: under 3 km and 15 min moving, within 90 min
+  of a real ride (the computer started, stopped, restarted). A short ride on its own stays visible.
+- They stay stored. Lists and trends leave them out (`rideengine/clean.py: visible()`); the API's
+  `/v1/rides?include_hidden=true` and `backend rides --all` show them, and the app has a toggle.
+- On Neelay's 97 Garmin rides: 19 hidden (13 empty, 6 false starts), 78 shown; smallest shown 5.2 km.
+
 ## Power
 - Outdoor cards have a vertical power strip down the right side of the map, showing average and max watts. It is hidden when a ride has no power data.
 - Until real data exists, power is simulated from speed and gradient (85 kg rider plus bike, gravel tyres, upright position) and tagged SIM.

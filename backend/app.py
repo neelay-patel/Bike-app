@@ -77,8 +77,9 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
                 "ride_id": be.ride_id_for(uid, rec.start, rec.end)}
 
     @app.get("/v1/rides")
-    def rides(uid: int = Depends(user)):
-        return be.rides(uid)
+    def rides(include_hidden: bool = False, uid: int = Depends(user)):
+        """Newest first. include_hidden=true adds false starts and empty recordings, marked "hidden"."""
+        return be.rides(uid, include_hidden)
 
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):

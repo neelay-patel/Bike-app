@@ -4,6 +4,10 @@ import SwiftUI
 struct RidesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
+    @AppStorage("rides.showHidden") private var showHidden = false
+
+    private var shown: [RideSummary] { showHidden ? model.rides : model.rides.filter { $0.hidden == nil } }
+    private var hiddenCount: Int { model.rides.filter { $0.hidden != nil }.count }
 
     var body: some View {
         NavigationStack {
@@ -11,12 +15,20 @@ struct RidesView: View {
                 if let error = model.error {
                     Text(error).foregroundStyle(.red).font(.footnote)
                 }
-                if model.rides.isEmpty && model.error == nil && !model.isLoading {
+                if shown.isEmpty && model.error == nil && !model.isLoading {
                     ContentUnavailableView("No rides yet", systemImage: "bicycle",
                                            description: Text("Connect Apple Health or Garmin in Connections."))
                 }
-                ForEach(model.rides) { ride in
+                ForEach(shown) { ride in
                     NavigationLink { RideDetailView(ride: ride) } label: { RideRow(ride: ride) }
+                }
+                if hiddenCount > 0 {
+                    Section {
+                        Toggle(isOn: $showHidden) {
+                            Text("Show \(hiddenCount) false starts and empty recordings")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .navigationTitle("Rides")
@@ -47,6 +59,7 @@ struct RideRow: View {
                 }
                 if ride.summary.indoor { Stat(value: "Indoor") }
                 if !(ride.excluded ?? []).isEmpty { Stat(value: "Trimmed", symbol: "car.fill") }
+                if let hidden = ride.hidden { Stat(value: hidden == "empty" ? "Empty" : "False start") }
             }
             SourceChips(sources: ride.sources)
         }

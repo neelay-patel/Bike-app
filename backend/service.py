@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from rideengine.analysis.basics import summary
+from rideengine.clean import hidden_reasons
 from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
 from rideengine.merge import build_rides
 from rideengine.model import Recording, Ride
@@ -217,11 +218,22 @@ class Backend:
             return len(self.remerge(user_id, row["a"], row["b"]))
 
     # --- reading rides ------------------------------------------------------------------------
-    def rides(self, user_id: int) -> list[dict]:
+    def rides(self, user_id: int, include_hidden: bool = False) -> list[dict]:
+        """Rides newest first. False starts and empty recordings are left out unless asked for;
+        with include_hidden each ride says why it would be hidden ("hidden": reason or None)."""
         with self.lock:
             rows = self.db.execute("SELECT ride_id, data FROM rides WHERE user_id = ? ORDER BY start_t DESC",
                                    (user_id,)).fetchall()
-        return [describe(r["ride_id"], Ride.from_json(r["data"])) for r in rows]
+        rides = [Ride.from_json(r["data"]) for r in rows]
+        hide = hidden_reasons(rides)
+        out = []
+        for i, (row, ride) in enumerate(zip(rows, rides)):
+            if i in hide and not include_hidden:
+                continue
+            d = describe(row["ride_id"], ride)
+            d["hidden"] = hide.get(i)
+            out.append(d)
+        return out
 
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:

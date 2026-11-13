@@ -26,7 +26,7 @@ Summaries, insights and cards come later. See `docs/connectors.md`.
 - `rideengine/importers/`: `fit.py` (dependency-free FIT decoder), `gpx.py`, `apple_health.py` (streams export.zip, keeps only cycling workouts + heart rate during them), `recording_json.py` (the exchange format the iPhone app uploads: `asdict(Recording)` + `"format": "rideengine.recording/1"`).
 - `rideengine/sources.py`: which source wins for each channel/total, and `SOURCE_POLICY` (may a source's data feed AI / be shown to others; unreviewed = no). Change rules here, not in merge code.
 - `rideengine/merge.py`: group recordings by time overlap, merge onto the bike computer's timeline.
-- `rideengine/clean.py`: leaves out stretches that weren't riding (bike computer left on in a car: sustained >65 km/h, cut between the surrounding long stops). Merge then redoes the affected totals and lists the cut in `Ride.excluded`.
+- `rideengine/clean.py`: leaves out stretches that weren't riding (bike computer left on in a car: sustained >65 km/h, cut between the surrounding long stops). Merge then redoes the affected totals and lists the cut in `Ride.excluded`. `hidden_reasons()`/`visible()` mark false starts and empty recordings (kept, but left out of lists and trends).
 - `rideengine/store.py`: JSON file store under `data/store/` (keeps all recordings, rebuilds rides). Placeholder for a real DB.
 - `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `simpower` (SIMULATED power, prototyping only).
 - `rideengine/card/`: share card generator (`make_card.py`, prototype-quality) and `prepare.py`.

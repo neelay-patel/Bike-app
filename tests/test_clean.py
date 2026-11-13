@@ -70,3 +70,37 @@ def test_wearable_calories_are_kept():
 def test_recording_that_is_all_driving_is_left_alone():
     r = build_rides([garmin(track([DRIVE]))])[0]
     assert r.excluded == [] and r.totals["distance_m"] > 45000
+
+
+# --- false starts ------------------------------------------------------------------------------------
+from rideengine.clean import hidden_reasons, visible  # noqa: E402
+
+
+def ride_at(start, minutes, kmh=25):
+    s = track([(minutes * 60, kmh, 0)], start=start)
+    return garmin(s)
+
+
+def test_false_starts_before_a_ride_are_hidden_but_kept():
+    # 30 Jul 2026 pattern: 1.3 km, an empty one, 0.7 km, then the real ride.
+    recs = [ride_at(T0, 3), ride_at(T0 + 300, 0.5, kmh=0), ride_at(T0 + 480, 2), ride_at(T0 + 660, 120)]
+    rides = build_rides(recs)
+    assert len(rides) == 4
+    reasons = hidden_reasons(rides)
+    assert sorted(reasons.values()) == ["empty", "false_start", "false_start"]
+    assert [round(r.totals["distance_m"] / 1000) for r in visible(rides)] == [50]
+
+
+def test_a_short_ride_on_its_own_stays():
+    rides = build_rides([ride_at(T0, 5), ride_at(T0 + 86400, 120)])  # 2 km one day, 50 km the next
+    assert hidden_reasons(rides) == {}
+
+
+def test_tiny_rides_with_no_real_ride_nearby_stay():
+    rides = build_rides([ride_at(T0, 4), ride_at(T0 + 600, 4)])
+    assert hidden_reasons(rides) == {}
+
+
+def test_empty_recording_is_hidden_even_alone():
+    rides = build_rides([ride_at(T0, 0.5, kmh=0)])
+    assert hidden_reasons(rides) == {0: "empty"}

@@ -20,6 +20,7 @@ from datetime import date, datetime
 from .analysis.basics import stops, summary
 from .analysis.climbs import find_climbs, match_climbs
 from .analysis.fitness import daily_loads, efficiency, estimate_hrmax, fitness_fatigue
+from .clean import visible
 from .importers.apple_health import read_export
 from .importers.fit import read_fit
 from .importers.gpx import read_gpx
@@ -53,7 +54,7 @@ def cmd_import(a):
 
 
 def cmd_rides(a):
-    for r in Store(a.store).rides():
+    for r in visible(Store(a.store).rides()):
         s = summary(r)
         print(f"{int(r.start)}  {_day(r.start)}  {s['km']:6.1f} km  "
               f"{(s['avg_kmh'] or 0):4.1f} km/h  {s['avg_hr'] or '-':>5} bpm  " if s['km'] else f"{_day(r.start)[:0]}{'':>23}{s['avg_hr'] or '-':>5} bpm  "
@@ -69,7 +70,7 @@ def cmd_show(a):
 
 
 def cmd_trends(a):
-    rides = [r for r in Store(a.store).rides() if not r.indoor]
+    rides = [r for r in visible(Store(a.store).rides()) if not r.indoor]
     hrmax = estimate_hrmax(rides)
     print(f"Estimated max HR: {hrmax:.0f}")
     print("\nEfficiency (m per heartbeat, flat steady riding):")

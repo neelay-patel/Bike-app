@@ -132,3 +132,69 @@ def pieces(samples: list[Sample], cuts: list[dict]) -> list[list[Sample]]:
     if cur:
         out.append(cur)
     return out
+
+
+# --- Rides that aren't really rides -----------------------------------------------------------------
+# A false start: the bike computer started, stopped, started again before the real ride (or ran on
+# for a minute after it). Seen on Neelay's Garmin: 0.0-2.6 km, under 11 min, within an hour of a ride.
+# They stay stored; lists and trends just leave them out.
+
+EMPTY_KM = 0.1
+EMPTY_MOVING_S = 60
+TINY_KM = 3.0
+TINY_MOVING_S = 15 * 60
+SESSION_GAP_S = 90 * 60   # rides this close together are one outing
+
+
+def _size(ride) -> tuple[float, float]:
+    """(km, moving seconds), preferring the ride's totals like the summary does."""
+    km = (ride.totals.get("distance_m") or sum(
+        haversine(a.lat, a.lon, b.lat, b.lon) for a, b in zip(ride.samples, ride.samples[1:])
+        if a.lat is not None and b.lat is not None)) / 1000
+    moving = ride.totals.get("moving_s")
+    if moving is None:
+        moving = moving_seconds(ride.samples)
+    return km, moving
+
+
+def hidden_reasons(rides: list) -> dict[int, str]:
+    """{index: "empty" | "false_start"} for rides to leave out of lists and trends.
+
+    empty: under EMPTY_KM or EMPTY_MOVING_S of riding.
+    false_start: under TINY_KM and TINY_MOVING_S, in the same outing (gaps <= SESSION_GAP_S)
+    as a ride that isn't tiny. A tiny ride on its own is a real (short) ride and stays.
+    """
+    order = sorted(range(len(rides)), key=lambda i: rides[i].start)
+    size = {i: _size(rides[i]) for i in order}
+    reasons: dict[int, str] = {}
+    for i in order:
+        if rides[i].indoor:
+            continue  # trainer sessions have no distance to judge by
+        km, moving = size[i]
+        if km < EMPTY_KM or moving < EMPTY_MOVING_S:
+            reasons[i] = "empty"
+    # Outings: consecutive rides with short gaps between them.
+    outing, outings = [], []
+    for i in order:
+        if outing and rides[i].start - rides[outing[-1]].end > SESSION_GAP_S:
+            outings.append(outing)
+            outing = []
+        outing.append(i)
+    if outing:
+        outings.append(outing)
+
+    def tiny(i):
+        km, moving = size[i]
+        return km < TINY_KM and moving < TINY_MOVING_S
+
+    for o in outings:
+        if any(not tiny(i) and i not in reasons for i in o):
+            for i in o:
+                if tiny(i) and i not in reasons and not rides[i].indoor:
+                    reasons[i] = "false_start"
+    return reasons
+
+
+def visible(rides: list) -> list:
+    hide = hidden_reasons(rides)
+    return [r for i, r in enumerate(rides) if i not in hide]
