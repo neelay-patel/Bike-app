@@ -1,0 +1,114 @@
+{
+ "title": "Share card: Durham Forest loop",
+ "towns": [
+  [
+   "Start",
+   43.92743,
+   -79.07513,
+   0,
+   "right"
+  ],
+  [
+   "Finish",
+   43.9089,
+   -79.0694,
+   68.7,
+   "right"
+  ],
+  [
+   "Durham Forest",
+   44.0401,
+   -79.0867,
+   20.5,
+   "right"
+  ],
+  [
+   "Uxbridge",
+   44.1088,
+   -79.1227,
+   35.5,
+   "left"
+  ],
+  [
+   "Claremont",
+   43.9725,
+   -79.1292,
+   56.0,
+   "left"
+  ]
+ ],
+ "map_aria": "Route map: a 68.7 km gravel loop north through Durham Forest to Uxbridge and back south through Claremont",
+ "ele_lo": 110,
+ "ele_hi": 420,
+ "ele_aria": "Elevation profile, 123 to 407 m, 1,139 m of climbing",
+ "ele_mid": "407 M HIGH POINT",
+ "meta_l": "DURHAM FOREST GRAVEL",
+ "meta_r": "03.10.26",
+ "h1a": "1,139 m in 69 km.",
+ "h1b": "Lunch in Uxbridge, earned.",
+ "dials": [
+  [
+   "Distance",
+   0,
+   160,
+   68.7,
+   null,
+   "68.7",
+   "KM",
+   "3:55 moving",
+   false
+  ],
+  [
+   "Speed",
+   0,
+   60,
+   17.5,
+   57.0,
+   "17.5",
+   "KM/H AVG",
+   "max 57.0",
+   false
+  ],
+  [
+   "Climbed",
+   0,
+   1500,
+   1139,
+   null,
+   "1,139",
+   "METRES",
+   "peak 407 m",
+   false
+  ],
+  [
+   "Heart",
+   0,
+   200,
+   144,
+   173,
+   "144",
+   "BPM AVG",
+   "max 173",
+   false
+  ],
+  [
+   "Calories",
+   0,
+   3000,
+   1973,
+   null,
+   "1,973",
+   "KCAL ACTIVE",
+   "Apple Watch",
+   false
+  ]
+ ],
+ "marks": [
+  [
+   "\u2665 173 PEAK",
+   43.961,
+   -79.0901,
+   "left"
+  ]
+ ]
+}

@@ -1,0 +1,95 @@
+"""Canonical ride format.
+
+Every importer converts its source into a `Recording` (one device's view of one
+activity). The merge step combines overlapping recordings into one `Ride`, where
+every channel remembers which device it came from.
+"""
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from typing import Optional
+
+# Channels a sample can carry. Units: degrees, metres, m/s, bpm, watts, rpm, deg C.
+CHANNELS = ("lat", "lon", "ele", "speed", "hr", "power", "cadence", "temp")
+
+
+@dataclass
+class Sample:
+    t: float  # unix seconds (UTC)
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    ele: Optional[float] = None
+    speed: Optional[float] = None
+    hr: Optional[float] = None
+    power: Optional[float] = None
+    cadence: Optional[float] = None
+    temp: Optional[float] = None
+
+
+@dataclass
+class Recording:
+    """One device's recording of one activity, straight from an importer."""
+
+    source: str  # e.g. "garmin", "apple_watch", "kickr"
+    device: str  # free text, e.g. "Garmin Edge (FIT)", "Neelay's Apple Watch"
+    start: float
+    end: float
+    sport: str = "cycling"
+    indoor: bool = False
+    samples: list[Sample] = field(default_factory=list)
+    # Totals the device itself reports (preferred over values we derive).
+    totals: dict = field(default_factory=dict)
+    # Where it came from, for traceability (file path, workout id...).
+    origin: str = ""
+
+    def channels(self) -> set[str]:
+        present = set()
+        for c in CHANNELS:
+            if any(getattr(s, c) is not None for s in self.samples):
+                present.add(c)
+        return present
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+
+@dataclass
+class Ride:
+    """A merged ride. `samples` is the base timeline; `provenance` says which
+    source supplied each channel and each total."""
+
+    start: float
+    end: float
+    sport: str
+    indoor: bool
+    samples: list[Sample]
+    totals: dict
+    provenance: dict  # {"channel:hr": "apple_watch", "total:calories": "apple_watch", ...}
+    recordings: list[str]  # origins of the recordings merged into this ride
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
+
+    @staticmethod
+    def from_json(text: str) -> "Ride":
+        d = json.loads(text)
+        d["samples"] = [Sample(**s) for s in d["samples"]]
+        return Ride(**d)
+
+    @property
+    def start_dt(self) -> datetime:
+        return datetime.fromtimestamp(self.start).astimezone()
+
+
+def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance in metres between two points."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = p2 - p1
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
