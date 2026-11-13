@@ -109,7 +109,10 @@ def merge(group_: list[Recording]) -> Ride:
                         provenance[f"total:{key}"] = "derived:power"
                         break
                 continue
-            rec = next((r for r in group_ if r.source == src and key in r.totals), None)
+            # Same source twice (e.g. a Garmin .FIT and the copy Garmin Connect wrote to Apple
+            # Health): trust the fuller recording.
+            rec = max((r for r in group_ if r.source == src and key in r.totals),
+                      key=lambda r: len(r.samples), default=None)
             if rec is not None:
                 totals[key] = rec.totals[key]
                 provenance[f"total:{key}"] = src

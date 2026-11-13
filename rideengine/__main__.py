@@ -1,6 +1,7 @@
 """Command line.
 
   python -m rideengine import data/*.fit data/*.gpx            # Garmin / Wahoo / any FIT or GPX
+  python -m rideengine import data/*.json                       # recordings exported by the iPhone app
   python -m rideengine import --apple data/export.zip --since 2025-01-01
   python -m rideengine rides                                    # merged rides, one line each
   python -m rideengine show <ride_id>                           # totals + where each value came from
@@ -22,6 +23,7 @@ from .analysis.fitness import daily_loads, efficiency, estimate_hrmax, fitness_f
 from .importers.apple_health import read_export
 from .importers.fit import read_fit
 from .importers.gpx import read_gpx
+from .importers.recording_json import read_recording_json
 from .store import Store
 
 
@@ -37,8 +39,10 @@ def cmd_import(a):
             recs.append(read_fit(path, source=a.source or "garmin"))
         elif path.lower().endswith(".gpx"):
             recs.append(read_gpx(path, source=a.source or "garmin", device="GPX file"))
+        elif path.lower().endswith(".json"):
+            recs.append(read_recording_json(path))
         else:
-            print(f"skipping {path} (not .fit or .gpx)")
+            print(f"skipping {path} (not .fit, .gpx or .json)")
     if a.apple:
         print("Reading Apple Health export (cycling workouts and their heart rate only)...")
         recs += read_export(a.apple, since=a.since, routes_dir=os.path.join(a.store, "apple_routes"))

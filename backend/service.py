@@ -1,0 +1,238 @@
+"""The backend's core, independent of HTTP: users, connections, sync, upload, merge into rides.
+
+Flow for every activity, whichever way it arrives:
+  original file kept on disk → connector.normalize() → recording row → re-merge that time window
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+import threading
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
+
+from rideengine.analysis.basics import summary
+from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
+from rideengine.merge import build_rides
+from rideengine.model import Recording, Ride
+from rideengine.sources import allowed, blocked_sources, sources_used
+
+from . import db
+from .config import Settings
+from .connectors import REGISTRY, ConnectorError
+from .crypto import Vault, load_key
+
+FIRST_SYNC_DAYS = 90      # history pulled on first connect unless a start date is given
+RESYNC_OVERLAP_DAYS = 2   # later syncs look back a little, in case a ride synced late
+_SAFE_ID = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class Backend:
+    def __init__(self, settings: Settings, registry: Optional[dict] = None):
+        self.settings = settings
+        os.makedirs(settings.data_dir, exist_ok=True)
+        os.makedirs(settings.raw_dir, exist_ok=True)
+        self.db = db.connect(settings.database)
+        self.vault = Vault(load_key(settings.secret_key_file))
+        self.registry = registry if registry is not None else REGISTRY
+        self.lock = threading.RLock()
+
+    def connector(self, provider: str):
+        if provider not in self.registry:
+            raise ConnectorError(f"Unknown provider {provider!r}")
+        return self.registry[provider]
+
+    # --- users (dev tokens until Sign in with Apple) ------------------------------------------
+    def create_user(self) -> tuple[int, str]:
+        token = secrets.token_urlsafe(32)
+        with self.lock:
+            cur = self.db.execute("INSERT INTO users (created_at, token_hash) VALUES (?, ?)",
+                                  (db.now(), _hash(token)))
+        return cur.lastrowid, token
+
+    def user_for_token(self, token: str) -> Optional[int]:
+        with self.lock:
+            row = self.db.execute("SELECT id FROM users WHERE token_hash = ?", (_hash(token),)).fetchone()
+        return row["id"] if row else None
+
+    # --- connections ------------------------------------------------------------------------
+    def connections(self, user_id: int) -> list[dict]:
+        with self.lock:
+            rows = {r["provider"]: r for r in self.db.execute(
+                "SELECT provider, status, detail, last_sync_at FROM connections WHERE user_id = ?", (user_id,))}
+            counts = {r["provider"]: r["n"] for r in self.db.execute(
+                "SELECT provider, COUNT(*) AS n FROM recordings WHERE user_id = ? GROUP BY provider", (user_id,))}
+        out = []
+        for key, c in self.registry.items():
+            i, row = c.info, rows.get(key)
+            if i.auth == "device":
+                state = "connected" if counts.get(key) else "not_connected"
+            else:
+                state = row["status"] if row else "not_connected"
+            out.append({"provider": key, "name": i.name, "auth": i.auth, "availability": i.status,
+                        "gives": i.gives, "notes": i.notes, "state": state,
+                        "detail": row["detail"] if row else None,
+                        "last_sync_at": row["last_sync_at"] if row else None,
+                        "recordings": counts.get(key, 0)})
+        return out
+
+    def connect(self, user_id: int, provider: str, credentials: dict) -> None:
+        c = self.connector(provider)
+        if c.info.status != "available" or c.info.auth == "device":
+            raise ConnectorError(f"{c.info.name} can't be connected here")
+        secret = c.connect(credentials)
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO connections (user_id, provider, secret, status, detail, created_at) "
+                "VALUES (?, ?, ?, 'connected', NULL, ?) ON CONFLICT (user_id, provider) DO UPDATE SET "
+                "secret = excluded.secret, status = 'connected', detail = NULL",
+                (user_id, provider, self.vault.seal(secret), db.now()))
+
+    def disconnect(self, user_id: int, provider: str) -> int:
+        """Forget the credentials and everything that provider delivered. Returns recordings removed."""
+        with self.lock:
+            rows = self.db.execute("SELECT external_id, start_t, end_t, raw_path FROM recordings "
+                                   "WHERE user_id = ? AND provider = ?", (user_id, provider)).fetchall()
+            self.db.execute("DELETE FROM connections WHERE user_id = ? AND provider = ?", (user_id, provider))
+            self.db.execute("DELETE FROM recordings WHERE user_id = ? AND provider = ?", (user_id, provider))
+            for r in rows:
+                if r["raw_path"] and os.path.exists(r["raw_path"]):
+                    os.remove(r["raw_path"])
+            for r in rows:
+                self.remerge(user_id, r["start_t"], r["end_t"])
+        return len(rows)
+
+    # --- sync (pull connectors) ----------------------------------------------------------------
+    def sync(self, user_id: int, provider: str, since: Optional[str] = None) -> dict:
+        c = self.connector(provider)
+        with self.lock:
+            row = self.db.execute("SELECT secret, last_sync_at FROM connections WHERE user_id = ? AND provider = ?",
+                                  (user_id, provider)).fetchone()
+        if row is None:
+            raise ConnectorError(f"{c.info.name} isn't connected")
+        secret = self.vault.open(row["secret"])
+        if since is None:
+            back = (datetime.fromtimestamp(row["last_sync_at"], timezone.utc).date()
+                    - timedelta(days=RESYNC_OVERLAP_DAYS)) if row["last_sync_at"] \
+                else date.today() - timedelta(days=FIRST_SYNC_DAYS)
+            since = back.isoformat()
+
+        def known(external_id: str) -> bool:
+            with self.lock:
+                return self.db.execute("SELECT 1 FROM recordings WHERE user_id = ? AND provider = ? "
+                                       "AND external_id = ?", (user_id, provider, external_id)).fetchone() is not None
+
+        new, skipped, status, detail = 0, 0, "connected", None
+        try:
+            for f in c.fetch(secret, since, known):
+                try:
+                    self.ingest(user_id, provider, f.external_id, f.kind, f.content)
+                    new += 1
+                except ValueError:
+                    skipped += 1  # unreadable or empty file: keep going
+        except ConnectorError as exc:
+            status, detail = "error", str(exc)
+        with self.lock:
+            self.db.execute("UPDATE connections SET secret = ?, status = ?, detail = ?, last_sync_at = ? "
+                            "WHERE user_id = ? AND provider = ?",
+                            (self.vault.seal(secret), status, detail,
+                             db.now() if status == "connected" else row["last_sync_at"], user_id, provider))
+        if status == "error":
+            raise ConnectorError(detail)
+        return {"provider": provider, "since": since, "new": new, "skipped": skipped}
+
+    # --- upload (device connectors) ------------------------------------------------------------
+    def upload(self, user_id: int, provider: str, payload: bytes) -> Recording:
+        c = self.connector(provider)
+        if not hasattr(c, "parse_upload"):
+            raise ConnectorError(f"{c.info.name} doesn't take uploads")
+        rec = c.parse_upload(payload)
+        return self.ingest(user_id, provider, rec.origin.split(":", 1)[1], "json", payload)
+
+    # --- ingest and merge ----------------------------------------------------------------------
+    def ingest(self, user_id: int, provider: str, external_id: str, kind: str, content: bytes) -> Recording:
+        """Keep the original, normalize it, store the recording, rebuild rides around it."""
+        c = self.connector(provider)
+        folder = os.path.join(self.settings.raw_dir, str(user_id), provider)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{_SAFE_ID.sub('_', external_id)}.{_SAFE_ID.sub('', kind)}")
+        tmp = path + ".part"
+        with open(tmp, "wb") as fh:
+            fh.write(content)
+        os.replace(tmp, path)
+        try:
+            rec = c.normalize(path, external_id)
+        except Exception:
+            os.remove(path)
+            raise
+        with self.lock:
+            old = self.db.execute("SELECT start_t, end_t FROM recordings WHERE user_id = ? AND provider = ? "
+                                  "AND external_id = ?", (user_id, provider, external_id)).fetchone()
+            self.db.execute(
+                "INSERT INTO recordings (user_id, provider, external_id, source, start_t, end_t, raw_path, data, "
+                "received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, provider, external_id) "
+                "DO UPDATE SET source = excluded.source, start_t = excluded.start_t, end_t = excluded.end_t, "
+                "raw_path = excluded.raw_path, data = excluded.data, received_at = excluded.received_at",
+                (user_id, provider, external_id, rec.source, rec.start, rec.end, path,
+                 json.dumps(recording_to_dict(rec)), db.now()))
+            if old:  # a re-upload may have moved in time
+                self.remerge(user_id, old["start_t"], old["end_t"])
+            self.remerge(user_id, rec.start, rec.end)
+        return rec
+
+    def remerge(self, user_id: int, start: float, end: float) -> list[Ride]:
+        """Rebuild the rides around [start, end]. The window grows until it holds every recording
+        that touches it, so a ride is always rebuilt from all of its recordings."""
+        lo, hi = start - 60, end + 60
+        with self.lock:
+            while True:
+                rows = self.db.execute("SELECT data, start_t, end_t FROM recordings WHERE user_id = ? "
+                                       "AND end_t >= ? AND start_t <= ?", (user_id, lo, hi)).fetchall()
+                nlo = min([lo] + [r["start_t"] for r in rows])
+                nhi = max([hi] + [r["end_t"] for r in rows])
+                if (nlo, nhi) == (lo, hi):
+                    break
+                lo, hi = nlo, nhi
+            rides = build_rides([recording_from_dict(json.loads(r["data"])) for r in rows])
+            self.db.execute("DELETE FROM rides WHERE user_id = ? AND end_t >= ? AND start_t <= ?", (user_id, lo, hi))
+            for r in rides:
+                self.db.execute("INSERT OR REPLACE INTO rides (user_id, ride_id, start_t, end_t, data) "
+                                "VALUES (?, ?, ?, ?, ?)", (user_id, str(int(r.start)), r.start, r.end, r.to_json()))
+        return rides
+
+    # --- reading rides ------------------------------------------------------------------------
+    def rides(self, user_id: int) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT ride_id, data FROM rides WHERE user_id = ? ORDER BY start_t DESC",
+                                   (user_id,)).fetchall()
+        return [describe(r["ride_id"], Ride.from_json(r["data"])) for r in rows]
+
+    def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
+        with self.lock:
+            row = self.db.execute("SELECT data FROM rides WHERE user_id = ? AND ride_id = ?",
+                                  (user_id, ride_id)).fetchone()
+        return Ride.from_json(row["data"]) if row else None
+
+    def ride_id_for(self, user_id: int, start: float, end: float) -> Optional[str]:
+        """The merged ride a recording ended up in (the one it overlaps most)."""
+        with self.lock:
+            row = self.db.execute(
+                "SELECT ride_id, MIN(end_t, ?) - MAX(start_t, ?) AS o FROM rides WHERE user_id = ? "
+                "AND end_t >= ? AND start_t <= ? ORDER BY o DESC LIMIT 1",
+                (end, start, user_id, start, end)).fetchone()
+        return row["ride_id"] if row else None
+
+
+def describe(ride_id: str, ride: Ride) -> dict:
+    """A ride without its samples: summary, where each value came from, what it may be used for."""
+    return {"ride_id": ride_id, "summary": summary(ride), "sources": sorted(sources_used(ride.provenance)),
+            "provenance": ride.provenance, "recordings": ride.recordings,
+            "use": {u: {"allowed": allowed(ride.provenance, u),
+                        "blocked_by": sorted(blocked_sources(ride.provenance, u))} for u in ("ai", "share")}}

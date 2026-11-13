@@ -38,7 +38,8 @@ Implemented in `rideengine/sources.py`.
 - Indoor rides have power but no route. Idea: make the power trace itself the "map", drawn as a skyline.
 
 ## Status of each source (Nov 2026)
-- Garmin Connect Developer Program: new API applications paused, no reopening date. Manual .FIT export for now. Fallback: an aggregator partnered with Garmin (e.g. Terra), paid per user.
+- Garmin Connect Developer Program: reopened Oct 2026 with Personal (own data, pull), Starter (free, ~1,000 users, push, no history) and Enterprise (paid, history) tiers. Personal-key connector built (13 Nov 2026); Starter next. See `docs/connectors.md`.
 - Apple Health: needs an iPhone app with the user's permission; background delivery of new workouts. The most realistic automated route for heart rate and calories.
 - Wahoo: open cloud API with app approval.
+- Hammerhead, Whoop, Oura, Fitbit (Google Health API): see `docs/connectors.md`.
 - Strava: avoid as a source. Its terms bar AI use and showing a user's data to others.

@@ -1,0 +1,183 @@
+"""Backend: connections, Garmin personal-key sync (mocked Garmin), Apple Health upload, merge, disconnect.
+
+Skipped when the backend's dependencies aren't installed (pip install -r requirements-backend.txt).
+"""
+import base64
+import io
+import json
+import zipfile
+
+import pytest
+
+pytest.importorskip("fastapi")
+httpx = pytest.importorskip("httpx")
+pytest.importorskip("cryptography")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from backend.app import create_app  # noqa: E402
+from backend.config import Settings  # noqa: E402
+from backend.connectors import PLANNED, Planned  # noqa: E402
+from backend.connectors.apple_health import AppleHealth  # noqa: E402
+from backend.connectors.garmin_personal import BASE_URL, GarminPersonal  # noqa: E402
+from backend.service import Backend  # noqa: E402
+from fitwriter import write_fit  # noqa: E402
+from test_engine import T0, line_ride  # noqa: E402
+from test_recording_json import phone_json  # noqa: E402
+
+API_KEY = "test-personal-key"
+
+
+def jwt(exp: float) -> str:
+    part = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+    return f"e30.{part}.sig"
+
+
+class FakeGarmin:
+    """Just the three Personal API endpoints the connector uses."""
+
+    def __init__(self, rides):
+        self.rides = rides  # {activityId: fit bytes}
+        self.token_calls = 0
+        self.now = T0  # tokens last 24 h from "now", like Garmin's
+        self.downloads = []
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/personal-api-key/token"):
+            self.token_calls += 1
+            if req.headers.get("Authorization") != f"ApiKey {API_KEY}":
+                return httpx.Response(401)
+            return httpx.Response(200, text=jwt(self.now + 86400))
+        if req.headers.get("Authorization", "").split(" ")[0] != "Bearer":
+            return httpx.Response(401)
+        if req.url.path == "/activitylist-service/activities/search/activities":
+            assert req.url.params["activityType"] == "cycling"
+            start = int(req.url.params["start"])
+            items = [{"activityId": a, "activityName": "Ride"} for a in sorted(self.rides)]
+            return httpx.Response(200, json=items[start:start + int(req.url.params["limit"])])
+        if req.url.path.startswith("/download-service/files/activity/"):
+            aid = int(req.url.path.rsplit("/", 1)[1])
+            self.downloads.append(aid)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr(f"{aid}_ACTIVITY.fit", self.rides[aid])
+            return httpx.Response(200, content=buf.getvalue())
+        return httpx.Response(404)
+
+
+@pytest.fixture
+def env(tmp_path):
+    ride = line_ride(60, climb=(5, 10, 120))
+    other_day = line_ride(30, start=T0 + 86400)
+    garmin = FakeGarmin({
+        111: write_fit(ride.samples, {"distance_m": 25000, "elapsed_s": 3600, "moving_s": 3570,
+                                      "calories": 800, "ascent_m": 118}),
+        222: write_fit(other_day.samples, {"distance_m": 12500, "elapsed_s": 1800, "calories": 400}),
+    })
+    connector = GarminPersonal(client=httpx.Client(base_url=BASE_URL, transport=httpx.MockTransport(garmin)),
+                               clock=lambda: garmin.now)
+    registry = {"apple_health": AppleHealth(), "garmin_personal": connector,
+                **{i.key: Planned(i) for i in PLANNED}}
+    settings = Settings(data_dir=str(tmp_path), database=str(tmp_path / "db.sqlite3"),
+                        raw_dir=str(tmp_path / "raw"), secret_key_file=str(tmp_path / "secret.key"),
+                        public_base_url="http://test")
+    be = Backend(settings, registry=registry)
+    uid, token = be.create_user()
+    client = TestClient(create_app(be), headers={"Authorization": f"Bearer {token}"})
+    return be, uid, client, garmin
+
+
+def test_needs_a_token(env):
+    _, _, client, _ = env
+    assert TestClient(client.app).get("/v1/rides").status_code == 401
+    assert client.get("/v1/rides", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_connections_list_every_provider(env):
+    _, _, client, _ = env
+    rows = {c["provider"]: c for c in client.get("/v1/connections").json()}
+    assert {"apple_health", "garmin_personal", "garmin", "wahoo", "hammerhead", "whoop", "oura",
+            "google_health"} <= set(rows)
+    assert rows["garmin_personal"]["state"] == "not_connected"
+    assert rows["hammerhead"]["availability"] == "blocked"
+    r = client.put("/v1/connections/wahoo", json={})
+    assert r.status_code == 400 and "can't be connected" in r.json()["error"]
+
+
+def test_bad_garmin_key_is_refused(env):
+    _, _, client, _ = env
+    r = client.put("/v1/connections/garmin_personal", json={"api_key": "wrong"})
+    assert r.status_code == 400 and "didn't accept" in r.json()["error"]
+
+
+def test_garmin_sync_then_phone_upload_merge(env, tmp_path):
+    be, uid, client, garmin = env
+    r = client.put("/v1/connections/garmin_personal?since=2026-01-01", json={"api_key": API_KEY})
+    assert r.status_code == 202
+    # The background sync pulled both rides.
+    assert sorted(garmin.downloads) == [111, 222]
+    rides = client.get("/v1/rides").json()
+    assert len(rides) == 2 and all(r["sources"] == ["garmin"] for r in rides)
+    # Credentials are stored encrypted.
+    blob = be.db.execute("SELECT secret FROM connections").fetchone()["secret"]
+    assert API_KEY.encode() not in blob
+    # Original files are kept.
+    assert (tmp_path / "raw" / str(uid) / "garmin_personal" / "111.fit").exists()
+
+    # A second sync downloads nothing new.
+    assert client.post("/v1/connections/garmin_personal/sync?since=2026-01-01").json()["new"] == 0
+    assert sorted(garmin.downloads) == [111, 222]
+
+    # The phone uploads the Apple Watch workout for the first ride: it merges.
+    up = client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert up.status_code == 201
+    ride_id = up.json()["ride_id"]
+    assert ride_id == str(int(T0))
+    d = client.get(f"/v1/rides/{ride_id}").json()
+    assert d["sources"] == ["apple_watch", "garmin"]
+    assert d["provenance"]["channel:lat"] == "garmin" and d["provenance"]["channel:hr"] == "apple_watch"
+    assert d["totals"]["calories"] == 1973 and d["totals"]["ascent_m"] == 118
+    assert d["use"]["ai"] == {"allowed": False, "blocked_by": ["garmin"]}
+    assert len(client.get("/v1/rides").json()) == 2
+
+    # Uploading the same workout again changes nothing.
+    client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert be.db.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 3
+
+    # Disconnecting Garmin deletes its data; the Watch recording becomes the ride on its own.
+    assert client.delete("/v1/connections/garmin_personal").json()["recordings_deleted"] == 2
+    rides = client.get("/v1/rides").json()
+    assert len(rides) == 1 and rides[0]["sources"] == ["apple_watch"]
+    assert not (tmp_path / "raw" / str(uid) / "garmin_personal" / "111.fit").exists()
+    states = {c["provider"]: c["state"] for c in client.get("/v1/connections").json()}
+    assert states["garmin_personal"] == "not_connected" and states["apple_health"] == "connected"
+
+
+def test_expired_token_is_renewed(env):
+    be, uid, _, garmin = env
+    be.connect(uid, "garmin_personal", {"api_key": API_KEY})
+    assert garmin.token_calls == 1
+    be.sync(uid, "garmin_personal", "2026-01-01")
+    assert garmin.token_calls == 1  # still valid: reused
+    garmin.now += 2 * 86400  # two days later the 24 h token has expired
+    be.sync(uid, "garmin_personal", "2026-01-01")
+    assert garmin.token_calls == 2
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"sport": "running"}, "Only cycling"),
+    ({"source": "strava"}, "Unknown source"),
+    ({"origin": "somewhere"}, "healthkit"),
+    ({"samples": "nope"}, "must be a list"),
+])
+def test_upload_validation(env, change, message):
+    _, _, client, _ = env
+    r = client.post("/v1/uploads/apple_health", content=json.dumps({**phone_json(), **change}))
+    assert r.status_code == 400 and message in r.json()["error"]
+    assert client.get("/v1/rides").json() == []
+
+
+def test_upload_only_to_device_connectors(env):
+    _, _, client, _ = env
+    r = client.post("/v1/uploads/garmin_personal", content=json.dumps(phone_json()))
+    assert r.status_code == 400

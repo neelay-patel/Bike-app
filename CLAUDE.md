@@ -2,7 +2,7 @@
 
 Neelay's cycling app. Built for himself first, hoping for wide adoption; not a business (yet).
 He rides gravel and road around Toronto (previously London), records every ride on a **Garmin**
-and an **Apple Watch** (Cycling workout started each time), currently pushes both to Strava,
+and an **Apple Watch** (Cycling workout started each time; iPhone on iOS 27), currently pushes both to Strava,
 and has a **Wahoo KICKR** arriving. No power meter on the bike. He likes to work in a
 "vibe coding" style: short iterations, see results, adjust.
 
@@ -16,19 +16,23 @@ boastful summaries. This app:
    order: **ride faster, ride further**, fed by **more power** and **climbing faster**.
    See `docs/app-and-insights-plan.md`.
 
-Current focus (Nov 2026): **get the data right** (sources, merge, storage, automatic arrival).
-Insights and dashboards run in parallel on top.
+Current focus (from 13 Nov 2026): **ride data from external sources first**. The rider signs in to
+each account once and every ride arrives on its own, merged. Connectors: Apple Health, Garmin,
+Wahoo, Hammerhead, Whoop, Oura, Fitbit (Google). Direct integrations, not an aggregator.
+Summaries, insights and cards come later. See `docs/connectors.md`.
 
 ## Repo layout
 - `rideengine/model.py`: canonical format. `Recording` = one device's view; `Ride` = merged, with `provenance`.
-- `rideengine/importers/`: `fit.py` (dependency-free FIT decoder), `gpx.py`, `apple_health.py` (streams export.zip, keeps only cycling workouts + heart rate during them).
-- `rideengine/sources.py`: which source wins for each channel/total. Change rules here, not in merge code.
+- `rideengine/importers/`: `fit.py` (dependency-free FIT decoder), `gpx.py`, `apple_health.py` (streams export.zip, keeps only cycling workouts + heart rate during them), `recording_json.py` (the exchange format the iPhone app uploads: `asdict(Recording)` + `"format": "rideengine.recording/1"`).
+- `rideengine/sources.py`: which source wins for each channel/total, and `SOURCE_POLICY` (may a source's data feed AI / be shown to others; unreviewed = no). Change rules here, not in merge code.
 - `rideengine/merge.py`: group recordings by time overlap, merge onto the bike computer's timeline.
 - `rideengine/store.py`: JSON file store under `data/store/` (keeps all recordings, rebuilds rides). Placeholder for a real DB.
 - `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `simpower` (SIMULATED power, prototyping only).
 - `rideengine/card/`: share card generator (`make_card.py`, prototype-quality) and `prepare.py`.
 - `rideengine/__main__.py`: CLI (`python -m rideengine import|rides|show|trends|card`).
-- `tests/`: `test_engine.py` (synthetic, always runs), `test_real_rides.py` (skips unless Neelay's files are in `data/`).
+- `backend/`: hosted service (FastAPI; SQLite in dev, Postgres later). `service.py` (users, connections, sync, upload, re-merge by time window), `connectors/` (one module per provider on `base.Connector`; `__init__` lists all seven with status), `app.py` (HTTP API), `crypto.py` (credentials encrypted at rest), `__main__.py` (dev CLI). Dev data in `data/backend/`. Dependencies in `requirements-backend.txt`; the engine itself stays stdlib-only.
+- `ios/RideApp/`: iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`). Apple Health connector (HealthKit permission, history import, anchored sync, background delivery, upload), Connections and Rides screens, dev login (server URL + token). Setup: `ios/README.md`.
+- `tests/`: `test_engine.py` and `test_recording_json.py` (synthetic, always run), `test_backend.py` (mocked Garmin; skips without backend deps), `fitwriter.py` (tiny FIT writer for tests), `test_real_rides.py` (skips unless Neelay's files are in `data/`).
 
 ## Rules
 - **Never commit personal data.** Ride files, the Apple Health export and anything derived live in `data/` (git-ignored). Tests that need them must skip when absent.
@@ -38,27 +42,35 @@ Insights and dashboards run in parallel on top.
 - **Simulated power must always be labelled** (SIM) and never feed real totals (calories, load).
 - Calories: the wearable wins (Neelay's call), then energy from measured power, then the head unit.
 - Python 3.11+, standard library only for the engine (keeps it portable to a backend). pytest for tests.
+- Request only the data a ride needs from every provider (workouts and HR during them), keep the original files, and delete a provider's data when the rider disconnects it.
+- Garmin's personal API key is for Neelay's own account only (Garmin's terms); other riders connect through the Starter tier.
 
 ## Commands
 ```
 python -m pytest -q
-python -m rideengine import data/*.fit data/*.gpx --apple data/export.zip --since 2025-01-01
+python -m rideengine import data/*.fit data/*.gpx data/*.json --apple data/export.zip --since 2025-01-01
 python -m rideengine rides
 python -m rideengine show <ride_id>
 python -m rideengine trends
 python -m rideengine card <ride_id> --config examples/card_durham_forest.json --power
+pip install -r requirements-backend.txt             # backend deps (use a venv)
+python -m backend create-user                       # dev user + bearer token
+python -m backend connect-garmin --user 1 --since 2026-10-01
+python -m backend rides --user 1
+python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
 ```
 
 ## Verified numbers (for sanity checks)
 - Durham Forest, 3 Oct 2026 (Garmin FIT + Apple Watch): 68.7 km, 1,139 m, 3:55 moving, avg HR ~144, max 173, 1,973 kcal (Apple active).
 - Scugog loop, 19 Oct 2026 (Garmin GPX + Apple Watch): 104.5 km, 633 m (from Garmin track), 23.8 km/h, avg HR 142, max 170, 2,463 kcal.
 
-## Next steps
-1. iPhone app prototype (SwiftUI + HealthKit): permission, background delivery of new cycling workouts, history backfill, send to the engine.
-2. Replace the JSON store with SQLite, then a hosted backend.
-3. Garmin → Apple Health route test (Neelay to try); otherwise an aggregator for Garmin.
-4. KICKR power: pair to Garmin (power in the FIT) or Wahoo cloud API; power insights + indoor card.
-5. Automatic story for the card: places from stops/towns, headline, map fitted to route shape.
+## Next steps (order in docs/connectors.md)
+1. Try the Garmin personal-key connector on Neelay's account; compare with the verified numbers.
+2. iPhone app: run it on Neelay's iPhone (iOS 27; needs the latest Xcode), connect Apple Health,
+   check Durham Forest merges. Then Sign in with Apple (paid developer account) in place of the dev token.
+3. Garmin Starter tier (OAuth + push webhook) so other riders can connect; host the backend.
+4. Wahoo (KICKR power), then Whoop, Oura, Google Health; Hammerhead once access is agreed.
+5. Read each provider's terms in full and fill in `SOURCE_POLICY`.
 
 ## Linked work in claude.ai (Project "Cycling app")
 - Share card canvas: https://claude.ai/artifact/6vEqXrfwo3ozkCh8byzDin
