@@ -46,6 +46,7 @@ struct RideRow: View {
                     Stat(value: "\(Int(avg.rounded()))/\(Int(max.rounded())) bpm", symbol: "heart.fill")
                 }
                 if ride.summary.indoor { Stat(value: "Indoor") }
+                if !(ride.excluded ?? []).isEmpty { Stat(value: "Trimmed", symbol: "car.fill") }
             }
             SourceChips(sources: ride.sources)
         }
@@ -68,8 +69,20 @@ struct RideDetailView: View {
                 if let v = ride.summary.avgPower { LabeledContent("Average power", value: "\(Int(v.rounded())) W") }
                 if let v = ride.summary.calories { LabeledContent("Calories", value: "\(Int(v.rounded())) kcal") }
             }
+            if let cuts = ride.excluded, !cuts.isEmpty {
+                Section("Left out") {
+                    ForEach(Array(cuts.enumerated()), id: \.offset) { _, cut in
+                        Label(String(format: "%.1f km over %d min in a vehicle (up to %.0f km/h). Not counted in this ride.",
+                                     cut.km, cut.minutes, cut.peakKmh),
+                              systemImage: "car.fill")
+                            .font(.footnote)
+                    }
+                }
+            }
             Section("Where each value came from") {
-                ForEach(ride.provenance.sorted(by: { $0.key < $1.key }), id: \.key) { key, source in
+                // Latitude and longitude always come from the same source: show one "Route" row.
+                ForEach(ride.provenance.filter { $0.key != "channel:lon" }.sorted(by: { $0.key < $1.key }),
+                        id: \.key) { key, source in
                     LabeledContent(Format.provenanceLabel(key), value: Format.sourceName(source))
                 }
             }

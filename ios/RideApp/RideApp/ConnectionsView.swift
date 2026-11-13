@@ -40,6 +40,10 @@ struct AppleHealthRow: View {
             }
             Text("Cycling workouts, their routes, and the heart rate, calories and distance recorded during them.")
                 .font(.footnote).foregroundStyle(.secondary)
+            if !health.isConnected {
+                Text("On the Health screen, turn on all five and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Ride.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             DatePicker("Import rides since", selection: $since, displayedComponents: .date)
             if let p = health.progress {
                 ProgressView(value: Double(p.done), total: Double(max(p.total, 1))) {

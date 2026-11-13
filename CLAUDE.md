@@ -26,6 +26,7 @@ Summaries, insights and cards come later. See `docs/connectors.md`.
 - `rideengine/importers/`: `fit.py` (dependency-free FIT decoder), `gpx.py`, `apple_health.py` (streams export.zip, keeps only cycling workouts + heart rate during them), `recording_json.py` (the exchange format the iPhone app uploads: `asdict(Recording)` + `"format": "rideengine.recording/1"`).
 - `rideengine/sources.py`: which source wins for each channel/total, and `SOURCE_POLICY` (may a source's data feed AI / be shown to others; unreviewed = no). Change rules here, not in merge code.
 - `rideengine/merge.py`: group recordings by time overlap, merge onto the bike computer's timeline.
+- `rideengine/clean.py`: leaves out stretches that weren't riding (bike computer left on in a car: sustained >65 km/h, cut between the surrounding long stops). Merge then redoes the affected totals and lists the cut in `Ride.excluded`.
 - `rideengine/store.py`: JSON file store under `data/store/` (keeps all recordings, rebuilds rides). Placeholder for a real DB.
 - `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `simpower` (SIMULATED power, prototyping only).
 - `rideengine/card/`: share card generator (`make_card.py`, prototype-quality) and `prepare.py`.
@@ -53,16 +54,21 @@ python -m rideengine rides
 python -m rideengine show <ride_id>
 python -m rideengine trends
 python -m rideengine card <ride_id> --config examples/card_durham_forest.json --power
-pip install -r requirements-backend.txt             # backend deps (use a venv)
+# .venv is Python 3.13 (uv-managed, ~/.local/share/uv/python). Apple's /usr/bin/python3 (3.9,
+# LibreSSL) can't do TLS 1.3, which Garmin requires. Rebuild: <python3.13> -m venv .venv
+.venv/bin/pip install -r requirements-backend.txt
 python -m backend create-user                       # dev user + bearer token
 python -m backend connect-garmin --user 1 --since 2026-10-01
 python -m backend rides --user 1
+python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
 ```
 
 ## Verified numbers (for sanity checks)
 - Durham Forest, 3 Oct 2026 (Garmin FIT + Apple Watch): 68.7 km, 1,139 m, 3:55 moving, avg HR ~144, max 173, 1,973 kcal (Apple active).
 - Scugog loop, 19 Oct 2026 (Garmin GPX + Apple Watch): 104.5 km, 633 m (from Garmin track), 23.8 km/h, avg HR 142, max 170, 2,463 kcal.
+  From the Garmin .FIT via the personal API (13 Nov 2026): 104.3 km, 850 m (device barometric total, which wins over the 633 m GPX-track figure), 4:25 moving.
+- Durham Forest via the Garmin personal API (13 Nov 2026): 68.7 km, 1,139 m, 3:55 moving. Matches.
 
 ## Next steps (order in docs/connectors.md)
 1. Try the Garmin personal-key connector on Neelay's account; compare with the verified numbers.

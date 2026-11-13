@@ -70,6 +70,9 @@ class Ride:
     totals: dict
     provenance: dict  # {"channel:hr": "apple_watch", "total:calories": "apple_watch", ...}
     recordings: list[str]  # origins of the recordings merged into this ride
+    # Stretches left out of the ride because they weren't riding (see clean.py), e.g.
+    # [{"reason": "vehicle", "start": ..., "end": ..., "km": 41.3, "minutes": 52, "peak_kmh": 115.1}]
+    excluded: list = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))

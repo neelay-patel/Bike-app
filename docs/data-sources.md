@@ -31,6 +31,15 @@ Implemented in `rideengine/sources.py`.
 - Scugog loop, 19 Oct: average 142, max 170 at km 66 (the climbs after the Cannington lunch); 2,463 active kcal (Apple).
 - Practical notes: the full export is several GB unzipped, so stream it and keep only cycling workouts and the heart rate inside them. Times in the export carry the offset at export time (EST), not the ride's (EDT), so parse them with their offset.
 
+## Not riding: left out of the ride (13 Nov 2026)
+- A bike computer left recording in a car shows up as a long stretch above ~65 km/h. `rideengine/clean.py`
+  cuts it from the stop before (loading the bike) to the stop after, or to the end. Totals that covered the
+  whole recording are worked out again: distance and top speed from the route, climbing as the device's
+  barometric total scaled to the part kept, head-unit calories by the share of moving time kept.
+  Wearable calories stay as recorded. The ride lists what was left out (`Ride.excluded`), and the app shows it.
+- On Neelay's 97 Garmin rides since 2025 this caught two: 30 Jul 2026 (41.7 km in a car at up to 115 km/h;
+  the ride is 105.7 km, not 146.9) and 11 May 2025 (38.5 km at up to 117 km/h). Nothing else was touched.
+
 ## Power
 - Outdoor cards have a vertical power strip down the right side of the map, showing average and max watts. It is hidden when a ride has no power data.
 - Until real data exists, power is simulated from speed and gradient (85 kg rider plus bike, gravel tyres, upright position) and tagged SIM.

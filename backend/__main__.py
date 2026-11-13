@@ -6,6 +6,7 @@
   python -m backend sync --user 1 --provider garmin_personal
   python -m backend upload --user 1 data/apple_watch_2026-10-03.json
   python -m backend rides --user 1
+  python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
   python -m backend serve                             # HTTP API on http://127.0.0.1:8000 (docs at /docs)
 """
 from __future__ import annotations
@@ -38,6 +39,8 @@ def main(argv=None) -> int:
     u.add_argument("files", nargs="+")
     r = sub.add_parser("rides")
     r.add_argument("--user", type=int, required=True)
+    rb = sub.add_parser("rebuild")
+    rb.add_argument("--user", type=int, required=True)
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
@@ -70,12 +73,15 @@ def main(argv=None) -> int:
                 rec = be.upload(a.user, "apple_health", open(f, "rb").read())
                 print(f"{f}: {rec.source} {datetime.fromtimestamp(rec.start):%Y-%m-%d %H:%M} "
                       f"-> ride {be.ride_id_for(a.user, rec.start, rec.end)}")
+        elif a.cmd == "rebuild":
+            print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":
             for d in be.rides(a.user):
                 s = d["summary"]
                 hr = f"{s['avg_hr']:.0f}/{s['max_hr']:.0f} bpm" if s["avg_hr"] else "no HR"
+                cut = "".join(f"  (left out {e['km']} km in a vehicle)" for e in d["excluded"])
                 print(f"{d['ride_id']}  {datetime.fromtimestamp(s['start']):%Y-%m-%d %H:%M}  {s['km']:6.1f} km  "
-                      f"{s['ascent_m'] or 0:5.0f} m  {hr:>12}  {', '.join(d['sources'])}")
+                      f"{s['ascent_m'] or 0:5.0f} m  {hr:>12}  {', '.join(d['sources'])}{cut}")
     except ConnectorError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

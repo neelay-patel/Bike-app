@@ -70,4 +70,4 @@ backend/  connections (encrypted tokens) → raw file kept → connector.normali
 - Email Hammerhead/SRAM about partner API access.
 - A domain plus a short privacy policy page (every provider asks for one; fixed OAuth return address).
 - Apple Developer Program ($99/yr): Sign in with Apple, background delivery, TestFlight.
-- The latest Xcode (iOS 27 support) and Python 3.13 on this Mac.
+- Done 13 Nov 2026: Xcode 27.2; Python 3.13 (via uv) for the project's .venv.

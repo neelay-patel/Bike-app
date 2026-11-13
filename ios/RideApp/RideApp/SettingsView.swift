@@ -17,8 +17,13 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         #endif
-                    SecureField("Token", text: $token)
+                    // A plain field, not SecureField: iOS would offer to save the dev token as a password.
+                    TextField("Token", text: $token)
+                        .font(.body.monospaced())
                         .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
                 } header: {
                     Text("Server")
                 } footer: {

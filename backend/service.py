@@ -207,6 +207,15 @@ class Backend:
                                 "VALUES (?, ?, ?, ?, ?)", (user_id, str(int(r.start)), r.start, r.end, r.to_json()))
         return rides
 
+    def rebuild_all(self, user_id: int) -> int:
+        """Re-merge every ride from the stored recordings (after the engine changes). Returns rides."""
+        with self.lock:
+            row = self.db.execute("SELECT MIN(start_t) AS a, MAX(end_t) AS b FROM recordings WHERE user_id = ?",
+                                  (user_id,)).fetchone()
+            if row["a"] is None:
+                return 0
+            return len(self.remerge(user_id, row["a"], row["b"]))
+
     # --- reading rides ------------------------------------------------------------------------
     def rides(self, user_id: int) -> list[dict]:
         with self.lock:
@@ -233,6 +242,6 @@ class Backend:
 def describe(ride_id: str, ride: Ride) -> dict:
     """A ride without its samples: summary, where each value came from, what it may be used for."""
     return {"ride_id": ride_id, "summary": summary(ride), "sources": sorted(sources_used(ride.provenance)),
-            "provenance": ride.provenance, "recordings": ride.recordings,
+            "provenance": ride.provenance, "recordings": ride.recordings, "excluded": ride.excluded,
             "use": {u: {"allowed": allowed(ride.provenance, u),
                         "blocked_by": sorted(blocked_sources(ride.provenance, u))} for u in ("ai", "share")}}

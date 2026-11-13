@@ -76,6 +76,15 @@ struct RideSummary: Decodable, Identifiable {
     let sources: [String]
     let provenance: [String: String]
     let use: [String: UsePolicy]
+    let excluded: [Excluded]?
+
+    /// A stretch left out because it wasn't riding (e.g. the bike computer left on in a car).
+    struct Excluded: Decodable {
+        let reason: String
+        let km: Double
+        let minutes: Int
+        let peakKmh: Double
+    }
 
     struct Summary: Decodable {
         let start: Double

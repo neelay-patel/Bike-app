@@ -181,3 +181,32 @@ def test_upload_only_to_device_connectors(env):
     _, _, client, _ = env
     r = client.post("/v1/uploads/garmin_personal", content=json.dumps(phone_json()))
     assert r.status_code == 400
+
+
+def test_network_failure_is_a_clear_error_not_a_500(env):
+    """E.g. Python linked to an old TLS library that Garmin's servers refuse."""
+    be, _, client, _ = env
+
+    def refuse(req):
+        raise httpx.ConnectError("[SSL: TLSV1_ALERT_PROTOCOL_VERSION] tlsv1 alert protocol version")
+    be.registry["garmin_personal"].http = httpx.Client(base_url=BASE_URL, transport=httpx.MockTransport(refuse))
+    r = client.put("/v1/connections/garmin_personal", json={"api_key": API_KEY})
+    assert r.status_code == 400
+    assert "Couldn't reach Garmin" in r.json()["error"] and "Python 3.11+" in r.json()["error"]
+    assert API_KEY not in r.json()["error"]
+
+
+def test_key_pasted_twice_is_caught_before_asking_garmin(env):
+    be, uid, _, garmin = env
+    from backend.connectors import ConnectorError
+    with pytest.raises(ConnectorError, match="pasted 2 times"):
+        be.connect(uid, "garmin_personal", {"api_key": "GCDC_a.b.c.1GCDC_a.b.c.1"})
+    assert garmin.token_calls == 0
+
+
+def test_rebuild_and_excluded_in_api(env):
+    be, uid, client, _ = env
+    client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert be.rebuild_all(uid) == 1
+    d = client.get("/v1/rides").json()[0]
+    assert d["excluded"] == []

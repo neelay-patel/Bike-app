@@ -55,11 +55,25 @@ class GarminPersonal(Connector):
         self.http = client or httpx.Client(base_url=BASE_URL, timeout=30.0)
         self.clock = clock
 
+    def _send(self, method: str, path: str, **kw) -> httpx.Response:
+        """One HTTP call; network and TLS failures become a message the rider can act on."""
+        try:
+            return self.http.request(method, path, **kw)
+        except httpx.HTTPError as exc:
+            hint = " (this Python's TLS library is too old: use Python 3.11+)" \
+                if "PROTOCOL_VERSION" in str(exc) else ""
+            raise ConnectorError(f"Couldn't reach Garmin{hint}: {type(exc).__name__}") from exc
+
     # --- auth -------------------------------------------------------------------------------
     def _token(self, api_key: str) -> dict:
-        r = self.http.post(TOKEN_PATH, headers={"Accept": "*/*", "Authorization": f"ApiKey {api_key}"})
+        r = self._send("POST", TOKEN_PATH, headers={"Accept": "*/*", "Authorization": f"ApiKey {api_key}"})
         if r.status_code in (401, 403):
-            raise ConnectorError("Garmin didn't accept that personal API key. Check it hasn't expired.")
+            # Describe the key's shape (never the key) so a bad copy-paste is easy to spot.
+            parts = len(api_key.split("."))
+            raise ConnectorError(
+                f"Garmin didn't accept that personal API key ({r.status_code}). Check it hasn't expired "
+                f"or been deleted. Received {len(api_key)} characters starting '{api_key[:5]}', "
+                f"in {parts} dot-separated parts.")
         if r.status_code >= 400:
             raise ConnectorError(f"Garmin token request failed ({r.status_code})")
         token = r.text.strip()
@@ -69,6 +83,8 @@ class GarminPersonal(Connector):
         key = (credentials.get("api_key") or "").strip()
         if not key:
             raise ConnectorError("Paste the personal API key from Garmin Connect settings.")
+        if key.count("GCDC_") > 1:  # hidden prompts make it easy to paste twice
+            raise ConnectorError(f"That looks like the key pasted {key.count('GCDC_')} times. Paste it once.")
         return {"api_key": key, **self._token(key)}
 
     def _bearer(self, secret: dict) -> dict:
@@ -78,10 +94,10 @@ class GarminPersonal(Connector):
 
     def _get(self, secret: dict, path: str, **kw) -> httpx.Response:
         extra = kw.pop("headers", {})
-        r = self.http.get(path, headers={**self._bearer(secret), **extra}, **kw)
+        r = self._send("GET", path, headers={**self._bearer(secret), **extra}, **kw)
         if r.status_code == 401:  # token revoked early: one fresh try
             secret["expires_at"] = 0
-            r = self.http.get(path, headers={**self._bearer(secret), **extra}, **kw)
+            r = self._send("GET", path, headers={**self._bearer(secret), **extra}, **kw)
         if r.status_code == 429:
             raise ConnectorError("Garmin is rate-limiting us; the next sync will carry on.")
         if r.status_code >= 400:
@@ -107,7 +123,7 @@ class GarminPersonal(Connector):
             if not aid.isdecimal() or known(aid):
                 continue
             r = self._get(secret, DOWNLOAD_PATH.format(id=aid),
-                          headers={"Accept": "application/zip, application/octet-stream"})
+                          headers={"Accept": "application/zip, application/x-zip-compressed, application/octet-stream"})
             got = _unzip_activity(r.content)
             if got:
                 yield Fetched(external_id=aid, kind=got[0], content=got[1])

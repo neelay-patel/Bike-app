@@ -6,6 +6,7 @@ Apple replaces this with the iPhone app).
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Request
@@ -15,6 +16,8 @@ from .config import Settings
 from .connectors import ConnectorError
 from .service import Backend, describe
 
+log = logging.getLogger("uvicorn.error")
+
 
 def create_app(backend: Optional[Backend] = None) -> FastAPI:
     be = backend or Backend(Settings.from_env())
@@ -22,7 +25,9 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
     app.state.backend = be
 
     @app.exception_handler(ConnectorError)
-    async def connector_error(_req: Request, exc: ConnectorError):
+    async def connector_error(req: Request, exc: ConnectorError):
+        # Messages are written to be safe to show and log (never credentials).
+        log.warning("%s %s -> %s", req.method, req.url.path, exc)
         return JSONResponse(status_code=400, content={"error": str(exc)})
 
     def user(authorization: Optional[str] = Header(None)) -> int:

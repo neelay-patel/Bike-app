@@ -10,6 +10,7 @@ from __future__ import annotations
 import bisect
 from dataclasses import replace
 
+from . import clean
 from .model import CHANNELS, Recording, Ride, Sample, haversine
 from .sources import ALIGN_TOLERANCE, CHANNEL_PRIORITY, DEFAULT_TOLERANCE, TOTAL_PRIORITY, rank
 
@@ -88,6 +89,19 @@ def merge(group_: list[Recording]) -> Ride:
                         best = j
             setattr(s, ch, vs[best] if best is not None else None)
 
+    # Leave out stretches that weren't riding (a bike computer left on in a car).
+    full = samples
+    cuts = clean.vehicle_segments(samples)
+    kept = [x for p in clean.pieces(samples, cuts) for x in p] if cuts else samples
+    excluded = []
+    if cuts and len(kept) >= 0.1 * len(samples):  # if nearly everything is "vehicle", leave it alone
+        for c in cuts:
+            inside = [x for x in samples if c["start"] <= x.t <= c["end"]]
+            excluded.append({"reason": "vehicle", "start": c["start"], "end": c["end"],
+                             "km": round(track_distance(inside) / 1000, 1),
+                             "minutes": round((c["end"] - c["start"]) / 60), "peak_kmh": c["peak_kmh"]})
+        samples = kept
+
     totals: dict = {}
     for key, prio in TOTAL_PRIORITY.items():
         for src in prio:
@@ -123,6 +137,9 @@ def merge(group_: list[Recording]) -> Ride:
                 totals[key] = rec.totals[key]
                 provenance[f"total:{key}"] = rec.source
 
+    if excluded:
+        _totals_without_cuts(totals, provenance, full, samples, cuts)
+
     # Heart-rate and power summaries come from the merged channels, over the base window.
     hr = [s.hr for s in samples if s.hr is not None]
     if hr:
@@ -137,7 +154,45 @@ def merge(group_: list[Recording]) -> Ride:
 
     return Ride(start=samples[0].t, end=samples[-1].t, sport=base.sport,
                 indoor=all(r.indoor for r in group_), samples=samples, totals=totals,
-                provenance=provenance, recordings=[r.origin for r in group_])
+                provenance=provenance, recordings=[r.origin for r in group_], excluded=excluded)
+
+
+# Head units whose totals cover the whole recording, vehicle stretch included.
+_HEAD_UNIT_TOTALS = ("distance_m", "ascent_m", "descent_m", "moving_s", "elapsed_s", "max_speed_ms")
+
+
+def _totals_without_cuts(totals: dict, provenance: dict, full: list[Sample], kept: list[Sample],
+                         cuts: list[dict]) -> None:
+    """Device totals include the cut stretch, so work these out again from what was kept."""
+    route = provenance.get("channel:lat")
+    pieces = clean.pieces(full, cuts)
+    device_ascent = totals.get("ascent_m") if not provenance.get("total:ascent_m", "").startswith("derived") else None
+    for key in _HEAD_UNIT_TOTALS:
+        totals.pop(key, None)
+        provenance.pop(f"total:{key}", None)
+    if route:
+        totals["distance_m"] = round(sum(track_distance(p) for p in pieces), 1)
+        provenance["total:distance_m"] = f"derived:{route}"
+    if provenance.get("channel:ele"):
+        kept_gain = sum(elevation_gain(p) for p in pieces)
+        full_gain = elevation_gain(full)
+        # Keep the device's barometric calibration: its total, scaled by the share of climbing kept.
+        totals["ascent_m"] = round(device_ascent * kept_gain / full_gain if device_ascent and full_gain
+                                   else kept_gain, 1)
+        provenance["total:ascent_m"] = f"derived:{provenance['channel:ele']}"
+    totals["elapsed_s"] = round(sum(p[-1].t - p[0].t for p in pieces))
+    provenance["total:elapsed_s"] = "derived:" + (route or provenance.get("channel:speed", "hr"))
+    v = [x for x in clean.speeds(kept) if x is not None]
+    if v and provenance.get("channel:speed"):
+        totals["max_speed_ms"] = round(max(v), 2)
+        provenance["total:max_speed_ms"] = f"derived:{provenance['channel:speed']}"
+    # A head unit's calorie estimate also ran in the car: keep the share for the moving time kept.
+    # A wearable's calories are the wearable's own workout, so they stay as they are.
+    cal_src = provenance.get("total:calories", "")
+    if cal_src in ("garmin", "wahoo", "hammerhead", "kickr") and "calories" in totals:
+        before, after = clean.moving_seconds(full), clean.moving_seconds(kept)
+        if before:
+            totals["calories"] = round(totals["calories"] * after / before)
 
 
 def track_distance(samples: list[Sample]) -> float:

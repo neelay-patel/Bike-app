@@ -34,8 +34,18 @@ New Swift files dropped into `RideApp/` join the target automatically (synchroni
    ```
    Phone and Mac on the same Wi-Fi. In the app: Settings → paste the address and token → Save.
    Allow local network access when asked.
-6. Connections → Connect Apple Health → allow everything on the Health screen. History since the
-   chosen date uploads; new rides then arrive in the background.
+6. Connections → Connect Apple Health → turn on all five types → Continue → choose **All Recorded
+   Data** (iOS 27 asks; "Past 30 Days" would limit the history import) → Allow. History since the
+   chosen date uploads; new rides then arrive in the background as long as Settings → General →
+   Background App Refresh is on for Ride.
+
+Checked in the Simulator (iPhone 18 Pro, iOS 27.2, 13 Nov 2026): builds with Xcode 27.2, settings
+and dev login, Rides list and detail, Connections list, Health permission sheet (exactly the five
+read types), connect + background delivery setup. Not yet checked: real workouts (the Simulator
+has none) and background wake-ups, which need the iPhone.
+
+Simulator builds without signing can't use the Keychain, so the token won't save; Xcode's Run
+signs the app locally and it works.
 
 With a free Apple ID the app stops opening after 7 days until you press Run again.
 Background sync to the Mac only works while the phone can reach it (same network, server running).
