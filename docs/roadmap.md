@@ -34,13 +34,22 @@ App: the **You** tab, and each ride's notes on its detail screen.
   longest of 2026", "most climbing since June", "your longest ride yet"); milestones crossed ("took
   2026 past 2,000 km", "your 100th ride"); streaks ("5 weeks in a row").
 - [x] **Ride card headline** from the top note, when no headline is given (`python -m backend card`).
-- [ ] **Repeated routes**: spot the home loop and rank each lap ("fastest home loop since June").
-- [ ] **Climb bests**: named repeated climbs (nearest town from GeoNames), best time, last time, trend.
+- [x] **Repeated routes** (`rideengine/analysis/repeats.py`): rides covering mostly the same ground are one
+  route; the most-ridden one from home is the home loop. Laps ranked on average speed ("your 2nd fastest home loop").
+  Named after the most notable place on them ("Home loop via East Bayfront"). Next: let the rider rename them.
+- [x] **Climb bests**: each repeated climb gets fixed start and finish points and every ride over it is timed
+  between them, like a segment; named bottom to top from GeoNames ("Regent Park to Leaside"). Next: renaming, and
+  heart rate on the climb once Apple Health is connected.
 - [ ] **Towns collected**: every town a route passes, counted over a year and all time.
 - [ ] **Faster, explained**: efficiency (metres per heartbeat) and heart-rate drift; needs heart rate,
   so it waits on Apple Health on the real phone.
 - [ ] **Fitness, fatigue, form** over time (heart rate now, power once the KICKR is in).
 - [ ] **Power bests** (5 s, 1 min, 5 min, 20 min) once the KICKR is in.
+
+- [x] **Insights pipeline** (14 Nov 2026, `docs/insights.md`): per-ride features stored once, new rides matched to
+  known routes and climbs, discovery and notes in a background refresh, stable ids, renaming, the rider's time
+  zone. Rides in any order give the same answers as the batch. Left before other riders: job queue + Postgres,
+  rides list from stored rows, push notifications, thresholds on other terrain, privacy zones, GeoNames worldwide.
 
 ## Bucket 2: fun
 Our own drawing style, not a copy of any existing card game's art.

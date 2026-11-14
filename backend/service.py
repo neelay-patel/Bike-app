@@ -14,7 +14,6 @@ import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from rideengine.analysis import records
 from rideengine.analysis.basics import summary
 from rideengine.clean import hidden_reasons
 from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
@@ -26,6 +25,7 @@ from . import db
 from .config import Settings
 from .connectors import REGISTRY, ConnectorError
 from .crypto import Vault, load_key
+from .insights import Insights
 
 FIRST_SYNC_DAYS = 90      # history pulled on first connect unless a start date is given
 RESYNC_OVERLAP_DAYS = 2   # later syncs look back a little, in case a ride synced late
@@ -37,7 +37,9 @@ def _hash(token: str) -> str:
 
 
 class Backend:
-    def __init__(self, settings: Settings, registry: Optional[dict] = None):
+    def __init__(self, settings: Settings, registry: Optional[dict] = None, background: bool = False):
+        """background: refresh insights on a worker thread (the server). Off, they're refreshed
+        before each call returns (tests, the command line)."""
         self.settings = settings
         os.makedirs(settings.data_dir, exist_ok=True)
         os.makedirs(settings.raw_dir, exist_ok=True)
@@ -45,6 +47,7 @@ class Backend:
         self.vault = Vault(load_key(settings.secret_key_file))
         self.registry = registry if registry is not None else REGISTRY
         self.lock = threading.RLock()
+        self.insights = Insights(self, background=background)
 
     def connector(self, provider: str):
         if provider not in self.registry:
@@ -109,6 +112,7 @@ class Backend:
                     os.remove(r["raw_path"])
             for r in rows:
                 self.remerge(user_id, r["start_t"], r["end_t"])
+        self.insights.schedule(user_id)
         return len(rows)
 
     # --- sync (pull connectors) ----------------------------------------------------------------
@@ -187,6 +191,7 @@ class Backend:
             if old:  # a re-upload may have moved in time
                 self.remerge(user_id, old["start_t"], old["end_t"])
             self.remerge(user_id, rec.start, rec.end)
+        self.insights.schedule(user_id)
         return rec
 
     def remerge(self, user_id: int, start: float, end: float) -> list[Ride]:
@@ -203,10 +208,13 @@ class Backend:
                     break
                 lo, hi = nlo, nhi
             rides = build_rides([recording_from_dict(json.loads(r["data"])) for r in rows])
+            removed = [r["ride_id"] for r in self.db.execute(
+                "SELECT ride_id FROM rides WHERE user_id = ? AND end_t >= ? AND start_t <= ?", (user_id, lo, hi))]
             self.db.execute("DELETE FROM rides WHERE user_id = ? AND end_t >= ? AND start_t <= ?", (user_id, lo, hi))
             for r in rides:
                 self.db.execute("INSERT OR REPLACE INTO rides (user_id, ride_id, start_t, end_t, data) "
                                 "VALUES (?, ?, ?, ?, ?)", (user_id, str(int(r.start)), r.start, r.end, r.to_json()))
+            self.insights.rides_changed(user_id, removed, rides)
         return rides
 
     def rebuild_all(self, user_id: int) -> int:
@@ -216,7 +224,9 @@ class Backend:
                                   (user_id,)).fetchone()
             if row["a"] is None:
                 return 0
-            return len(self.remerge(user_id, row["a"], row["b"]))
+            n = len(self.remerge(user_id, row["a"], row["b"]))
+        self.insights.schedule(user_id)
+        return n
 
     # --- reading rides ------------------------------------------------------------------------
     def rides(self, user_id: int, include_hidden: bool = False) -> list[dict]:
@@ -227,7 +237,7 @@ class Backend:
                                    (user_id,)).fetchall()
         rides = [Ride.from_json(r["data"]) for r in rows]
         hide = hidden_reasons(rides)
-        notes = records.notes_by_ride([r for i, r in enumerate(rides) if i not in hide])
+        notes = self.insights.notes(user_id)
         out = []
         for i, (row, ride) in enumerate(zip(rows, rides)):
             if i in hide and not include_hidden:
@@ -247,12 +257,13 @@ class Backend:
         return [r for i, r in enumerate(rides) if i not in hide]
 
     def you(self, user_id: int) -> dict:
-        """Tallies, streaks, personal bests and the latest rides' notes (rideengine.analysis.records)."""
-        return records.you(self.visible_rides(user_id))
+        """Tallies, streaks, personal bests, repeated routes and climbs, and the latest rides' notes,
+        from what backend/insights.py keeps stored."""
+        return self.insights.you(user_id)
 
     def notes(self, user_id: int, ride_id: str) -> list[dict]:
         """What's notable about one ride, compared with the rides before it."""
-        return records.notes_by_ride(self.visible_rides(user_id)).get(ride_id, [])
+        return self.insights.notes(user_id).get(ride_id, [])
 
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:

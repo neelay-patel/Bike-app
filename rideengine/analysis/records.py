@@ -92,6 +92,13 @@ def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
     return sorted(out, key=lambda e: e.start)
 
 
+def entries_from_features(feats: list[dict], tz: tzinfo | None = None) -> list[_Entry]:
+    """The same records from stored per-ride features (features.extract), without the samples."""
+    out = [_Entry(f["ride_id"], f["start"], datetime.fromtimestamp(f["start"], tz).astimezone(tz).date(),
+                  f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"]) for f in feats]
+    return sorted(out, key=lambda e: e.start)
+
+
 # --- formatting ------------------------------------------------------------------------------
 def _ordinal(n: int) -> str:
     suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
@@ -296,16 +303,92 @@ def _streak_note(e: _Entry, before: list[_Entry]) -> list[dict]:
     return []
 
 
-def notes(e: _Entry, es: list[_Entry]) -> list[dict]:
-    """What's notable about one ride, best first: at most one note per kind, MAX_NOTES in all."""
+# --- repeated routes and climbs (repeats.find) --------------------------------------------------
+LAP_MILESTONES = {10, 25, 50, 75, 100, 150, 200, 300, 500}
+
+
+def _day_of(t: float, tz: tzinfo | None) -> date:
+    return datetime.fromtimestamp(t, tz).astimezone(tz).date()
+
+
+def _ranked(kind: str, items: list[dict], key: str, better, phrase: str, best_word: str, fmt, tz,
+            unit_word: str) -> dict[str, list[dict]]:
+    """Notes for each lap or attempt, compared with the earlier ones. `better(a, b)`: a beats b."""
+    out: dict[str, list[dict]] = {}
+    for i, it in enumerate(items):
+        v = it.get(key)
+        if v is None:
+            continue
+        earlier = [x for x in items[:i] if x.get(key) is not None]
+        day = _day_of(it["start"], tz)
+        notes = []
+        detail = fmt(v)
+        if len(earlier) >= MIN_REPEATS_BEFORE and all(better(v, x[key]) for x in earlier):
+            notes.append(_note(kind, f"Your {best_word} {phrase} yet", 92, detail, pb=True))
+        else:
+            rank = 1 + sum(1 for x in earlier if not better(v, x[key]))  # ties rank after earlier
+            if len(earlier) >= YEAR_RANK_HISTORY // 2 and rank <= 3:
+                notes.append(_note(kind, f"Your {_ordinal(rank)} {best_word} {phrase}", 72 - 8 * (rank - 2), detail))
+            elif len(earlier) >= MIN_REPEATS_BEFORE:
+                beat_me = [x for x in earlier if not better(v, x[key])]
+                if beat_me:
+                    last = _day_of(beat_me[-1]["start"], tz)
+                    gap = (day - last).days
+                    if gap >= SINCE_MIN_DAYS:
+                        notes.append(_note(kind, f"Your {best_word} {phrase} since {_since(last, day)}",
+                                           min(58, 28 + gap / 10), detail, since=True))
+        if i + 1 in LAP_MILESTONES:
+            notes.append(_note(kind, f"Your {_ordinal(i + 1)} {unit_word}", 45, milestone=True))
+        for n in notes:
+            out.setdefault(it["ride_id"], []).append(n)
+    return out
+
+
+MIN_REPEATS_BEFORE = 3
+
+
+def _clock(seconds: float) -> str:
+    seconds = round(seconds)
+    h, m, s = seconds // 3600, seconds % 3600 // 60, seconds % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _phrase(name: str) -> str:
+    """Route names read inside a sentence: "Home loop via X" -> "home loop via X"."""
+    return "home" + name[4:] if name.startswith("Home") else name
+
+
+def repeat_notes(found: dict, tz: tzinfo | None = None) -> dict[str, list[dict]]:
+    """Notes about laps of repeated routes and times on repeated climbs, per ride."""
+    out: dict[str, list[dict]] = {}
+    for r in found.get("routes", []):
+        phrase = _phrase(r["name"])
+        laps = sorted(r["laps"], key=lambda x: x["start"])
+        for rid, ns in _ranked("route", laps, "kmh", lambda a, b: a > b, phrase, "fastest",
+                               lambda v: f"{v:.1f} km/h", tz, phrase).items():
+            out.setdefault(rid, []).extend(ns)
+    for c in found.get("climbs", []):
+        atts = sorted(c["attempts"], key=lambda x: x["at"])
+        name = f"the {c['name']}" if c["name"].endswith(" climb") else c["name"]
+        for rid, ns in _ranked("climb", atts, "seconds", lambda a, b: a < b, f"time on {name}", "best",
+                               _clock, tz, f"time up {name}").items():
+            out.setdefault(rid, []).extend(ns)
+    return out
+
+
+def notes(e: _Entry, es: list[_Entry], extra: list[dict] | None = None) -> list[dict]:
+    """What's notable about one ride, best first: at most one note per kind (one ranking and one
+    milestone), MAX_NOTES in all. `extra`: this ride's route and climb notes (repeat_notes)."""
     before = [x for x in es if x.start < e.start]
     cands = _rank_notes(e, before) + _first_over(e, before) + _milestones(e, before) + _streak_note(e, before)
+    cands += extra or []
     cands.sort(key=lambda n: -n["weight"])
     out, seen, since = [], set(), 0
     ranked = {n["kind"] for n in cands if not n["milestone"]}
     for n in cands:
         # Each kind keeps its best ranking and its best milestone.
-        key = (n["kind"], n["milestone"])
+        # A lap of a repeated route and the ride's speed say the same thing: keep the stronger.
+        key = ("speed" if n["kind"] == "route" else n["kind"], n["milestone"])
         if key in seen:
             continue
         # Time in the saddle mostly repeats distance: only say it when distance has nothing.
@@ -320,18 +403,64 @@ def notes(e: _Entry, es: list[_Entry]) -> list[dict]:
     return out[:MAX_NOTES]
 
 
-def notes_by_ride(rides: list[Ride], tz: tzinfo | None = None) -> dict[str, list[dict]]:
-    es = entries(rides, tz)
-    return {e.ride_id: notes(e, es) for e in es}
+def _found(rides: list[Ride], found: dict | None) -> dict:
+    if found is None:
+        from . import repeats
+        found = repeats.find(rides)
+    return found
 
 
-def you(rides: list[Ride], today: date | None = None, tz: tzinfo | None = None, recent: int = 5) -> dict:
-    """Everything for the You screen: tallies, streaks, personal bests, the latest rides' notes."""
+def notes_by_ride(rides: list[Ride], tz: tzinfo | None = None, found: dict | None = None) -> dict[str, list[dict]]:
+    """found: repeats.find(rides), if already worked out (it takes a few seconds)."""
+    return notes_for(entries(rides, tz), _found(rides, found), tz)
+
+
+def notes_for(es: list[_Entry], found: dict, tz: tzinfo | None = None, since: float | None = None
+              ) -> dict[str, list[dict]]:
+    """Notes for every ride (or only rides starting at or after `since`: a ride's notes depend only
+    on the rides before it, so a change at time T only changes notes from T on)."""
+    extra = repeat_notes(found, tz)
+    return {e.ride_id: notes(e, es, extra.get(e.ride_id)) for e in es if since is None or e.start >= since}
+
+
+def _route_view(r: dict) -> dict:
+    laps = [l for l in r["laps"] if l["kmh"]]
+    best = max(laps, key=lambda l: l["kmh"], default=None)
+    return {"id": r["id"], "name": r["name"], "home": r["home"], "km": r["km"], "count": len(r["laps"]),
+            "custom": bool(r.get("custom_name")),
+            "best": best, "last": laps[-1] if laps else None,
+            "laps": [{"ride_id": l["ride_id"], "start": l["start"], "kmh": l["kmh"], "avg_hr": l["avg_hr"]}
+                     for l in r["laps"]]}
+
+
+def _climb_view(c: dict) -> dict:
+    best = min(c["attempts"], key=lambda a: a["seconds"])
+    return {"id": c["id"], "name": c["name"], "custom": bool(c.get("custom_name")),
+            "length_m": c["length_m"], "gain_m": c["gain_m"],
+            "grade": c["grade"], "count": len(c["attempts"]), "best": best, "last": c["attempts"][-1],
+            "attempts": [{"ride_id": a["ride_id"], "start": a["start"], "seconds": a["seconds"],
+                          "avg_hr": a["avg_hr"]} for a in c["attempts"]]}
+
+
+def you(rides: list[Ride], today: date | None = None, tz: tzinfo | None = None, recent: int = 5,
+        found: dict | None = None) -> dict:
+    """Everything for the You screen: tallies, streaks, personal bests, repeated routes and climbs,
+    the latest rides' notes."""
     es = entries(rides, tz)
+    found = _found(rides, found)
+    latest = {e.ride_id for e in es[-recent:]}
+    by_ride = {rid: n for rid, n in notes_for(es, found, tz).items() if rid in latest}
+    return you_from(es, found, by_ride, today, tz, recent)
+
+
+def you_from(es: list[_Entry], found: dict, ride_notes: dict[str, list[dict]], today: date | None = None,
+             tz: tzinfo | None = None, recent: int = 5) -> dict:
+    """you() from parts a backend keeps stored: entries, routes and climbs, each ride's notes."""
     today = today or datetime.now(tz).astimezone(tz).date()
-    latest = [{"ride_id": e.ride_id, "start": e.start, "km": e.km, "notes": notes(e, es)}
+    latest = [{"ride_id": e.ride_id, "start": e.start, "km": e.km, "notes": ride_notes.get(e.ride_id, [])}
               for e in reversed(es[-recent:])]
-    return {**tallies(es, today), "bests": bests(es), "recent": latest}
+    return {**tallies(es, today), "bests": bests(es), "routes": [_route_view(r) for r in found["routes"]],
+            "climbs": [_climb_view(c) for c in found["climbs"]], "recent": latest}
 
 
 def headline(ride_notes: list[dict]) -> str | None:
@@ -357,6 +486,19 @@ def report(y: dict) -> str:
     lines.append("Personal bests:")
     for b in y["bests"]:
         lines.append(f"  {b['label']:<26} {b['text']:>10}  {b['date']}  ride {b['ride_id']}")
+    if y.get("routes"):
+        lines.append("Repeated routes:")
+        for r in y["routes"]:
+            b = r["best"]
+            lines.append(f"  {r['name']:<32} {r['km']:5.1f} km  {r['count']:3d} laps  best {b['kmh']:.1f} km/h "
+                         f"({datetime.fromtimestamp(b['start']).astimezone():%Y-%m-%d})" if b else f"  {r['name']}")
+    if y.get("climbs"):
+        lines.append("Repeated climbs:")
+        for c in y["climbs"]:
+            b = c["best"]
+            lines.append(f"  {c['name']:<32} {c['length_m'] / 1000:4.1f} km {c['grade']:4.1f}%  {c['count']:3d} times  "
+                         f"best {_clock(b['seconds'])} ({datetime.fromtimestamp(b['start']).astimezone():%Y-%m-%d}), "
+                         f"last {_clock(c['last']['seconds'])}")
     lines.append("Latest rides:")
     for r in y["recent"]:
         day = datetime.fromtimestamp(r["start"]).astimezone().strftime("%Y-%m-%d")

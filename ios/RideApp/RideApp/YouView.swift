@@ -12,6 +12,9 @@ struct YouView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         if let since = model.you?.since.flatMap(Self.month) { MonoLabel("On record since \(since)") }
                         Text("You").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                        if model.you?.updating == true {
+                            MonoLabel("Working in new rides…", color: Theme.cobalt)
+                        }
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
@@ -20,6 +23,7 @@ struct YouView: View {
                         AllTimeHero(tally: you.all)
                         TotalsPanel(you: you)
                         YearCompare(you: you)
+                        RepeatsSection(routes: you.routes ?? [], climbs: you.climbs ?? [], rides: model.rides)
                         BestsList(bests: you.bests, rides: model.rides)
                         LatelyList(recent: you.recent.filter { !$0.notes.isEmpty }, rides: model.rides)
                     } else if let error = model.error {

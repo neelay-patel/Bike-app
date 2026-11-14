@@ -57,10 +57,12 @@ def _files(path: str) -> list[tuple[str, str]]:
     return out
 
 
-def load(bbox: tuple[float, float, float, float], path: str = DEFAULT) -> list[dict]:
-    """Populated places inside (south, west, north, east), from cities500 and any country files.
-    Empty if nothing is downloaded."""
-    s, w, n, e = bbox
+def load(bbox, path: str = DEFAULT) -> list[dict]:
+    """Populated places inside (south, west, north, east), or inside any of a list of such boxes
+    (one pass over the files), from cities500 and any country files. Empty if nothing is downloaded."""
+    boxes = [bbox] if isinstance(bbox[0], (int, float)) else list(bbox)
+    if not boxes:
+        return []
     seen, out = set(), []
     for zpath, member in _files(path):
         with zipfile.ZipFile(zpath) as zf, zf.open(member) as raw:
@@ -69,13 +71,13 @@ def load(bbox: tuple[float, float, float, float], path: str = DEFAULT) -> list[d
                 if col[6] != "P" or col[0] in seen:
                     continue
                 lat, lon = float(col[4]), float(col[5])
-                if s <= lat <= n and w <= lon <= e:
+                if any(s <= lat <= n and w <= lon <= e for s, w, n, e in boxes):
                     seen.add(col[0])
                     out.append({"name": col[1], "lat": lat, "lon": lon, "population": int(col[14] or 0)})
     return out
 
 
-def places_on_route(ride: Ride, path: str = DEFAULT, limit: int = 2) -> list[dict]:
+def places_on_route(ride: Ride, path: str = DEFAULT, limit: int = 2, places: list | None = None) -> list[dict]:
     """Up to `limit` places the route goes through, most notable first, spread along the ride.
 
     A place counts when the route passes within NEAR_M of its centre (NEAR_BIG_M for towns of
@@ -83,6 +85,7 @@ def places_on_route(ride: Ride, path: str = DEFAULT, limit: int = 2) -> list[dic
     then by population (GeoNames has no population for most villages), then by how close the route
     passes. The start/finish town is skipped unless nothing else qualifies.
     Each result carries "stop_min" when the rider stopped there.
+    places: already-loaded places to choose from (saves reading the files again).
     """
     track, d, prev = [], 0.0, None
     for s in ride.samples:
@@ -102,7 +105,10 @@ def places_on_route(ride: Ride, path: str = DEFAULT, limit: int = 2) -> list[dic
     start, end = pts[0], pts[-1]
     long_stops = [st for st in stops(ride) if st["seconds"] >= STOP_MIN_S and st["lat"] is not None]
     found, home = [], []
-    for pl in load(bbox, path):
+    s_, w_, n_, e_ = bbox
+    pool_in = load(bbox, path) if places is None else \
+        [p for p in places if s_ <= p["lat"] <= n_ and w_ <= p["lon"] <= e_]
+    for pl in pool_in:
         near = NEAR_BIG_M if pl["population"] >= BIG_POP else NEAR_M
         best, along = min((haversine(pl["lat"], pl["lon"], la, lo), dd) for la, lo, dd in pts)
         if best > near:

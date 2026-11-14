@@ -132,7 +132,11 @@ struct YouSummary: Decodable {
     let biggestMonth: Tally?
     let streak: Streak
     let bests: [Best]
+    let routes: [RouteRepeat]?
+    let climbs: [ClimbRepeat]?
     let recent: [Recent]
+    /// True while the server is still working new rides in (routes, climbs and notes may lag a little).
+    let updating: Bool?
 
     struct Tally: Decodable {
         let label: String?
@@ -168,6 +172,50 @@ struct YouSummary: Decodable {
         let start: Double
         let km: Double
         let notes: [RideNote]
+    }
+}
+
+enum RepeatKind { case route, climb }
+
+/// A route ridden again and again (the home loop first, if there is one). Laps oldest first.
+struct RouteRepeat: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let home: Bool
+    let km: Double
+    let count: Int
+    /// The rider gave it their own name.
+    let custom: Bool?
+    let best: Lap?
+    let last: Lap?
+    let laps: [Lap]
+
+    struct Lap: Decodable {
+        let rideId: String
+        let start: Double
+        let kmh: Double?
+        let avgHr: Double?
+    }
+}
+
+/// A climb timed on fixed start and finish points every time it's ridden. Attempts oldest first.
+struct ClimbRepeat: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let lengthM: Double
+    let gainM: Double
+    let grade: Double
+    let count: Int
+    let custom: Bool?
+    let best: Attempt
+    let last: Attempt
+    let attempts: [Attempt]
+
+    struct Attempt: Decodable {
+        let rideId: String
+        let start: Double
+        let seconds: Double
+        let avgHr: Double?
     }
 }
 
@@ -248,6 +296,26 @@ struct APIClient {
     }
 
     func you() async throws -> YouSummary { try await get("v1/you") }
+
+    /// Dates, years and streaks are worked out in the rider's own time zone.
+    func setTimeZone(_ identifier: String) async throws {
+        let body = try JSONEncoder().encode(["tz": identifier])
+        _ = try await send(request("PUT", "v1/me", body: body))
+    }
+
+    /// The rider's own name for a route or climb; nil goes back to the automatic name.
+    func rename(_ kind: RepeatKind, id: String, to name: String?) async throws {
+        struct Body: Encodable {
+            let name: String?
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(name, forKey: .name)  // null, not left out
+            }
+            enum CodingKeys: String, CodingKey { case name }
+        }
+        let path = (kind == .route ? "v1/routes/" : "v1/climbs/") + (id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)
+        _ = try await send(request("PATCH", path, body: JSONEncoder().encode(Body(name: name))))
+    }
 
     func trace(_ rideId: String) async throws -> RideTrace {
         try await get("v1/rides/\(rideId)", query: [URLQueryItem(name: "samples", value: "true")])

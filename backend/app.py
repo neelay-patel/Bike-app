@@ -20,7 +20,7 @@ log = logging.getLogger("uvicorn.error")
 
 
 def create_app(backend: Optional[Backend] = None) -> FastAPI:
-    be = backend or Backend(Settings.from_env())
+    be = backend or Backend(Settings.from_env(), background=True)
     app = FastAPI(title="Ride data backend", version="0.1")
     app.state.backend = be
 
@@ -83,9 +83,39 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
 
     @app.get("/v1/you")
     def you(uid: int = Depends(user)):
-        """Tallies (all time, this year, last year, this month), streaks, personal bests, and the
-        latest rides' notes. Rule-based text; counts visible rides only."""
+        """Tallies (all time, this year, last year, this month), streaks, personal bests, repeated
+        routes and climbs, and the latest rides' notes. Rule-based text; counts visible rides only.
+        "updating": true while new rides are still being worked in (results may be a little behind)."""
         return be.you(uid)
+
+    @app.get("/v1/me")
+    def me(uid: int = Depends(user)):
+        row = be.db.execute("SELECT id, tz FROM users WHERE id = ?", (uid,)).fetchone()
+        return {"id": row["id"], "tz": row["tz"]}
+
+    @app.put("/v1/me")
+    def update_me(body: dict = Body(...), uid: int = Depends(user)):
+        """{"tz": "America/Toronto"}: the rider's time zone, for dates, years and streaks."""
+        if "tz" in body:
+            try:
+                be.insights.set_tz(uid, str(body["tz"]))
+            except Exception:
+                raise HTTPException(400, f"Unknown time zone {body['tz']!r}")
+        return me(uid)
+
+    @app.patch("/v1/routes/{route_id}")
+    def rename_route(route_id: str, body: dict = Body(...), uid: int = Depends(user)):
+        """{"name": "Bayview loop"} names a route; {"name": null} goes back to the automatic name."""
+        if not be.insights.rename(uid, "route", route_id, body.get("name")):
+            raise HTTPException(404, "No such route")
+        return {"id": route_id, "name": body.get("name")}
+
+    @app.patch("/v1/climbs/{climb_id}")
+    def rename_climb(climb_id: str, body: dict = Body(...), uid: int = Depends(user)):
+        """{"name": "Bayview drag"} names a climb; {"name": null} goes back to the automatic name."""
+        if not be.insights.rename(uid, "climb", climb_id, body.get("name")):
+            raise HTTPException(404, "No such climb")
+        return {"id": climb_id, "name": body.get("name")}
 
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):

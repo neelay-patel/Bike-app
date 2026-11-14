@@ -7,6 +7,7 @@
   python -m backend upload --user 1 data/apple_watch_2026-10-03.json
   python -m backend rides --user 1
   python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
+  python -m backend rebuild-insights --user 1         # work out routes, climbs and notes again
   python -m backend you --user 1                      # tallies, streaks, personal bests
   python -m backend card --user 1 <ride_id> [--name "Durham Forest"] [--headline "..."] [--place "Uxbridge,44.10,-79.12"]
                                                       # towns are found automatically unless --place / --no-places
@@ -46,6 +47,11 @@ def main(argv=None) -> int:
     r.add_argument("--all", action="store_true", help="include false starts and empty recordings")
     yo = sub.add_parser("you", help="tallies, streaks, personal bests")
     yo.add_argument("--user", type=int, required=True)
+    ri = sub.add_parser("rebuild-insights", help="forget routes, climbs and notes and work them out again")
+    ri.add_argument("--user", type=int, required=True)
+    tzp = sub.add_parser("set-tz", help="the rider's time zone, e.g. America/Toronto")
+    tzp.add_argument("--user", type=int, required=True)
+    tzp.add_argument("tz")
     rb = sub.add_parser("rebuild")
     rb.add_argument("--user", type=int, required=True)
     cd = sub.add_parser("card")
@@ -118,6 +124,13 @@ def main(argv=None) -> int:
         elif a.cmd == "you":
             from rideengine.analysis.records import report
             print(report(be.you(a.user)))
+        elif a.cmd == "rebuild-insights":
+            be.insights.rebuild(a.user)
+            y = be.you(a.user)
+            print(f"{len(y['routes'])} routes, {len(y['climbs'])} climbs")
+        elif a.cmd == "set-tz":
+            be.insights.set_tz(a.user, a.tz)
+            print(f"time zone {a.tz}")
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":

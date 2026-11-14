@@ -44,7 +44,70 @@ CREATE TABLE IF NOT EXISTS rides (
     PRIMARY KEY (user_id, ride_id)
 );
 CREATE INDEX IF NOT EXISTS rides_time ON rides (user_id, start_t, end_t);
+
+-- Insights (backend/insights.py). Everything below is derived from the rides and can be rebuilt.
+CREATE TABLE IF NOT EXISTS ride_features (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    ride_id       TEXT NOT NULL,
+    start_t       REAL NOT NULL,
+    data          TEXT NOT NULL,        -- rideengine.analysis.features.extract(ride)
+    PRIMARY KEY (user_id, ride_id)
+);
+CREATE TABLE IF NOT EXISTS routes (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    route_id      TEXT NOT NULL,        -- stable once made
+    auto_name     TEXT,
+    custom_name   TEXT,                 -- the rider's own name, if they gave one
+    data          TEXT NOT NULL,        -- grid cells, length, loop, home flags
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (user_id, route_id)
+);
+CREATE TABLE IF NOT EXISTS route_laps (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    route_id      TEXT NOT NULL,
+    ride_id       TEXT NOT NULL,
+    start_t       REAL NOT NULL,
+    data          TEXT NOT NULL,
+    PRIMARY KEY (user_id, route_id, ride_id)
+);
+CREATE INDEX IF NOT EXISTS route_laps_ride ON route_laps (user_id, ride_id);
+CREATE TABLE IF NOT EXISTS climbs (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    climb_id      TEXT NOT NULL,        -- stable once made
+    auto_name     TEXT,
+    custom_name   TEXT,
+    data          TEXT NOT NULL,        -- start/finish gates, length, gain, path
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (user_id, climb_id)
+);
+CREATE TABLE IF NOT EXISTS climb_attempts (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    climb_id      TEXT NOT NULL,
+    ride_id       TEXT NOT NULL,
+    at_t          REAL NOT NULL,        -- when the attempt started (a ride can go up twice)
+    data          TEXT NOT NULL,
+    PRIMARY KEY (user_id, climb_id, at_t)
+);
+CREATE INDEX IF NOT EXISTS climb_attempts_ride ON climb_attempts (user_id, ride_id);
+CREATE TABLE IF NOT EXISTS ride_notes (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    ride_id       TEXT NOT NULL,
+    start_t       REAL NOT NULL,
+    data          TEXT NOT NULL,        -- what's notable, as of the ride
+    PRIMARY KEY (user_id, ride_id)
+);
+CREATE TABLE IF NOT EXISTS insight_state (
+    user_id       INTEGER PRIMARY KEY REFERENCES users(id),
+    dirty_from    REAL,                 -- notes from this time on need redoing (NULL: all up to date)
+    gen           INTEGER NOT NULL DEFAULT 0,   -- bumped on every ride change
+    updated_at    REAL
+);
 """
+
+# Columns added after the first release of a table: (table, column, definition).
+MIGRATIONS = [
+    ("users", "tz", "TEXT"),        # the rider's IANA time zone, e.g. America/Toronto
+]
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -53,6 +116,10 @@ def connect(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    for table, column, definition in MIGRATIONS:
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     return conn
 
 

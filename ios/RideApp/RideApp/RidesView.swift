@@ -409,6 +409,13 @@ enum Format {
         return String(format: "%d:%02d", minutes / 60, minutes % 60)
     }
 
+    /// "13:43", or "1:02:05" past an hour.
+    static func clock(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s % 3600 / 60, s % 60)
+                         : String(format: "%d:%02d", s / 60, s % 60)
+    }
+
     /// For dot-matrix hero numbers: no thousands separator (its punctuation is wide).
     static func hero(_ v: Double, decimals: Int) -> String {
         v.formatted(.number.precision(.fractionLength(decimals)).grouping(.never))

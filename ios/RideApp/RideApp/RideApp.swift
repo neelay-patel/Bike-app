@@ -42,6 +42,10 @@ final class AppModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
+            let tz = TimeZone.current.identifier
+            if UserDefaults.standard.string(forKey: "sentTimeZone") != tz, (try? await api.setTimeZone(tz)) != nil {
+                UserDefaults.standard.set(tz, forKey: "sentTimeZone")
+            }
             async let c = api.connections()
             async let r = api.rides()
             async let y = try? api.you()  // an older server has no /v1/you: the rest still loads
