@@ -24,9 +24,15 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     func load(rideId: String) async {
-        guard !isLoaded else { return }
+        await load { try await APIClient().cardHTML(rideId) }
+    }
+
+    /// Load any server-drawn card page (ride card, rider card). `force` redraws one already shown.
+    func load(force: Bool = false, _ fetch: () async throws -> String) async {
+        guard force || !isLoaded else { return }
         do {
-            let html = try await APIClient().cardHTML(rideId)
+            let html = try await fetch()
+            failed = nil
             webView.loadHTMLString(Self.embedFonts(html), baseURL: nil)
         } catch {
             failed = error.localizedDescription
@@ -82,6 +88,15 @@ struct RideCard: View {
     let rideId: String
 
     var body: some View {
+        CardFrame(renderer: renderer).task { await renderer.load(rideId: rideId) }
+    }
+}
+
+/// Any 360 x 640 card page, scaled to fit the width.
+struct CardFrame: View {
+    @ObservedObject var renderer: CardRenderer
+
+    var body: some View {
         GeometryReader { geo in
             let scale = min(1, geo.size.width / CardRenderer.size.width)
             CardWebView(renderer: renderer)
@@ -100,8 +115,7 @@ struct RideCard: View {
         .aspectRatio(CardRenderer.size.width / CardRenderer.size.height, contentMode: .fit)
         .frame(maxWidth: CardRenderer.size.width)
         .frame(maxWidth: .infinity)
-        .task { await renderer.load(rideId: rideId) }
-        .accessibilityLabel("Ride card")
+        .accessibilityLabel("Card")
     }
 }
 

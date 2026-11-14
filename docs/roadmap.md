@@ -53,16 +53,17 @@ App: the **You** tab, and each ride's notes on its detail screen.
   zone. Rides in any order give the same answers as the batch. Left before other riders: job queue + Postgres,
   rides list from stored rows, push notifications, thresholds on other terrain, privacy zones, GeoNames worldwide.
 
-## Bucket 2: fun
+## Bucket 2: fun (built 14 Nov 2026, `docs/fun.md`)
 Our own drawing style, not a copy of any existing card game's art.
-- [ ] **Avatar builder**: drawn in code from parts (helmet or cap, kit colours, hair and beard, glasses,
-  bike type). Consistent, free per image, fits look D.
-- [ ] **Rider card**: the avatar plus ratings out of 99 from the rider's own data (Distance, Climbing,
-  Speed, Consistency, Endurance) that move as they improve. The ride cards are the set; this is the cover.
-- [ ] **Holo ride cards** for personal bests (bucket 1 already knows which rides they are).
-- [ ] **Badges**, earned, never handed out: first 100 km, an Everest of climbing in a month, every month
-  of a year ridden, a 10-week streak.
-- [ ] **Season binder**: the year's ride cards in order, gaps where weeks were missed.
+- [x] **Avatar builder**: drawn in code from parts (skin, face, hair and colour, beard, glasses, helmet or cap,
+  kit colours and pattern). Same drawing in the builder, on the rider card, and behind every ride card's map.
+- [x] **Rider card**: avatar, ratings out of 99 (Distance, Climbing, Speed, Endurance, Consistency) from the
+  last 12 months, overall, rider type (Rouleur, Climber, Flier, Diesel, Metronome), badges earned.
+- [x] **Holo ride cards** for all-time bests and firsts (iridescent header, "★ PB").
+- [x] **Badges** (24), earned on a ride, never handed out; the rest show how close you are.
+- [x] **Season binder**: a tab with the year's cards in order, holo cards, empty slots for missed weeks.
+- [ ] The bike choice isn't drawn yet (stored for a later full-body or bike-in-frame drawing).
+- [ ] Badge artwork (now icons); share the rider card; binder page-turn animation.
 - [ ] **Later, social**: trumps with friends' rider cards. Waits on the providers' sharing terms.
 
 ## Bucket 3: training and coaching

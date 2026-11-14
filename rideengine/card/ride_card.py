@@ -105,6 +105,23 @@ def route_path(ride: Ride, width: float = W, height: float = MAP_H) -> tuple[str
     return path, proj, ppk, dot_km
 
 
+# A personal-best card: an iridescent header that slowly shimmers (still for reduced motion).
+HOLO_CSS = """.holo{background:linear-gradient(115deg,#F7D6E6,#C9ECFF 22%,#FFF2B8 42%,#D9CCFF 62%,#BFF5DD 82%,#F7D6E6)!important;
+background-size:300% 300%!important;animation:sheen 7s linear infinite}
+@keyframes sheen{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.holo{animation:none}}"""
+
+
+def _avatar_layer(spec: dict, cobalt: str, uid: str) -> str:
+    """The rider's avatar, big and in tints of the map's blue, behind the km dots and the route."""
+    from .avatar import _shade, avatar_svg
+    k = MAP_H * 1.02 / 240
+    x = W - 200 * k + 26
+    y = MAP_H - 240 * k + 4
+    inner = avatar_svg(spec, mono=_shade(cobalt, 1.1), standalone=False, uid=f"card{uid}")
+    return f'<g transform="translate({x:.1f} {y:.1f}) scale({k:.3f})" opacity="0.5" aria-hidden="true">{inner}</g>'
+
+
 def _grid(ppk: float, dot_km: int, color: str, uid: str = "g") -> str:
     """Dots on a real-distance grid: each dot is dot_km from the next (an SVG pattern, so it stays small)."""
     gap = round(ppk * dot_km, 2)
@@ -131,10 +148,13 @@ def _place_label(x: float, y: float, text: str, taken: list) -> tuple[float, flo
 
 
 def ride_card(ride: Ride, number: int | None = None, name: str | None = None, headline: str | None = None,
-              places: list | None = None, fonts: str = "google", hide_near=None, background: str = "#FFFFFF") -> str:
+              places: list | None = None, fonts: str = "google", hide_near=None, background: str = "#FFFFFF",
+              avatar: dict | None = None, holo: bool = False) -> str:
     """places: None finds towns automatically (rideengine.places: where you stopped, else the biggest);
     or a list of [label, lat, lon] to mark instead; [] for none. fonts: "google" or "local".
-    hide_near: [(lat, lon)] to keep off the drawn route (home). background: behind the card."""
+    hide_near: [(lat, lon)] to keep off the drawn route (home). background: behind the card.
+    avatar: the rider's avatar spec, drawn big and quiet behind the map (rideengine/card/avatar.py).
+    holo: a personal-best ride: holographic header and a PB foil."""
     ride = trim_near(ride, hide_near)
     t = _tokens()
     c, f = t["color"], t["font"]
@@ -198,15 +218,16 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(name)} · ride card</title>
 {GOOGLE_FONTS if fonts == "google" else "<style>" + LOCAL_FONTS + "</style>"}
-<style>body{{margin:0;background:{background};display:flex;justify-content:center}}</style></head>
+<style>body{{margin:0;background:{background};display:flex;justify-content:center}}{HOLO_CSS if holo else ""}</style></head>
 <body>
 <article style="width:360px;height:640px;box-sizing:border-box;background:{background};padding:12px;display:flex;flex-direction:column;color:{c['ink']}">
-<header style="background:{c['strip']};color:#FFFFFF;border-radius:14px 14px 0 0;padding:10px 14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+<header class="{'holo' if holo else ''}" style="background:{c['strip']};color:{c['ink'] if holo else '#FFFFFF'};border-radius:14px 14px 0 0;padding:10px 14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px">
 <h1 style="margin:0;font-family:'{f['heading']}',serif;font-size:30px;font-weight:400;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{html.escape(name)}</h1>
-<span style="font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:#E2DADC;white-space:nowrap">{no}</span>
+<span style="font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:{c['ink'] if holo else '#E2DADC'};white-space:nowrap">{"★ PB · NO. " + str(number) if holo and number else no}</span>
 </header>
 <div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
-<svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="{aria}" style="position:absolute;left:0;top:0">
+<svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="{aria}" style="position:absolute;left:0;top:0;overflow:hidden">
+{_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
 {_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
 <path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
 {marks}

@@ -179,6 +179,83 @@ struct YouSummary: Decodable {
 
 enum RepeatKind { case route, climb }
 
+struct Me: Decodable {
+    let id: Int
+    let tz: String?
+    let name: String
+    let avatar: [String: String]?
+}
+
+/// GET /v1/avatar/options: every part, its choices, and colours for the swatches.
+struct AvatarOptions: Decodable {
+    let options: [String: [String]]
+    let defaults: [String: String]
+    let colors: Colors
+
+    struct Colors: Decodable {
+        let skin: [String: String]
+        let hairColor: [String: String]
+        let kit: [String: String]
+    }
+
+    enum CodingKeys: String, CodingKey { case options, defaults = "default", colors }
+}
+
+/// GET /v1/collection: the rider card's ratings, badges, and the season binder.
+struct CollectionSummary: Decodable {
+    let rider: Rider
+    let badges: [Badge]
+    let binder: [BinderPage]
+
+    struct Rider: Decodable {
+        let ratings: [String: Int]
+        let overall: Int
+        let type: String
+        let rides: Int
+        let km: Double
+        let name: String
+        let badgesEarned: Int
+        let badgesTotal: Int
+    }
+
+    struct Badge: Decodable, Identifiable {
+        let id: String
+        let group: String
+        let title: String
+        let description: String
+        let earned: Bool
+        let date: String?
+        let rideId: String?
+        let progress: Progress
+
+        struct Progress: Decodable { let value: Double; let target: Double }
+    }
+
+    struct BinderPage: Decodable, Identifiable {
+        var id: Int { year }
+        let year: Int
+        let cards: [BinderCard]
+        let gaps: [String]
+        let holo: Int
+        let weeks: Int
+    }
+
+    struct BinderCard: Decodable, Identifiable {
+        var id: String { rideId }
+        let rideId: String
+        let start: Double
+        let date: String
+        let number: Int
+        let name: String?
+        let km: Double
+        let ascentM: Double?
+        let holo: Bool
+        let headline: String?
+        let shape: [[Double]]
+        let week: String
+    }
+}
+
 /// GET /v1/recovery: HRV and resting heart rate against the rider's usual range, VO2 max, and
 /// heart-rate recovery after rides. For the rider only.
 struct RecoverySummary: Decodable {
@@ -348,6 +425,40 @@ struct APIClient {
     }
 
     func you() async throws -> YouSummary { try await get("v1/you") }
+
+    func collection() async throws -> CollectionSummary { try await get("v1/collection") }
+
+    func me() async throws -> Me { try await get("v1/me") }
+
+    /// Save the rider's name and avatar (nil avatar removes it).
+    func updateMe(name: String, avatar: [String: String]?) async throws -> Me {
+        struct Body: Encodable {
+            let name: String
+            let avatar: [String: String]?
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(name, forKey: .name)
+                try c.encode(avatar, forKey: .avatar)  // null removes it
+            }
+            enum CodingKeys: String, CodingKey { case name, avatar }
+        }
+        let body = try JSONEncoder().encode(Body(name: name, avatar: avatar))
+        return try Self.decoder.decode(Me.self, from: await send(request("PUT", "v1/me", body: body)))
+    }
+
+    func avatarOptions() async throws -> AvatarOptions { try await get("v1/avatar/options") }
+
+    /// The avatar drawn from a spec, as SVG (for the builder's preview; nothing saved).
+    func avatarPreview(_ spec: [String: String]) async throws -> String {
+        let data = try await send(request("POST", "v1/avatar/preview", body: JSONEncoder().encode(spec)))
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func riderCardHTML() async throws -> String {
+        let data = try await send(request("GET", "v1/rider/card", query: [
+            URLQueryItem(name: "fonts", value: "local"), URLQueryItem(name: "background", value: "transparent")]))
+        return String(decoding: data, as: UTF8.self)
+    }
 
     func recovery() async throws -> RecoverySummary { try await get("v1/recovery") }
 

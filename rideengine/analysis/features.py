@@ -15,7 +15,7 @@ from .basics import summary
 from .climbs import find_climbs
 from .repeats import Track
 
-VERSION = 2  # 2: heart-rate recovery after the ride
+VERSION = 3  # 2: heart-rate recovery after the ride; 3: route shape for binder thumbnails
 
 
 def extract(ride: Ride) -> dict:
@@ -35,8 +35,29 @@ def extract(ride: Ride) -> dict:
     f.update(cells=sorted([list(c) for c in t.cells]), first=[t.lat[0], t.lon[0]], last=[t.lat[-1], t.lon[-1]],
              bbox=[min(t.lat), min(t.lon), max(t.lat), max(t.lon)], track_km=round(t.km, 2),
              climbs=[{"start": list(c["start"]), "end": list(c["end"]), "gain_m": c["gain_m"],
-                      "length_m": c["length_m"]} for c in find_climbs(ride)])
+                      "length_m": c["length_m"]} for c in find_climbs(ride)],
+             shape=shape(t))
     return f
+
+
+def shape(t: Track, points: int = 48) -> list[list[float]]:
+    """The route's outline for thumbnails: ~`points` points evenly along it, x east and y south,
+    scaled into a unit square (aspect kept, centred). Only ever shown to the rider."""
+    import math
+    if len(t.lat) < 2 or t.d[-1] <= 0:
+        return []
+    k = math.cos(math.radians(sum(t.lat) / len(t.lat)))
+    picks, j = [], 0
+    for i in range(points + 1):
+        target = t.d[-1] * i / points
+        while j < len(t.d) - 1 and t.d[j] < target:
+            j += 1
+        picks.append((t.lon[j] * k, -t.lat[j]))
+    xs, ys = [p[0] for p in picks], [p[1] for p in picks]
+    span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1e-9
+    ox = (span - (max(xs) - min(xs))) / 2
+    oy = (span - (max(ys) - min(ys))) / 2
+    return [[round((x - min(xs) + ox) / span, 3), round((y - min(ys) + oy) / span, 3)] for x, y in picks]
 
 
 class Brief:

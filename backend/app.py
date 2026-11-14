@@ -11,7 +11,7 @@ import re
 from typing import Optional
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import Settings
 from .connectors import ConnectorError
@@ -103,18 +103,45 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
 
     @app.get("/v1/me")
     def me(uid: int = Depends(user)):
-        row = be.db.execute("SELECT id, tz FROM users WHERE id = ?", (uid,)).fetchone()
-        return {"id": row["id"], "tz": row["tz"]}
+        """The rider: time zone, name (for the rider card) and avatar spec (null until they make one)."""
+        return be.me(uid)
 
     @app.put("/v1/me")
     def update_me(body: dict = Body(...), uid: int = Depends(user)):
-        """{"tz": "America/Toronto"}: the rider's time zone, for dates, years and streaks."""
-        if "tz" in body:
-            try:
-                be.insights.set_tz(uid, str(body["tz"]))
-            except Exception:
-                raise HTTPException(400, f"Unknown time zone {body['tz']!r}")
-        return me(uid)
+        """Any of {"tz": "America/Toronto", "name": "Neelay", "avatar": {...}}. An avatar of null
+        removes it (cards go back to having none)."""
+        try:
+            return be.update_me(uid, body)
+        except Exception as exc:
+            if "tz" in body:
+                raise HTTPException(400, f"Unknown time zone {body['tz']!r}") from exc
+            raise
+
+    @app.get("/v1/avatar/options")
+    def avatar_options():
+        """Every avatar part and its choices, with colours for the swatches (no login needed)."""
+        from rideengine.card import avatar as av
+        return {"options": av.OPTIONS, "default": av.DEFAULT,
+                "colors": {"skin": av.SKIN, "hair_color": av.HAIR_COLOR, "kit": av.KIT}}
+
+    @app.post("/v1/avatar/preview")
+    def avatar_preview(spec: dict = Body(...), uid: int = Depends(user)):
+        """The avatar drawn from a spec, as SVG, for the builder's live preview (nothing is saved)."""
+        from rideengine.card.avatar import avatar_svg
+        return Response(avatar_svg(spec, size=240), media_type="image/svg+xml")
+
+    @app.get("/v1/collection")
+    def collection(uid: int = Depends(user)):
+        """The fun bucket: badges (earned or how close), the rider card's ratings out of 99, and the
+        season binder (every ride's card per year, holo for personal bests, gaps for missed weeks)."""
+        return be.collection(uid)
+
+    @app.get("/v1/rider/card", response_class=HTMLResponse)
+    def rider_card(fonts: str = "google", background: str = "#FFFFFF", uid: int = Depends(user)):
+        """The rider card (avatar, ratings, type) as one HTML page, like the ride cards."""
+        if fonts not in ("google", "local") or not re.fullmatch(r"#[0-9A-Fa-f]{6}|transparent", background):
+            raise HTTPException(400, "fonts must be google or local; background a #RRGGBB colour or transparent")
+        return HTMLResponse(be.rider_card_html(uid, fonts=fonts, background=background))
 
     @app.patch("/v1/routes/{route_id}")
     def rename_route(route_id: str, body: dict = Body(...), uid: int = Depends(user)):

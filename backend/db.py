@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS insight_state (
 # Columns added after the first release of a table: (table, column, definition).
 MIGRATIONS = [
     ("users", "tz", "TEXT"),        # the rider's IANA time zone, e.g. America/Toronto
+    ("users", "display_name", "TEXT"),  # shown on the rider card
+    ("users", "avatar", "TEXT"),        # avatar spec as JSON (rideengine/card/avatar.py)
 ]
 
 

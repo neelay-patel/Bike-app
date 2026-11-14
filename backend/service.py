@@ -304,6 +304,59 @@ class Backend:
         """What's notable about one ride, compared with the rides before it."""
         return self.insights.notes(user_id).get(ride_id, [])
 
+    # --- the rider: name, avatar ------------------------------------------------------------------
+    def me(self, user_id: int) -> dict:
+        from rideengine.card.avatar import clean
+        with self.lock:
+            row = self.db.execute("SELECT id, tz, display_name, avatar FROM users WHERE id = ?", (user_id,)).fetchone()
+        return {"id": row["id"], "tz": row["tz"], "name": row["display_name"] or "Rider",
+                "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None}
+
+    def update_me(self, user_id: int, body: dict) -> dict:
+        """{"tz": ..., "name": ..., "avatar": {...}}: any of them. The avatar is cleaned to known parts."""
+        from rideengine.card.avatar import clean
+        if "tz" in body:
+            self.insights.set_tz(user_id, str(body["tz"]))
+        with self.lock:
+            if "name" in body:
+                name = str(body["name"] or "").strip()[:40] or None
+                self.db.execute("UPDATE users SET display_name = ? WHERE id = ?", (name, user_id))
+            if "avatar" in body:
+                spec = json.dumps(clean(body["avatar"])) if isinstance(body["avatar"], dict) else None
+                self.db.execute("UPDATE users SET avatar = ? WHERE id = ?", (spec, user_id))
+        return self.me(user_id)
+
+    # --- the fun bucket: badges, rider card, binder ------------------------------------------------
+    def collection(self, user_id: int) -> dict:
+        """Badges, the rider card's ratings and the season binder, from what insights keeps stored."""
+        from rideengine.analysis import collection as col
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import records, repeats
+        with self.lock:
+            feats = self.insights._features(user_id)
+            visible = feat_mod.visible_ids(feats)
+            found = self.insights._found(user_id, visible)
+        notes = self.insights.notes(user_id)
+        tz = self.insights.tz(user_id)
+        vfeats = [f for f in feats if f["ride_id"] in visible]
+        es = records.entries_from_features(vfeats, tz)
+        today = datetime.now(tz).astimezone(tz).date()
+        local = col.local_times(vfeats, tz, repeats.home_point(vfeats))
+        badges = col.badges(es, found, tz, local)
+        names = {l["ride_id"]: r["name"] for r in found["routes"] for l in r["laps"]}
+        shapes = {f["ride_id"]: f.get("shape") or [] for f in vfeats}
+        me = self.me(user_id)
+        return {"rider": {**col.ratings(es, today), "name": me["name"], "avatar": me["avatar"],
+                          "badges_earned": sum(b["earned"] for b in badges), "badges_total": len(badges)},
+                "badges": badges, "binder": col.binder(es, notes, names, shapes, today)}
+
+    def rider_card_html(self, user_id: int, fonts: str = "google", background: str = "#FFFFFF") -> str:
+        from rideengine.card.rider_card import rider_card
+        c = self.collection(user_id)
+        r = c["rider"]
+        return rider_card(r, r["avatar"], name=r["name"], badges_earned=r["badges_earned"],
+                          badges_total=r["badges_total"], fonts=fonts, background=background)
+
     def card_html(self, user_id: int, ride_id: str, name: Optional[str] = None, headline: Optional[str] = None,
                   places: Optional[list] = None, fonts: str = "google", background: str = "#FFFFFF",
                   privacy: bool = True) -> Optional[str]:
@@ -338,8 +391,10 @@ class Backend:
         if headline is None:
             headline = records.headline(self.notes(user_id, ride_id))
         home = repeats.home_point([f for f in feats if f["ride_id"] in visible]) if privacy else None
+        from rideengine.analysis.collection import is_holo
         return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,
-                         hide_near=[home] if home else None, background=background)
+                         hide_near=[home] if home else None, background=background,
+                         avatar=self.me(user_id)["avatar"], holo=is_holo(self.notes(user_id, ride_id)))
 
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:

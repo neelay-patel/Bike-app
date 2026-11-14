@@ -18,6 +18,8 @@ enum Theme {
     static let cobalt = Color(hex: 0x1D3A8C)
     static let cobaltSoft = Color(hex: 0xC9D3F2)
     static let heart = Color(hex: 0x7C1E3E)
+    static let sand = Color(hex: 0xF1E2B6)
+    static let strip = Color(hex: 0x3A3537)
 
     // MARK: Type
     /// Instrument Serif: screen and ride titles only.

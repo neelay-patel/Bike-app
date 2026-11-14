@@ -78,6 +78,7 @@ struct ContentView: View {
         TabView {
             RidesView().tabItem { Label("Rides", systemImage: "bicycle") }
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }
+            BinderView().tabItem { Label("Binder", systemImage: "rectangle.stack.fill") }
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }
