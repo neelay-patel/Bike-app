@@ -208,6 +208,8 @@ struct CollectionSummary: Decodable {
     let binder: [BinderPage]
 
     struct Rider: Decodable {
+        /// Nil until the rider makes one (the card shows a silhouette).
+        let avatar: [String: String]?
         let ratings: [String: Int]
         let overall: Int
         let type: String
@@ -495,6 +497,11 @@ struct APIClient {
         let data = try await send(request("GET", "v1/rides/\(rideId)/card", query: [
             URLQueryItem(name: "fonts", value: "local"), URLQueryItem(name: "background", value: "transparent")]))
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Delete a ride and every recording merged into it; later syncs and uploads won't bring it back.
+    func deleteRide(_ rideId: String) async throws {
+        _ = try await send(request("DELETE", "v1/rides/\(rideId)"))
     }
 
     func trace(_ rideId: String) async throws -> RideTrace {

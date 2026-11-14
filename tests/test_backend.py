@@ -241,3 +241,26 @@ def test_new_token_replaces_the_old(env):
     token = be.new_token(uid)
     assert client.get("/v1/rides").status_code == 401  # the old token no longer works
     assert client.get("/v1/rides", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+
+def test_delete_ride_stays_deleted(env):
+    be, uid, client, garmin = env
+    client.put("/v1/connections/garmin_personal?since=2026-01-01", json={"api_key": API_KEY})
+    up = client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    ride_id = up.json()["ride_id"]
+    assert client.get(f"/v1/rides/{ride_id}").json()["sources"] == ["apple_watch", "garmin"]
+    # Deleting the merged ride removes both recordings (Garmin's and the Watch's).
+    r = client.delete(f"/v1/rides/{ride_id}")
+    assert r.status_code == 200 and r.json()["recordings_deleted"] == 2
+    assert client.get(f"/v1/rides/{ride_id}").status_code == 404
+    assert [d["ride_id"] for d in client.get("/v1/rides").json()] == [str(int(T0 + 86400))]
+    # It stays deleted: a re-sync doesn't download it, a re-upload is accepted but ignored.
+    downloads = len(garmin.downloads)
+    client.post("/v1/connections/garmin_personal/sync?since=2026-01-01")
+    assert len(garmin.downloads) == downloads
+    again = client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert again.status_code == 201 and again.json()["ride_id"] is None
+    assert len(client.get("/v1/rides").json()) == 1
+    assert client.delete("/v1/rides/123").status_code == 404
+    # Insights forget it too.
+    assert client.get("/v1/you").json()["all"]["rides"] == 1

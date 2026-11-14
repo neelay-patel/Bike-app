@@ -4,12 +4,16 @@ Built 14 Nov 2026. Everything comes from the rider's own rides, by rules (`ridee
 Our own drawing style, not a copy of any existing card game's art.
 
 ## Avatar (`rideengine/card/avatar.py`)
-- Drawn in code as SVG from parts: skin (6), face (3), hair (5) and colour (6), beard (5), glasses (4),
-  helmet / cap / none and its colour, jersey and stripe colours (10 each), pattern (band, sash, hoops, plain).
-  Bike is stored but not drawn yet.
-- One drawing everywhere: the builder's live preview (`POST /v1/avatar/preview`), the rider card, and **big and
-  quiet behind every ride card's map** (tints of the map's blue, half opacity, under the km dots and route).
-- Saved on the user (`PUT /v1/me {"name", "avatar"}`); unknown parts fall back to defaults. No avatar, no background.
+- Drawn in code as SVG from parts: skin (6), face (3), hair (5) and colour (6), beard (none, stubble, goatee, short,
+  full) and moustache (none, moustache, handlebar) as two choices so any pair works, glasses (4), helmet / cap / none
+  and its colour, jersey and stripe colours (10 each), pattern (band, sash, hoops, plain). Bike is stored, not drawn yet.
+  Specs saved before beard and moustache were split keep their look (`clean()`).
+- **Until a rider makes one**: the rider card shows a plain silhouette (never a default face), ride cards have no
+  background figure, and the Binder shows "Make your avatar". The first Binder visit opens **four quick questions**
+  (skin, hair, beard or moustache, helmet or cap) and the name; "More options" opens the full builder.
+- One drawing everywhere: the builder's live preview (`POST /v1/avatar/preview`, swapped in place, no reload), the rider
+  card, and **big and quiet behind every ride card's map** (tints of the map's blue, half opacity, under dots and route).
+- Saved on the user (`PUT /v1/me {"name", "avatar"}`; `{"avatar": null}` removes it); unknown parts fall back to defaults.
 
 ## Rider card (`rideengine/card/rider_card.py`, `GET /v1/rider/card`)
 - Ratings out of 99 from the **last 12 months**: Distance (top 3 rides, log scale 20 to 200 km), Climbing

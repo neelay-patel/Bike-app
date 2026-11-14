@@ -4,6 +4,7 @@ import SwiftUI
 struct RidesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
+    @State private var deleting: RideSummary?
     @AppStorage("rides.showHidden") private var showHidden = false
 
     private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
@@ -36,6 +37,9 @@ struct RidesView: View {
                         ForEach(shown) { ride in
                             NavigationLink { RideDetailView(ride: ride) } label: { RideRow(ride: ride) }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Delete ride", systemImage: "trash", role: .destructive) { deleting = ride }
+                                }
                         }
                     }
                     if hiddenCount > 0 {
@@ -56,6 +60,16 @@ struct RidesView: View {
             .refreshable {
                 await health.syncNew()
                 await model.refresh()
+            }
+            .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },
+                                                                          set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible, presenting: deleting) { ride in
+                Button("Delete ride", role: .destructive) {
+                    Task { await model.run { try await APIClient().deleteRide(ride.rideId) } }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { ride in
+                Text(DeleteRide.message(ride))
             }
         }
     }
@@ -158,6 +172,9 @@ struct RideDetailView: View {
     @StateObject private var card = CardRenderer()
     @State private var confirmShare = false
     @State private var shareImage: UIImage?
+    @State private var confirmDelete = false
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
@@ -204,6 +221,13 @@ struct RideDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Delete ride", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if shareCleared { Task { await share() } } else { confirmShare = true }
                 } label: {
@@ -211,6 +235,17 @@ struct RideDetailView: View {
                 }
                 .disabled(!card.isLoaded)
             }
+        }
+        .confirmationDialog("Delete this ride?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete ride", role: .destructive) {
+                Task {
+                    await model.run { try await APIClient().deleteRide(ride.rideId) }
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(DeleteRide.message(ride))
         }
         .confirmationDialog("Share this card?", isPresented: $confirmShare, titleVisibility: .visible) {
             Button("Share anyway") { Task { await share() } }
@@ -497,5 +532,17 @@ enum Format {
             let list = bySource[name]!.joined(separator: ", ")
             return list.prefix(1).uppercased() + list.dropFirst() + " · " + name
         }
+    }
+}
+
+
+enum DeleteRide {
+    /// What deleting means, in the confirmation.
+    static func message(_ ride: RideSummary) -> String {
+        let day = ride.date.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        let km = Format.number(ride.summary.km, decimals: 1)
+        let from = Format.sourceList(ride.sources)
+        return "\(day), \(km) km. Its recordings (\(from)) are deleted from the server and won't come back on the next "
+            + "sync. They stay in \(from) itself. This can't be undone."
     }
 }

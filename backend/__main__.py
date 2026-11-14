@@ -55,6 +55,9 @@ def main(argv=None) -> int:
     tzp = sub.add_parser("set-tz", help="the rider's time zone, e.g. America/Toronto")
     tzp.add_argument("--user", type=int, required=True)
     tzp.add_argument("tz")
+    dl = sub.add_parser("delete-ride", help="delete a ride and its recordings (stays deleted)")
+    dl.add_argument("--user", type=int, required=True)
+    dl.add_argument("ride_id")
     rb = sub.add_parser("rebuild")
     rb.add_argument("--user", type=int, required=True)
     cd = sub.add_parser("card")
@@ -134,6 +137,9 @@ def main(argv=None) -> int:
         elif a.cmd == "set-tz":
             be.insights.set_tz(a.user, a.tz)
             print(f"time zone {a.tz}")
+        elif a.cmd == "delete-ride":
+            n = be.delete_ride(a.user, a.ride_id)
+            print(f"no ride {a.ride_id}" if n is None else f"ride {a.ride_id} deleted ({n} recordings)")
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":

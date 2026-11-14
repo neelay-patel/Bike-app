@@ -32,7 +32,13 @@ def weekly(n, start="2026-03-02", **kw):
 # --- avatar ----------------------------------------------------------------------------------
 def test_avatar_clean_and_draw():
     assert clean(None) == DEFAULT
-    assert clean({"hair": "mohawk", "beard": "full", "extra": 1}) == {**DEFAULT, "beard": "full"}
+    assert clean({"hair": "mohawk", "beard": "goatee", "extra": 1}) == {**DEFAULT, "beard": "goatee"}
+    # Beard and moustache combine freely.
+    assert clean({"beard": "stubble", "moustache": "handlebar"})["moustache"] == "handlebar"
+    assert clean({"beard": "full", "moustache": "none"})["moustache"] == "none"
+    # Avatars saved before they were separate look the same.
+    assert clean({"beard": "moustache"}) == {**DEFAULT, "beard": "none", "moustache": "moustache"}
+    assert clean({"beard": "full"})["moustache"] == "moustache"
     for k, opts in OPTIONS.items():
         for v in opts:  # every choice draws
             svg = avatar_svg({k: v})
@@ -93,6 +99,13 @@ def test_ride_card_with_avatar_and_holo():
     assert "holo" not in plain and "kit-card" not in plain
     assert "class=\"holo\"" in fancy and "★ PB · NO. 3" in fancy and "kit-card" in fancy
     assert "prefers-reduced-motion" in fancy
+
+
+def test_silhouette_until_an_avatar_is_made():
+    r = collection.ratings(entries(weekly(10, km=50)), date(2026, 5, 20))
+    html = rider_card(r, None, name="Rider")
+    assert "No avatar yet" in html and "kit-rider" not in html
+    assert "kit-rider" in rider_card(r, {"beard": "full"})
 
 
 def test_rider_card():

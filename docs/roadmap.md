@@ -66,7 +66,12 @@ Our own drawing style, not a copy of any existing card game's art.
 - [ ] Badge artwork (now icons); share the rider card; binder page-turn animation.
 - [ ] **Later, social**: trumps with friends' rider cards. Waits on the providers' sharing terms.
 
-## Bucket 3: training and coaching
+## Housekeeping
+- [x] **Delete a ride** (14 Nov 2026): long-press in Rides, or ⋯ on the ride screen. Every recording merged into it
+  and its original file go; it's remembered as deleted (`deleted_recordings`) so a Garmin sync or Health upload doesn't
+  bring it back. `DELETE /v1/rides/{id}`, `python -m backend delete-ride --user N <id>`. No undo yet.
+
+## Bucket 3: training and coaching (next, from 14 Nov 2026)
 - [ ] **Goals**: a distance (a first 150 km day), a date (a gran fondo), a climb time to beat.
 - [ ] **Plans that adapt** to what was ridden and how tired the rider is. Needs heart rate (Apple Health
   on the real phone) and power (KICKR).

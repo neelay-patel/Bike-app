@@ -20,7 +20,8 @@ OPTIONS = {
     "face": ["oval", "round", "long"],
     "hair": ["short", "buzz", "curly", "long", "none"],
     "hair_color": list(HAIR_COLOR),
-    "beard": ["none", "stubble", "short", "full", "moustache"],
+    "beard": ["none", "stubble", "goatee", "short", "full"],
+    "moustache": ["none", "moustache", "handlebar"],
     "glasses": ["none", "round", "square", "shades"],
     "headwear": ["helmet", "cap", "none"],
     "helmet_color": list(KIT),
@@ -29,14 +30,21 @@ OPTIONS = {
     "pattern": ["band", "sash", "hoops", "plain"],
     "bike": ["road", "gravel", "mtb", "indoor"],
 }
-DEFAULT = {"skin": "s3", "face": "oval", "hair": "short", "hair_color": "brown", "beard": "none",
+DEFAULT = {"skin": "s3", "face": "oval", "hair": "short", "hair_color": "brown", "beard": "none", "moustache": "none",
            "glasses": "none", "headwear": "helmet", "helmet_color": "white", "jersey": "cobalt",
            "accent": "sand", "pattern": "band", "bike": "road"}
 
 
 def clean(spec: dict | None) -> dict:
-    """A complete, valid spec: unknown keys dropped, unknown values replaced by the default."""
-    spec = spec or {}
+    """A complete, valid spec: unknown keys dropped, unknown values replaced by the default.
+    Specs saved before beard and moustache were separate (beard "moustache", or a short or full beard
+    that always came with one) keep looking the same."""
+    spec = dict(spec or {})
+    if "moustache" not in spec:
+        if spec.get("beard") == "moustache":
+            spec["beard"], spec["moustache"] = "none", "moustache"
+        elif spec.get("beard") in ("short", "full"):
+            spec["moustache"] = "moustache"
     return {k: spec[k] if isinstance(spec.get(k), str) and spec[k] in OPTIONS[k] else DEFAULT[k] for k in OPTIONS}
 
 
@@ -99,9 +107,12 @@ def avatar_svg(spec: dict | None = None, size: int = 200, mono: str | None = Non
     # Hair on top (under any headwear).
     if s["hair"] in ("short", "curly", "long") or (s["hair"] == "buzz" and s["headwear"] == "none"):
         if s["hair"] == "curly":
+            covered = s["headwear"] != "none"  # under a cap or helmet only the curls at the sides show
             for i in range(9):
+                if covered and 1 < i < 7:
+                    continue
                 x = cx - rx + 4 + i * (2 * rx - 8) / 8
-                y = top + 12 - (12 if 2 <= i <= 6 else 2)
+                y = top + 12 - (12 if 2 <= i <= 6 else 2) + (14 if covered else 0)
                 add(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="11" fill="{hair}"/>')
         else:
             thick = 8 if s["hair"] == "buzz" else 16
@@ -109,16 +120,24 @@ def avatar_svg(spec: dict | None = None, size: int = 200, mono: str | None = Non
                 f'Q{cx + rx - 6} {top + thick} {cx + 10} {top + thick - 2} Q{cx - 18} {top + thick + 4} {cx - rx} {cy - 8} Z" '
                 f'fill="{hair}"/>')
 
-    # Beard.
+    # Beard and moustache: two separate choices, so any combination works (stubble + moustache...).
     jaw = f"M{cx - rx + 4} {cy + 2} Q{cx - rx + 6} {cy + ry} {cx} {cy + ry + 2} Q{cx + rx - 6} {cy + ry} {cx + rx - 4} {cy + 2}"
     if s["beard"] == "stubble":
         add(f'<path d="{jaw} Q{cx} {cy + 26} {cx - rx + 4} {cy + 2} Z" fill="{hair}" opacity="0.28"/>')
     elif s["beard"] in ("short", "full"):
         inner = cy + 20 if s["beard"] == "short" else cy + 16
         add(f'<path d="{jaw} Q{cx + 14} {inner} {cx} {inner + 6} Q{cx - 14} {inner} {cx - rx + 4} {cy + 2} Z" fill="{hair}"/>')
-    if s["beard"] in ("moustache", "short", "full"):
+    elif s["beard"] == "goatee":
+        add(f'<path d="M{cx - 12} {cy + 32} Q{cx} {cy + 30} {cx + 12} {cy + 32} Q{cx + 12} {cy + ry - 2} {cx} {cy + ry + 3} '
+            f'Q{cx - 12} {cy + ry - 2} {cx - 12} {cy + 32} Z" fill="{hair}"/>')
+    if s["moustache"] == "moustache":
         add(f'<path d="M{cx - 14} {cy + 22} Q{cx} {cy + 14} {cx + 14} {cy + 22} Q{cx} {cy + 19} {cx - 14} {cy + 22} Z" '
             f'fill="{hair}" stroke="{hair}" stroke-width="3" stroke-linejoin="round"/>')
+    elif s["moustache"] == "handlebar":
+        add(f'<path d="M{cx} {cy + 17} Q{cx + 12} {cy + 15} {cx + 17} {cy + 22} Q{cx + 22} {cy + 26} {cx + 24} {cy + 18} '
+            f'Q{cx + 22} {cy + 30} {cx + 13} {cy + 25} Q{cx + 6} {cy + 22} {cx} {cy + 23} '
+            f'Q{cx - 6} {cy + 22} {cx - 13} {cy + 25} Q{cx - 22} {cy + 30} {cx - 24} {cy + 18} '
+            f'Q{cx - 22} {cy + 26} {cx - 17} {cy + 22} Q{cx - 12} {cy + 15} {cx} {cy + 17} Z" fill="{hair}"/>')
 
     # Face: brows, eyes, nose, smile.
     ey = cy - 2
@@ -128,7 +147,7 @@ def avatar_svg(spec: dict | None = None, size: int = 200, mono: str | None = Non
         add(f'<ellipse cx="{cx + dx}" cy="{ey}" rx="3.6" ry="4.4" fill="{ink}"/>')
     add(f'<path d="M{cx + 1} {ey + 6} Q{cx + 5} {ey + 16} {cx - 2} {ey + 17}" fill="none" stroke="{skin_dark}" '
         f'stroke-width="2.5" stroke-linecap="round"/>')
-    mouth = ink if s["beard"] not in ("short", "full") else _shade(hair, 1.7)
+    mouth = ink if s["beard"] not in ("short", "full") and s["moustache"] == "none" else _shade(hair, 1.7)
     add(f'<path d="M{cx - 9} {cy + 28} Q{cx} {cy + 34} {cx + 9} {cy + 28}" fill="none" stroke="{mouth}" '
         f'stroke-width="2.5" stroke-linecap="round"/>')
 
@@ -161,14 +180,36 @@ def avatar_svg(spec: dict | None = None, size: int = 200, mono: str | None = Non
         add(f'<path d="M{cx - rx + 2} {cy - 10} L{cx - rx + 6} {cy + 30}" stroke="{ink}" stroke-width="2.5" opacity="0.8"/>')
         add(f'<path d="M{cx + rx - 2} {cy - 10} L{cx + rx - 6} {cy + 30}" stroke="{ink}" stroke-width="2.5" opacity="0.8"/>')
     elif s["headwear"] == "cap":
-        add(f'<path d="M{cx - rx - 2} {cy - 16} Q{cx - rx} {top - 10} {cx} {top - 12} Q{cx + rx} {top - 10} {cx + rx + 2} {cy - 16} Z" '
-            f'fill="{lid}"/>')
-        add(f'<rect x="{cx - 6}" y="{top - 11}" width="12" height="{cy - 16 - top + 11}" fill="{accent}"/>')
-        add(f'<path d="M{cx - 30} {cy - 16} Q{cx} {cy - 30} {cx + 30} {cy - 16} L{cx + 26} {cy - 24} Q{cx} {cy - 36} '
-            f'{cx - 26} {cy - 24} Z" fill="{_shade(lid, 0.8)}"/>')
+        # A cycling cap: the crown hugs the head, a stripe down the middle, the short peak turned down.
+        edge = cy - 14                      # where the cap meets the forehead (at the sides)
+        crown = (f"M{cx - rx - 3} {edge + 2} C{cx - rx - 3} {top - 4} {cx - rx * 0.55} {top - 14} {cx} {top - 14} "
+                 f"C{cx + rx * 0.55} {top - 14} {cx + rx + 3} {top - 4} {cx + rx + 3} {edge + 2} "
+                 f"Q{cx} {edge - 8} {cx - rx - 3} {edge + 2} Z")
+        add(f'<clipPath id="cap-{uid}"><path d="{crown}"/></clipPath>')
+        add(f'<path d="{crown}" fill="{lid}"/>')
+        add(f'<rect x="{cx - 7}" y="{top - 16}" width="14" height="{edge - top + 18}" fill="{accent}" clip-path="url(#cap-{uid})"/>')
+        add(f'<path d="M{cx - rx - 3} {edge + 2} Q{cx} {edge - 8} {cx + rx + 3} {edge + 2}" fill="none" '
+            f'stroke="{_shade(lid, 0.78)}" stroke-width="3"/>')
+        peak = _shade(lid, 0.82)
+        add(f'<path d="M{cx - 27} {edge - 3} Q{cx} {edge - 9} {cx + 27} {edge - 3} Q{cx + 24} {edge + 9} {cx} {edge + 10} '
+            f'Q{cx - 24} {edge + 9} {cx - 27} {edge - 3} Z" fill="{peak}"/>')
+        add(f'<rect x="{cx - 7}" y="{edge - 7}" width="14" height="16" fill="{_shade(accent, 0.85)}" '
+            f'clip-path="url(#peak-{uid})"/>')
+        add(f'<clipPath id="peak-{uid}"><path d="M{cx - 27} {edge - 3} Q{cx} {edge - 9} {cx + 27} {edge - 3} '
+            f'Q{cx + 24} {edge + 9} {cx} {edge + 10} Q{cx - 24} {edge + 9} {cx - 27} {edge - 3} Z"/></clipPath>')
 
     inner = "".join(parts)
     if not standalone:
         return inner
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="{size}" height="{round(size * 1.2)}" '
             f'role="img" aria-label="{html.escape(title)}">{inner}</svg>')
+
+
+def silhouette_svg(size: int = 200, color: str = "#C9D3F2", title: str = "No avatar yet", uid: str = "s") -> str:
+    """A plain head-and-shoulders shape for riders who haven't made an avatar (never someone else's face)."""
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="{size}" height="{round(size * 1.2)}" '
+            f'role="img" aria-label="{html.escape(title)}">'
+            f'<path d="M18 240 C20 196 52 178 100 176 C148 178 180 196 182 240 Z" fill="{color}"/>'
+            f'<path d="M86 150 L86 182 Q100 190 114 182 L114 150 Z" fill="{_shade(color, 0.9)}"/>'
+            f'<ellipse cx="100" cy="112" rx="40" ry="49" fill="{color}"/></svg>')
+

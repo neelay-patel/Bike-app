@@ -157,6 +157,15 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such climb")
         return {"id": climb_id, "name": body.get("name")}
 
+    @app.delete("/v1/rides/{ride_id}")
+    def delete_ride(ride_id: str, uid: int = Depends(user)):
+        """Delete a ride and every recording merged into it. It stays deleted: a later sync or upload of
+        the same activity is ignored."""
+        n = be.delete_ride(uid, ride_id)
+        if n is None:
+            raise HTTPException(404, "No such ride")
+        return {"ride_id": ride_id, "recordings_deleted": n}
+
     @app.get("/v1/rides/{ride_id}/card", response_class=HTMLResponse)
     def card(ride_id: str, fonts: str = "google", background: str = "#FFFFFF", uid: int = Depends(user)):
         """The ride's collectible card as one HTML page (360x640). fonts=local: the app supplies the

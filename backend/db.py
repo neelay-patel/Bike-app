@@ -45,6 +45,17 @@ CREATE TABLE IF NOT EXISTS rides (
 );
 CREATE INDEX IF NOT EXISTS rides_time ON rides (user_id, start_t, end_t);
 
+-- Recordings the rider deleted (with their ride): kept so a later sync or upload doesn't bring them back.
+CREATE TABLE IF NOT EXISTS deleted_recordings (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    provider      TEXT NOT NULL,
+    external_id   TEXT NOT NULL,
+    start_t       REAL NOT NULL,
+    end_t         REAL NOT NULL,
+    deleted_at    REAL NOT NULL,
+    PRIMARY KEY (user_id, provider, external_id)
+);
+
 -- Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery). Never shared.
 CREATE TABLE IF NOT EXISTS metrics (
     user_id       INTEGER NOT NULL REFERENCES users(id),

@@ -33,9 +33,11 @@ def rider_card(ratings: dict, avatar: dict | None, name: str = "Rider", badges_e
         f'</div>'
         for i, (key, label) in enumerate(LABELS))
     stripes = "".join(f'<div style="height:4px;background:{x}"></div>' for x in c["stripes"])
-    portrait = avatar_svg(avatar, size=250, title=f"{name}'s avatar", uid="rider")
+    from .avatar import silhouette_svg
+    portrait = (avatar_svg(avatar, size=250, title=f"{name}'s avatar", uid="rider") if avatar
+                else silhouette_svg(250, color=c["cobaltSoft"]))
     from .avatar import clean
-    disc = c["cobaltLine"] if clean(avatar)["jersey"] in ("white", "sand", "yellow") else c["ground"]
+    disc = c["cobaltLine"] if not avatar or clean(avatar)["jersey"] in ("white", "sand", "yellow") else c["ground"]
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(name)} · rider card</title>

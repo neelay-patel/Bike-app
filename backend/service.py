@@ -179,9 +179,8 @@ class Backend:
             since = back.isoformat()
 
         def known(external_id: str) -> bool:
-            with self.lock:
-                return self.db.execute("SELECT 1 FROM recordings WHERE user_id = ? AND provider = ? "
-                                       "AND external_id = ?", (user_id, provider, external_id)).fetchone() is not None
+            # Already stored, or deleted by the rider (then it stays deleted).
+            return self.has_recording(user_id, provider, external_id) or self.is_deleted(user_id, provider, external_id)
 
         new, skipped, status, detail = 0, 0, "connected", None
         try:
@@ -208,7 +207,48 @@ class Backend:
         if not hasattr(c, "parse_upload"):
             raise ConnectorError(f"{c.info.name} doesn't take uploads")
         rec = c.parse_upload(payload)
-        return self.ingest(user_id, provider, rec.origin.split(":", 1)[1], "json", payload)
+        external_id = rec.origin.split(":", 1)[1]
+        if self.is_deleted(user_id, provider, external_id):
+            return rec  # the rider deleted this ride: accept the upload (so the phone stops sending it), keep nothing
+        return self.ingest(user_id, provider, external_id, "json", payload)
+
+    # --- deleting a ride ----------------------------------------------------------------------
+    def has_recording(self, user_id: int, provider: str, external_id: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM recordings WHERE user_id = ? AND provider = ? AND external_id = ?",
+                                   (user_id, provider, external_id)).fetchone() is not None
+
+    def is_deleted(self, user_id: int, provider: str, external_id: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM deleted_recordings WHERE user_id = ? AND provider = ? "
+                                   "AND external_id = ?", (user_id, provider, external_id)).fetchone() is not None
+
+    def delete_ride(self, user_id: int, ride_id: str) -> Optional[int]:
+        """Delete a ride: every recording merged into it (and its original file) goes, and is remembered
+        as deleted so a later sync or upload doesn't bring it back. Returns recordings removed, or None
+        if there's no such ride."""
+        ride = self.ride(user_id, ride_id)
+        if ride is None:
+            return None
+        origins = set(ride.recordings)
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT provider, external_id, start_t, end_t, raw_path, data FROM recordings WHERE user_id = ? "
+                "AND end_t >= ? AND start_t <= ?", (user_id, ride.start - 60, ride.end + 60)).fetchall()
+            gone = [r for r in rows if json.loads(r["data"]).get("origin") in origins]
+            for r in gone:
+                self.db.execute("DELETE FROM recordings WHERE user_id = ? AND provider = ? AND external_id = ?",
+                                (user_id, r["provider"], r["external_id"]))
+                self.db.execute("INSERT OR REPLACE INTO deleted_recordings (user_id, provider, external_id, start_t, "
+                                "end_t, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                (user_id, r["provider"], r["external_id"], r["start_t"], r["end_t"], db.now()))
+                if r["raw_path"] and os.path.exists(r["raw_path"]):
+                    os.remove(r["raw_path"])
+            lo = min([ride.start] + [r["start_t"] for r in gone])
+            hi = max([ride.end] + [r["end_t"] for r in gone])
+            self.remerge(user_id, lo, hi)
+        self.insights.schedule(user_id)
+        return len(gone)
 
     # --- ingest and merge ----------------------------------------------------------------------
     def ingest(self, user_id: int, provider: str, external_id: str, kind: str, content: bytes) -> Recording:
