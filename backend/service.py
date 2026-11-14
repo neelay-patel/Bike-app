@@ -63,6 +63,15 @@ class Backend:
                                   (db.now(), _hash(token)))
         return cur.lastrowid, token
 
+    def new_token(self, user_id: int) -> str:
+        """A fresh login token for an existing user (e.g. a new phone); the old one stops working."""
+        token = secrets.token_urlsafe(32)
+        with self.lock:
+            cur = self.db.execute("UPDATE users SET token_hash = ? WHERE id = ?", (_hash(token), user_id))
+        if not cur.rowcount:
+            raise ValueError(f"no user {user_id}")
+        return token
+
     def user_for_token(self, token: str) -> Optional[int]:
         with self.lock:
             row = self.db.execute("SELECT id FROM users WHERE token_hash = ?", (_hash(token),)).fetchone()

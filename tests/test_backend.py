@@ -234,3 +234,10 @@ def test_you_and_ride_notes(env):
     rides = client.get("/v1/rides").json()
     assert all(isinstance(r["notes"], list) for r in rides)
     assert client.get(f"/v1/rides/{int(T0)}").json()["notes"] == []  # too few rides to compare yet
+
+
+def test_new_token_replaces_the_old(env):
+    be, uid, client, _ = env
+    token = be.new_token(uid)
+    assert client.get("/v1/rides").status_code == 401  # the old token no longer works
+    assert client.get("/v1/rides", headers={"Authorization": f"Bearer {token}"}).status_code == 200

@@ -84,8 +84,9 @@ python -m backend serve                             # API docs at http://127.0.0
 
 ## Next steps (order in docs/connectors.md)
 1. Try the Garmin personal-key connector on Neelay's account; compare with the verified numbers.
-2. iPhone app: run it on Neelay's iPhone (iOS 27; needs the latest Xcode), connect Apple Health,
-   check Durham Forest merges. Then Sign in with Apple (paid developer account) in place of the dev token.
+2. ~~iPhone app on Neelay's iPhone, Apple Health connected~~ (done 14 Nov 2026: 185 Watch rides merged, Durham Forest
+   and Scugog match the verified numbers, the Watch records heart rate after every ride, 2 years of HRV/resting HR/
+   VO2 max in). Next: Sign in with Apple (paid developer account) in place of the dev token.
 3. Garmin Starter tier (OAuth + push webhook) so other riders can connect; host the backend.
 4. Wahoo (KICKR power), then Whoop, Oura, Google Health; Hammerhead once access is agreed.
 5. Read each provider's terms in full and fill in `SOURCE_POLICY`.

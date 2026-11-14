@@ -1,6 +1,7 @@
 """Backend command line (dev).
 
   python -m backend create-user                       # prints a user id and a bearer token
+  python -m backend new-token --user 1                # a fresh token for an existing user (new phone)
   python -m backend connect-garmin --user 1 --since 2026-10-01
                                                       # asks for your Garmin personal API key, pulls rides
   python -m backend sync --user 1 --provider garmin_personal
@@ -32,6 +33,8 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="backend")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("create-user")
+    nt = sub.add_parser("new-token", help="a fresh login token for an existing user (the old one stops working)")
+    nt.add_argument("--user", type=int, required=True)
     g = sub.add_parser("connect-garmin")
     g.add_argument("--user", type=int, required=True)
     g.add_argument("--since", help="YYYY-MM-DD; default: last 90 days")
@@ -75,6 +78,13 @@ def main(argv=None) -> int:
 
     be = Backend(Settings.from_env())
     try:
+        if a.cmd == "new-token":
+            token = be.new_token(a.user)
+            host = socket.gethostname()
+            host = host if host.endswith(".local") else host + ".local"
+            print(f"user {a.user}\ntoken {token}\n(keep the token private; the old one no longer works)\n"
+                  f"iPhone app settings: server http://{host}:8000 and this token.")
+            return 0
         if a.cmd == "create-user":
             uid, token = be.create_user()
             host = socket.gethostname()

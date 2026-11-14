@@ -332,6 +332,7 @@ struct AvatarBuilder: View {
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     TextField("Your name on the rider card", text: $name)
                         .textFieldStyle(.roundedBorder).font(Theme.text(16))
+                        .submitLabel(.done)
                     if let options {
                         ForEach(order, id: \.key) { item in
                             if let choices = options.options[item.key] {
@@ -352,6 +353,7 @@ struct AvatarBuilder: View {
                 }
                 .padding(16)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.ground.ignoresSafeArea())
             .navigationTitle("Your avatar")
             .navigationBarTitleDisplayMode(.inline)
