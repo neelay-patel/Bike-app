@@ -45,10 +45,14 @@ struct AppleHealthCard: View {
                 Spacer()
                 StateBadge(state: health.isConnected ? "connected" : "not_connected")
             }
-            Text("Cycling workouts, their routes, and the heart rate, calories and distance recorded during them.")
+            Text("Cycling workouts, their routes, and the heart rate, calories and distance recorded during them. For recovery: heart rate for 3 minutes after each ride, VO2 max, HRV, resting heart rate and Cardio Recovery. Recovery data is only ever shown to you.")
                 .font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
+            if health.isConnected && health.needsPermission {
+                Button("Allow recovery data") { Task { await health.allowRecoveryData(); await model.refresh() } }
+                    .buttonStyle(PrimaryButton())
+            }
             if !health.isConnected {
-                Text("On the Health screen, turn on all five and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Ride.")
+                Text("On the Health screen, turn on every item and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Ride.")
                     .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
             }
             DatePicker("Import rides since", selection: $since, displayedComponents: .date)

@@ -15,6 +15,23 @@ struct RecordingPayload: Codable {
     var origin: String          // "healthkit:<workout uuid>"
     var totals: [String: Double]
     var samples: [SamplePayload]
+    /// Heart rate in the minutes after the workout ended, for recovery.
+    var after: [SamplePayload]?
+}
+
+/// A batch of recovery and fitness readings (rideengine.metrics/1).
+struct MetricsBatch: Codable {
+    var format = "rideengine.metrics/1"
+    var metrics: [MetricPayload]
+}
+
+/// One VO2 max, HRV, resting heart rate or Cardio Recovery reading.
+struct MetricPayload: Codable {
+    var id: String          // HealthKit sample uuid
+    var kind: String        // vo2max | hrv_sdnn | resting_hr | hr_recovery_1min
+    var t: Double
+    var value: Double
+    var source: String
 }
 
 /// A route point or a heart-rate reading. Nil fields are left out of the JSON.

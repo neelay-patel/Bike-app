@@ -29,6 +29,7 @@ final class AppModel: ObservableObject {
     @Published var connections: [Connection] = []
     @Published var rides: [RideSummary] = []
     @Published var you: YouSummary?
+    @Published var recovery: RecoverySummary?
     @Published var error: String?
     @Published var isLoading = false
 
@@ -49,8 +50,10 @@ final class AppModel: ObservableObject {
             async let c = api.connections()
             async let r = api.rides()
             async let y = try? api.you()  // an older server has no /v1/you: the rest still loads
+            async let rc = try? api.recovery()
             (connections, rides) = try await (c, r)
             you = await y
+            recovery = await rc
             error = nil
         } catch {
             self.error = error.localizedDescription

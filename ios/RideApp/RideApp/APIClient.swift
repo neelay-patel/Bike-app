@@ -100,6 +100,8 @@ struct RideSummary: Decodable, Identifiable {
         let maxHr: Double?
         let avgPower: Double?
         let calories: Double?
+        /// Heart rate fallen in the minute after the ride (recovery), when the watch kept measuring.
+        let hrDrop60S: Double?
         let indoor: Bool
     }
 
@@ -176,6 +178,56 @@ struct YouSummary: Decodable {
 }
 
 enum RepeatKind { case route, climb }
+
+/// GET /v1/recovery: HRV and resting heart rate against the rider's usual range, VO2 max, and
+/// heart-rate recovery after rides. For the rider only.
+struct RecoverySummary: Decodable {
+    let disclaimer: String
+    let readiness: Readiness
+    let hrvSdnn: Trend
+    let restingHr: Trend
+    let vo2max: Trend
+    let hrRecovery1Min: Trend
+    let rideRecovery: RideRecovery
+
+    struct Readiness: Decodable {
+        let status: String      // good | watch | strained | unknown
+        let text: String
+    }
+
+    struct Trend: Decodable {
+        let label: String
+        let unit: String
+        let higherIsBetter: Bool
+        let latest: Double?
+        let latestDate: String?
+        let recent: Double?
+        let usual: Double?
+        let low: Double?
+        let high: Double?
+        let status: String      // usual | better | worse | unknown
+        let series: [Point]
+        let change90D: Double?
+        let note: String?
+
+        struct Point: Decodable { let date: String; let value: Double }
+    }
+
+    struct RideRecovery: Decodable {
+        let count: Int
+        let latest: Ride?
+        let best: Ride?
+        let series: [Point]
+        let trend: String?
+
+        struct Ride: Decodable { let rideId: String; let start: Double; let hrDrop60S: Double }
+        struct Point: Decodable { let rideId: String; let start: Double; let value: Double }
+    }
+
+    var hasAnything: Bool {
+        [hrvSdnn, restingHr, vo2max].contains { $0.latest != nil } || rideRecovery.count > 0
+    }
+}
 
 /// A route ridden again and again (the home loop first, if there is one). Laps oldest first.
 struct RouteRepeat: Decodable, Identifiable {
@@ -296,6 +348,16 @@ struct APIClient {
     }
 
     func you() async throws -> YouSummary { try await get("v1/you") }
+
+    func recovery() async throws -> RecoverySummary { try await get("v1/recovery") }
+
+    struct MetricsResult: Decodable { let received: Int; let new: Int }
+
+    func uploadMetrics(_ batch: MetricsBatch) async throws -> MetricsResult {
+        let body = try JSONEncoder().encode(batch)
+        return try Self.decoder.decode(MetricsResult.self,
+                                       from: await send(request("POST", "v1/metrics/apple_health", body: body)))
+    }
 
     /// Dates, years and streaks are worked out in the rider's own time zone.
     func setTimeZone(_ identifier: String) async throws {

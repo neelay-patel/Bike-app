@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -112,8 +113,46 @@ class Backend:
                     os.remove(r["raw_path"])
             for r in rows:
                 self.remerge(user_id, r["start_t"], r["end_t"])
+            self.db.execute("DELETE FROM metrics WHERE user_id = ? AND provider = ?", (user_id, provider))
+            metrics_dir = os.path.join(self.settings.raw_dir, str(user_id), provider, "metrics")
+            if os.path.isdir(metrics_dir):
+                shutil.rmtree(metrics_dir)
         self.insights.schedule(user_id)
         return len(rows)
+
+    # --- recovery and fitness readings ------------------------------------------------------------
+    def upload_metrics(self, user_id: int, provider: str, payload: bytes) -> dict:
+        """Keep the batch as received, then store each reading once (by the provider's id)."""
+        c = self.connector(provider)
+        if not hasattr(c, "parse_metrics"):
+            raise ConnectorError(f"{c.info.name} doesn't send recovery data")
+        metrics = c.parse_metrics(payload)
+        folder = os.path.join(self.settings.raw_dir, str(user_id), provider, "metrics")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, hashlib.sha256(payload).hexdigest()[:24] + ".json"), "wb") as fh:
+            fh.write(payload)
+        with self.lock:
+            before = self.db.execute("SELECT COUNT(*) FROM metrics WHERE user_id = ?", (user_id,)).fetchone()[0]
+            for m in metrics:
+                self.db.execute(
+                    "INSERT OR REPLACE INTO metrics (user_id, provider, external_id, kind, t, value, source, received_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, provider, m["id"], m["kind"], m["t"], m["value"], m["source"], db.now()))
+            after = self.db.execute("SELECT COUNT(*) FROM metrics WHERE user_id = ?", (user_id,)).fetchone()[0]
+        return {"received": len(metrics), "new": after - before}
+
+    def recovery(self, user_id: int) -> dict:
+        """HRV, resting heart rate, VO2 max and heart-rate recovery after rides, against the rider's
+        own usual range (rideengine.analysis.wellness). For the rider only: never shared."""
+        from rideengine.analysis import wellness
+        with self.lock:
+            metrics = [dict(r) for r in self.db.execute(
+                "SELECT kind, t, value, source FROM metrics WHERE user_id = ? ORDER BY t", (user_id,))]
+            rides = [json.loads(r["data"]) for r in self.db.execute(
+                "SELECT data FROM ride_features WHERE user_id = ? ORDER BY start_t", (user_id,))]
+        tz = self.insights.tz(user_id)
+        return wellness.summary(metrics, [{"ride_id": f["ride_id"], "start": f["start"],
+                                           "hr_drop_60s": f.get("hr_drop_60s")} for f in rides], tz=tz)
 
     # --- sync (pull connectors) ----------------------------------------------------------------
     def sync(self, user_id: int, provider: str, since: Optional[str] = None) -> dict:

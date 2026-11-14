@@ -4,8 +4,9 @@ import HealthKit
 
 /// Reads cycling workouts from Apple Health and turns each into a `RecordingPayload`.
 ///
-/// Scope (agreed with Neelay): cycling workouts, their routes, and the heart rate, active energy
-/// and cycling distance recorded during them. Nothing else is requested or read.
+/// Scope (agreed with Neelay; CLAUDE.md): cycling workouts, their routes, and the heart rate, active
+/// energy and cycling distance recorded during them; heart rate in the 3 minutes after each ride
+/// (recovery); and VO2 max, HRV, resting heart rate and Cardio Recovery. Nothing else is requested or read.
 final class HealthKitReader {
     let store = HKHealthStore()
 
@@ -13,8 +14,19 @@ final class HealthKitReader {
     static let activeEnergy = HKQuantityType(.activeEnergyBurned)
     static let cyclingDistance = HKQuantityType(.distanceCycling)
 
+    /// Recovery and fitness readings: (HealthKit type, rideengine kind, unit).
+    static let metricTypes: [(type: HKQuantityType, kind: String, unit: HKUnit)] = [
+        (HKQuantityType(.vo2Max), "vo2max", HKUnit(from: "ml/kg*min")),
+        (HKQuantityType(.heartRateVariabilitySDNN), "hrv_sdnn", .secondUnit(with: .milli)),
+        (HKQuantityType(.restingHeartRate), "resting_hr", HKUnit.count().unitDivided(by: .minute())),
+        (HKQuantityType(.heartRateRecoveryOneMinute), "hr_recovery_1min", HKUnit.count().unitDivided(by: .minute())),
+    ]
+
+    static let afterRideSeconds: TimeInterval = 180
+
     static var readTypes: Set<HKObjectType> {
-        [HKObjectType.workoutType(), HKSeriesType.workoutRoute(), heartRate, activeEnergy, cyclingDistance]
+        Set([HKObjectType.workoutType(), HKSeriesType.workoutRoute(), heartRate, activeEnergy, cyclingDistance]
+            + metricTypes.map { $0.type as HKObjectType })
     }
 
     static let cyclingPredicate = HKQuery.predicateForWorkouts(with: .cycling)
@@ -23,6 +35,12 @@ final class HealthKitReader {
 
     func requestAuthorization() async throws {
         try await store.requestAuthorization(toShare: [], read: Self.readTypes)
+    }
+
+    /// True when there are types the rider hasn't been asked about yet (e.g. the recovery types,
+    /// added after they first connected).
+    func needsToAsk() async -> Bool {
+        (try? await store.statusForAuthorizationRequest(toShare: [], read: Self.readTypes)) == .shouldRequest
     }
 
     // MARK: Finding workouts
@@ -51,7 +69,10 @@ final class HealthKitReader {
     /// The rideengine source key for whoever wrote the workout, or nil for sources we don't take
     /// (e.g. Strava, whose data we never use).
     static func sourceKey(for workout: HKWorkout) -> String? {
-        let revision = workout.sourceRevision
+        sourceKey(for: workout.sourceRevision)
+    }
+
+    static func sourceKey(for revision: HKSourceRevision) -> String? {
         let product = revision.productType ?? ""
         let bundle = revision.source.bundleIdentifier.lowercased()
         if bundle.contains("strava") { return nil }
@@ -71,6 +92,8 @@ final class HealthKitReader {
         var samples = try await routeSamples(for: workout)
         samples += try await heartRateSamples(for: workout)
         samples.sort { $0.t < $1.t }
+        let after = try await heartRateSamples(for: workout, from: workout.endDate,
+                                               to: workout.endDate.addingTimeInterval(Self.afterRideSeconds))
 
         let product = workout.sourceRevision.productType
         let device = source == "apple_watch" ? "Apple Watch" + (product.map { " (\($0))" } ?? "")
@@ -80,7 +103,7 @@ final class HealthKitReader {
             start: workout.startDate.timeIntervalSince1970, end: workout.endDate.timeIntervalSince1970,
             indoor: (workout.metadata?[HKMetadataKeyIndoorWorkout] as? NSNumber)?.boolValue ?? false,
             origin: "healthkit:\(workout.uuid.uuidString)",
-            totals: Self.totals(for: workout), samples: samples)
+            totals: Self.totals(for: workout), samples: samples, after: after.isEmpty ? nil : after)
     }
 
     static func totals(for workout: HKWorkout) -> [String: Double] {
@@ -120,9 +143,10 @@ final class HealthKitReader {
         return out
     }
 
-    /// Every heart-rate reading the workout's own device took during the workout.
-    func heartRateSamples(for workout: HKWorkout) async throws -> [SamplePayload] {
-        let during = HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate,
+    /// Every heart-rate reading the workout's own device took during the workout (or, with
+    /// `from`/`to`, in that window: the minutes after the ride, for recovery).
+    func heartRateSamples(for workout: HKWorkout, from: Date? = nil, to: Date? = nil) async throws -> [SamplePayload] {
+        let during = HKQuery.predicateForSamples(withStart: from ?? workout.startDate, end: to ?? workout.endDate,
                                                  options: .strictStartDate)
         let sameDevice = HKQuery.predicateForObjects(from: workout.sourceRevision.source)
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [during, sameDevice])
@@ -135,5 +159,23 @@ final class HealthKitReader {
                                      hr: result.quantity.doubleValue(for: bpm)))
         }
         return out
+    }
+
+    // MARK: Recovery and fitness readings
+
+    /// Readings of one kind that Health added since `anchor` (nil: everything since `since`), and
+    /// the anchor to use next time. Readings from sources we don't take (e.g. Strava) are left out.
+    func newMetrics(_ metric: (type: HKQuantityType, kind: String, unit: HKUnit), after anchor: HKQueryAnchor?,
+                    since: Date) async throws -> ([MetricPayload], HKQueryAnchor) {
+        let window = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
+        let query = HKAnchoredObjectQueryDescriptor(predicates: [.quantitySample(type: metric.type, predicate: window)],
+                                                    anchor: anchor)
+        let result = try await query.result(for: store)
+        let out = result.addedSamples.compactMap { s -> MetricPayload? in
+            guard let source = Self.sourceKey(for: s.sourceRevision) else { return nil }
+            return MetricPayload(id: s.uuid.uuidString, kind: metric.kind, t: s.startDate.timeIntervalSince1970,
+                                 value: s.quantity.doubleValue(for: metric.unit), source: source)
+        }
+        return (out, result.newAnchor)
     }
 }

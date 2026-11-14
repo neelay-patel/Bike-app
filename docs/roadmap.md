@@ -43,6 +43,8 @@ App: the **You** tab, and each ride's notes on its detail screen.
 - [ ] **Towns collected**: every town a route passes, counted over a year and all time.
 - [ ] **Faster, explained**: efficiency (metres per heartbeat) and heart-rate drift; needs heart rate,
   so it waits on Apple Health on the real phone.
+- [x] **Recovery** (14 Nov 2026, `docs/recovery.md`): heart-rate recovery after rides, HRV and resting heart rate
+  against the rider's usual range, VO2 max trend, from Apple Health. Needs checking on the real phone.
 - [ ] **Fitness, fatigue, form** over time (heart rate now, power once the KICKR is in).
 - [ ] **Power bests** (5 s, 1 min, 5 min, 20 min) once the KICKR is in.
 

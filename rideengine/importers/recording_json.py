@@ -12,6 +12,8 @@ the same JSON as an upload. It is `dataclasses.asdict(Recording)` plus a format 
 
 Times are unix seconds (UTC). Heart rate may come as its own samples between route points, the
 same way the Apple Health export importer does it; the merge step aligns it.
+"after": optional heart-rate samples ({"t", "hr"}) from the minutes after the workout ended, for
+recovery (rideengine/analysis/wellness.py).
 Unknown keys are ignored so the phone can add fields before the engine knows about them.
 """
 from __future__ import annotations
@@ -64,14 +66,25 @@ def recording_from_dict(d: dict) -> Recording:
     if not isinstance(totals, dict):
         raise ValueError("'totals' must be an object")
     totals = {k: _num(v, f"totals.{k}") for k, v in totals.items() if v is not None}
+    raw_after = d.get("after") or []
+    if not isinstance(raw_after, list):
+        raw_after = []
+    after = []
+    for i, s in enumerate(raw_after):
+        if isinstance(s, dict) and s.get("t") is not None and s.get("hr") is not None:
+            after.append(Sample(t=_num(s["t"], f"after[{i}].t"), hr=_num(s["hr"], f"after[{i}].hr")))
+    after.sort(key=lambda s: s.t)
     return Recording(source=source, device=str(d.get("device") or source), start=start, end=end,
                      sport=str(d.get("sport") or "cycling"), indoor=bool(d.get("indoor", False)),
-                     samples=samples, totals=totals, origin=str(d.get("origin") or ""))
+                     samples=samples, totals=totals, origin=str(d.get("origin") or ""), after=after)
 
 
 def recording_to_dict(rec: Recording) -> dict:
     d = asdict(rec)
     d["samples"] = [{k: v for k, v in s.items() if v is not None} for s in d["samples"]]
+    d["after"] = [{"t": s["t"], "hr": s["hr"]} for s in d["after"] if s.get("hr") is not None]
+    if not d["after"]:
+        del d["after"]
     return {"format": FORMAT, **d}
 
 

@@ -212,6 +212,7 @@ struct RideDetailView: View {
         var parts: [String] = []
         if ride.summary.avgHr != nil, let v = ride.summary.avgKmh { parts.append("\(Format.number(v, decimals: 1)) km/h average") }
         if let v = ride.summary.avgPower { parts.append("\(Int(v.rounded())) W average") }
+        if let v = ride.summary.hrDrop60S { parts.append("heart rate fell \(Int(v.rounded())) bpm in the minute after") }
         if let v = ride.summary.calories {
             let from = ride.provenance["total:calories"].map(Format.sourceName) ?? ""
             parts.append("\(Format.number(v, decimals: 0)) kcal" + (from.isEmpty ? "" : " (\(from))"))

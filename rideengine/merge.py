@@ -11,6 +11,7 @@ import bisect
 from dataclasses import replace
 
 from . import clean
+from .analysis.wellness import ride_recovery
 from .model import CHANNELS, Recording, Ride, Sample, haversine
 from .sources import ALIGN_TOLERANCE, CHANNEL_PRIORITY, DEFAULT_TOLERANCE, TOTAL_PRIORITY, rank
 
@@ -151,6 +152,16 @@ def merge(group_: list[Recording]) -> Ride:
         totals["avg_power"] = round(sum(pw) / len(pw), 1)
         totals["max_power"] = max(pw)
         provenance["total:avg_power"] = provenance["total:max_power"] = "derived:power"
+
+    # Heart-rate recovery after the ride, from the wearable that kept measuring once it ended.
+    for rec in sorted((r for r in group_ if r.after), key=lambda r: rank(CHANNEL_PRIORITY["hr"], r.source)):
+        rr = ride_recovery(rec)
+        if rr:
+            for key in ("hr_drop_60s", "hr_drop_120s"):
+                if key in rr:
+                    totals[key] = rr[key]
+                    provenance[f"total:{key}"] = rec.source
+            break
 
     return Ride(start=samples[0].t, end=samples[-1].t, sport=base.sport,
                 indoor=all(r.indoor for r in group_), samples=samples, totals=totals,

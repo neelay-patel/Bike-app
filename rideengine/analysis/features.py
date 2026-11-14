@@ -15,7 +15,7 @@ from .basics import summary
 from .climbs import find_climbs
 from .repeats import Track
 
-VERSION = 1
+VERSION = 2  # 2: heart-rate recovery after the ride
 
 
 def extract(ride: Ride) -> dict:
@@ -25,6 +25,7 @@ def extract(ride: Ride) -> dict:
          "ascent_m": s["ascent_m"], "kmh": s["avg_kmh"], "avg_hr": s["avg_hr"],
          # Only measured power reaches a Ride (simulated power never does).
          "power": s["avg_power"] if ride.provenance.get("channel:power") else None,
+         "hr_drop_60s": s["hr_drop_60s"],
          "cells": [], "first": None, "last": None, "bbox": None, "track_km": 0.0, "climbs": []}
     if ride.indoor:
         return f

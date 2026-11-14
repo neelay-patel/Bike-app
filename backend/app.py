@@ -76,6 +76,18 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         return {"source": rec.source, "start": rec.start, "end": rec.end, "origin": rec.origin,
                 "ride_id": be.ride_id_for(uid, rec.start, rec.end)}
 
+    @app.post("/v1/metrics/{provider}", status_code=201)
+    async def upload_metrics(provider: str, request: Request, uid: int = Depends(user)):
+        """Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery), in
+        batches: {"format": "rideengine.metrics/1", "metrics": [...]}. Repeats are ignored."""
+        return be.upload_metrics(uid, provider, await request.body())
+
+    @app.get("/v1/recovery")
+    def recovery(uid: int = Depends(user)):
+        """How recovered the rider looks (HRV and resting heart rate against their usual range),
+        VO2 max, and heart-rate recovery after rides. Rule-based; for the rider only."""
+        return be.recovery(uid)
+
     @app.get("/v1/rides")
     def rides(include_hidden: bool = False, uid: int = Depends(user)):
         """Newest first. include_hidden=true adds false starts and empty recordings, marked "hidden"."""

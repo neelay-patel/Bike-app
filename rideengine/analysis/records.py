@@ -69,6 +69,7 @@ class _Entry:
     kmh: float | None
     power: float | None
     indoor: bool
+    hr_drop: float | None = None   # heart rate fallen in the minute after the ride
 
     def value(self, key: str) -> float | None:
         v = getattr(self, key)
@@ -88,14 +89,16 @@ def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
         s = summary(r)
         out.append(_Entry(ride_id(r), r.start, datetime.fromtimestamp(r.start, tz).astimezone(tz).date(),
                           s["km"] or 0.0, s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
-                          s["avg_power"] if r.provenance.get("channel:power") else None, r.indoor))
+                          s["avg_power"] if r.provenance.get("channel:power") else None, r.indoor,
+                          s["hr_drop_60s"]))
     return sorted(out, key=lambda e: e.start)
 
 
 def entries_from_features(feats: list[dict], tz: tzinfo | None = None) -> list[_Entry]:
     """The same records from stored per-ride features (features.extract), without the samples."""
     out = [_Entry(f["ride_id"], f["start"], datetime.fromtimestamp(f["start"], tz).astimezone(tz).date(),
-                  f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"]) for f in feats]
+                  f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
+                  f.get("hr_drop_60s")) for f in feats]
     return sorted(out, key=lambda e: e.start)
 
 
@@ -376,12 +379,23 @@ def repeat_notes(found: dict, tz: tzinfo | None = None) -> dict[str, list[dict]]
     return out
 
 
+def _recovery_note(e: _Entry, before: list[_Entry]) -> list[dict]:
+    """Heart rate fell faster after this ride than after any earlier one (a sign of fitness)."""
+    if e.hr_drop is None:
+        return []
+    earlier = [x.hr_drop for x in before if x.hr_drop is not None]
+    if len(earlier) >= MIN_REPEATS_BEFORE and e.hr_drop > max(earlier):
+        return [_note("recovery", "Your fastest heart-rate recovery yet", 64,
+                      f"{e.hr_drop:.0f} bpm down in a minute", pb=True)]
+    return []
+
+
 def notes(e: _Entry, es: list[_Entry], extra: list[dict] | None = None) -> list[dict]:
     """What's notable about one ride, best first: at most one note per kind (one ranking and one
     milestone), MAX_NOTES in all. `extra`: this ride's route and climb notes (repeat_notes)."""
     before = [x for x in es if x.start < e.start]
     cands = _rank_notes(e, before) + _first_over(e, before) + _milestones(e, before) + _streak_note(e, before)
-    cands += extra or []
+    cands += _recovery_note(e, before) + (extra or [])
     cands.sort(key=lambda n: -n["weight"])
     out, seen, since = [], set(), 0
     ranked = {n["kind"] for n in cands if not n["milestone"]}

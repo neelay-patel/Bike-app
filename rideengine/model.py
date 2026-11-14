@@ -44,6 +44,8 @@ class Recording:
     totals: dict = field(default_factory=dict)
     # Where it came from, for traceability (file path, workout id...).
     origin: str = ""
+    # Heart rate in the minutes after the workout ended (Apple Watch keeps measuring), for recovery.
+    after: list[Sample] = field(default_factory=list)
 
     def channels(self) -> set[str]:
         present = set()

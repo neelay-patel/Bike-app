@@ -19,6 +19,9 @@ struct YouView: View {
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
 
+                    if let recovery = model.recovery, recovery.hasAnything {
+                        RecoverySection(recovery: recovery)
+                    }
                     if let you = model.you, you.all.rides > 0 {
                         AllTimeHero(tally: you.all)
                         TotalsPanel(you: you)

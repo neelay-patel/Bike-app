@@ -38,6 +38,7 @@ class Store:
         for p in sorted(glob.glob(os.path.join(self.rec_dir, "*.json"))):
             d = json.load(open(p))
             d["samples"] = [Sample(**s) for s in d["samples"]]
+            d["after"] = [Sample(**s) for s in d.get("after") or []]
             out.append(Recording(**d))
         return out
 

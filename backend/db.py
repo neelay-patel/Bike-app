@@ -45,6 +45,20 @@ CREATE TABLE IF NOT EXISTS rides (
 );
 CREATE INDEX IF NOT EXISTS rides_time ON rides (user_id, start_t, end_t);
 
+-- Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery). Never shared.
+CREATE TABLE IF NOT EXISTS metrics (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    provider      TEXT NOT NULL,
+    external_id   TEXT NOT NULL,        -- the provider's id for the reading (HealthKit sample uuid)
+    kind          TEXT NOT NULL,        -- rideengine.analysis.wellness.KINDS
+    t             REAL NOT NULL,
+    value         REAL NOT NULL,
+    source        TEXT NOT NULL,
+    received_at   REAL NOT NULL,
+    PRIMARY KEY (user_id, provider, external_id)
+);
+CREATE INDEX IF NOT EXISTS metrics_kind ON metrics (user_id, kind, t);
+
 -- Insights (backend/insights.py). Everything below is derived from the rides and can be rebuilt.
 CREATE TABLE IF NOT EXISTS ride_features (
     user_id       INTEGER NOT NULL REFERENCES users(id),
