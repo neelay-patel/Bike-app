@@ -81,6 +81,12 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         """Newest first. include_hidden=true adds false starts and empty recordings, marked "hidden"."""
         return be.rides(uid, include_hidden)
 
+    @app.get("/v1/you")
+    def you(uid: int = Depends(user)):
+        """Tallies (all time, this year, last year, this month), streaks, personal bests, and the
+        latest rides' notes. Rule-based text; counts visible rides only."""
+        return be.you(uid)
+
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):
         r = be.ride(uid, ride_id)
@@ -88,6 +94,7 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such ride")
         out = describe(ride_id, r)
         out["totals"] = r.totals
+        out["notes"] = be.notes(uid, ride_id)
         if samples:
             out["samples"] = [{k: v for k, v in s.__dict__.items() if v is not None} for s in r.samples]
         return out

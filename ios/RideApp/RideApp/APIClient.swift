@@ -79,6 +79,8 @@ struct RideSummary: Decodable, Identifiable {
     /// Why the server would leave this ride out of lists ("false_start", "empty"), or nil.
     let hidden: String?
     let excluded: [Excluded]?
+    /// What's notable about this ride, best first (rule-based, as of the ride's date).
+    let notes: [RideNote]?
 
     /// A stretch left out because it wasn't riding (e.g. the bike computer left on in a car).
     struct Excluded: Decodable {
@@ -107,6 +109,66 @@ struct RideSummary: Decodable, Identifiable {
     }
 
     var date: Date { Date(timeIntervalSince1970: summary.start) }
+}
+
+/// "Your longest ride yet": one thing worth saying about a ride.
+struct RideNote: Decodable, Hashable {
+    let kind: String        // distance | climbing | time | speed | power | rides | streak
+    let text: String
+    let detail: String?
+    let weight: Int
+    let pb: Bool            // a personal best at the time
+    let milestone: Bool     // a round number crossed
+}
+
+/// The You screen: tallies, streaks, personal bests (GET /v1/you).
+struct YouSummary: Decodable {
+    let since: String?
+    let all: Tally
+    let year: Tally
+    let lastYear: Tally
+    let lastYearToDate: Tally
+    let month: Tally
+    let biggestMonth: Tally?
+    let streak: Streak
+    let bests: [Best]
+    let recent: [Recent]
+
+    struct Tally: Decodable {
+        let label: String?
+        let rides: Int
+        let km: Double
+        let hours: Double
+        let ascentM: Double
+        let everests: Double
+        let longestKm: Double
+        let crowFlies: String?
+    }
+
+    struct Streak: Decodable {
+        let longestWeeks: Int
+        let longestFrom: String?
+        let currentWeeks: Int
+    }
+
+    struct Best: Decodable, Identifiable {
+        var id: String { kind }
+        let kind: String
+        let label: String
+        let value: Double
+        let unit: String
+        let text: String
+        let rideId: String
+        let start: Double
+    }
+
+    struct Recent: Decodable, Identifiable {
+        var id: String { rideId }
+        let rideId: String
+        let start: Double
+        let km: Double
+        let notes: [RideNote]
+    }
 }
 
 /// One ride with its per-second samples (for the elevation profile and heart-rate peak).
@@ -184,6 +246,8 @@ struct APIClient {
     func rides() async throws -> [RideSummary] {
         try await get("v1/rides", query: [URLQueryItem(name: "include_hidden", value: "true")])
     }
+
+    func you() async throws -> YouSummary { try await get("v1/you") }
 
     func trace(_ rideId: String) async throws -> RideTrace {
         try await get("v1/rides/\(rideId)", query: [URLQueryItem(name: "samples", value: "true")])

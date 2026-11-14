@@ -20,6 +20,8 @@ Current focus (from 13 Nov 2026): **ride data from external sources first**. The
 each account once and every ride arrives on its own, merged. Connectors: Apple Health, Garmin,
 Wahoo, Hammerhead, Whoop, Oura, Fitbit (Google). Direct integrations, not an aggregator.
 Summaries, insights and cards come later. See `docs/connectors.md`.
+After that, three buckets in order (`docs/roadmap.md`): insight and tallies (started 13 Nov 2026), fun (avatar, rider card,
+badges), training and coaching. Notes and coaching text stay rule-based until the providers' AI terms are read.
 
 ## Repo layout
 - `rideengine/model.py`: canonical format. `Recording` = one device's view; `Ride` = merged, with `provenance`.
@@ -29,12 +31,12 @@ Summaries, insights and cards come later. See `docs/connectors.md`.
 - `rideengine/places.py`: towns/villages the route passes, offline from GeoNames (data/geo/, git-ignored; `python -m rideengine.places --download` then `--download CA`). Stops of 10+ min rank first. Credit GeoNames (CC BY 4.0).
 - `rideengine/clean.py`: leaves out stretches that weren't riding (bike computer left on in a car: sustained >65 km/h, cut between the surrounding long stops). Merge then redoes the affected totals and lists the cut in `Ride.excluded`. `hidden_reasons()`/`visible()` mark false starts and empty recordings (kept, but left out of lists and trends).
 - `rideengine/store.py`: JSON file store under `data/store/` (keeps all recordings, rebuilds rides). Placeholder for a real DB.
-- `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `simpower` (SIMULATED power, prototyping only).
+- `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `records` (tallies, streaks, personal bests, and each ride's rule-based notes such as "your longest ride yet", worked out as of the ride's date), `simpower` (SIMULATED power, prototyping only).
 - `rideengine/card/`: `ride_card.py`, the collectible ride card in the chosen look (D), from a Ride; `make_card.py` is the older graphite card (prototype). `python -m backend card --user 1 <ride_id>`.
 - `design/tokens.json` + `docs/design.md`: the look (direction D, 13 Nov 2026). The app's `Theme.swift` copies the tokens (test checks they match); fonts bundled in `ios/RideApp/RideApp/Fonts/` with their licences.
 - `rideengine/__main__.py`: CLI (`python -m rideengine import|rides|show|trends|card`).
 - `backend/`: hosted service (FastAPI; SQLite in dev, Postgres later). `service.py` (users, connections, sync, upload, re-merge by time window), `connectors/` (one module per provider on `base.Connector`; `__init__` lists all seven with status), `app.py` (HTTP API), `crypto.py` (credentials encrypted at rest), `__main__.py` (dev CLI). Dev data in `data/backend/`. Dependencies in `requirements-backend.txt`; the engine itself stays stdlib-only.
-- `ios/RideApp/`: iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`), styled in look D (porcelain, serif titles, Plex text, dot-matrix hero numbers, real halftone elevation profile). Apple Health connector (HealthKit permission, history import, anchored sync, background delivery, upload), Connections and Rides screens, dev login (server URL + token). Setup: `ios/README.md`.
+- `ios/RideApp/`: iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`), styled in look D (porcelain, serif titles, Plex text, dot-matrix hero numbers, real halftone elevation profile). Apple Health connector (HealthKit permission, history import, anchored sync, background delivery, upload), Rides (with each ride's notes), You (tallies, streaks, bests), Connections, dev login (server URL + token). Setup: `ios/README.md`.
 - `tests/`: `test_engine.py` and `test_recording_json.py` (synthetic, always run), `test_backend.py` (mocked Garmin; skips without backend deps), `fitwriter.py` (tiny FIT writer for tests), `test_real_rides.py` (skips unless Neelay's files are in `data/`).
 
 ## Rules
@@ -55,6 +57,7 @@ python -m rideengine import data/*.fit data/*.gpx data/*.json --apple data/expor
 python -m rideengine rides
 python -m rideengine show <ride_id>
 python -m rideengine trends
+python -m rideengine you                            # tallies, streaks, personal bests
 python -m rideengine card <ride_id> --config examples/card_durham_forest.json --power
 # .venv is Python 3.13 (uv-managed, ~/.local/share/uv/python). Apple's /usr/bin/python3 (3.9,
 # LibreSSL) can't do TLS 1.3, which Garmin requires. Rebuild: <python3.13> -m venv .venv
@@ -63,6 +66,7 @@ python -m backend create-user                       # dev user + bearer token
 python -m backend connect-garmin --user 1 --since 2026-10-01
 python -m backend rides --user 1
 python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
+python -m backend you --user 1                      # same, from the backend (GET /v1/you)
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
 ```
 

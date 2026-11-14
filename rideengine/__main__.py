@@ -6,6 +6,7 @@
   python -m rideengine rides                                    # merged rides, one line each
   python -m rideengine show <ride_id>                           # totals + where each value came from
   python -m rideengine trends                                   # efficiency, climbs, fitness
+  python -m rideengine you                                      # tallies, streaks, personal bests
   python -m rideengine card <ride_id> --config card.json        # share card (.dc.html)
 """
 from __future__ import annotations
@@ -20,6 +21,7 @@ from datetime import date, datetime
 from .analysis.basics import stops, summary
 from .analysis.climbs import find_climbs, match_climbs
 from .analysis.fitness import daily_loads, efficiency, estimate_hrmax, fitness_fatigue
+from .analysis.records import notes_by_ride, report, you
 from .clean import visible
 from .importers.apple_health import read_export
 from .importers.fit import read_fit
@@ -62,8 +64,11 @@ def cmd_rides(a):
 
 
 def cmd_show(a):
-    r = Store(a.store).ride(a.ride_id)
-    print(json.dumps({"start": _day(r.start), "summary": summary(r), "provenance": r.provenance,
+    st = Store(a.store)
+    r = st.ride(a.ride_id)
+    notes = notes_by_ride(visible(st.rides())).get(str(int(r.start)), [])
+    print(json.dumps({"start": _day(r.start), "summary": summary(r), "notes": [n["text"] for n in notes],
+                      "provenance": r.provenance,
                       "recordings": r.recordings,
                       "stops": [{"km": round(s["km"], 1), "minutes": round(s["seconds"] / 60)} for s in stops(r)],
                       "climbs": find_climbs(r)}, indent=2, default=str))
@@ -91,6 +96,10 @@ def cmd_trends(a):
         series = fitness_fatigue(loads, date.fromisoformat(min(loads)), date.today())
         now = series[-1]
         print(f"\nFitness {now['fitness']}, fatigue {now['fatigue']}, form {now['form']} ({now['date']})")
+
+
+def cmd_you(a):
+    print(report(you(visible(Store(a.store).rides()))))
 
 
 def cmd_card(a):
@@ -130,6 +139,7 @@ def main(argv=None):
     s.add_argument("ride_id")
     s.set_defaults(fn=cmd_show)
     sub.add_parser("trends").set_defaults(fn=cmd_trends)
+    sub.add_parser("you").set_defaults(fn=cmd_you)
     c = sub.add_parser("card")
     c.add_argument("ride_id")
     c.add_argument("--config", required=True)

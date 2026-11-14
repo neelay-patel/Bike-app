@@ -7,6 +7,7 @@
   python -m backend upload --user 1 data/apple_watch_2026-10-03.json
   python -m backend rides --user 1
   python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
+  python -m backend you --user 1                      # tallies, streaks, personal bests
   python -m backend card --user 1 <ride_id> [--name "Durham Forest"] [--headline "..."] [--place "Uxbridge,44.10,-79.12"]
                                                       # towns are found automatically unless --place / --no-places
                                                       # collectible ride card (HTML) in data/cards/
@@ -43,6 +44,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("rides")
     r.add_argument("--user", type=int, required=True)
     r.add_argument("--all", action="store_true", help="include false starts and empty recordings")
+    yo = sub.add_parser("you", help="tallies, streaks, personal bests")
+    yo.add_argument("--user", type=int, required=True)
     rb = sub.add_parser("rebuild")
     rb.add_argument("--user", type=int, required=True)
     cd = sub.add_parser("card")
@@ -103,13 +106,18 @@ def main(argv=None) -> int:
             out = a.out or os.path.join("data", "cards", f"ride_{a.ride_id}.html")
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, "w", encoding="utf-8") as fh:
-                fh.write(ride_card(ride, number=number, name=a.name, headline=a.headline,
+                from rideengine.analysis.records import headline
+                fh.write(ride_card(ride, number=number, name=a.name,
+                                   headline=a.headline or headline(be.notes(a.user, a.ride_id)),
                                    places=[] if a.no_places else (places or None)))
             print(f"Ride card written to {out}" + (f" (ride {number} of {year})" if number else ""))
             blocked = blocked_sources(ride.provenance, "share")
             if blocked:
                 print(f"Note: sharing isn't cleared yet for data from {', '.join(sorted(blocked))} "
                       f"(provider terms not reviewed). Fine for you to look at; check before posting.")
+        elif a.cmd == "you":
+            from rideengine.analysis.records import report
+            print(report(be.you(a.user)))
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":

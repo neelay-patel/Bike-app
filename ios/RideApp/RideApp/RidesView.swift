@@ -116,6 +116,15 @@ struct RideRow: View {
                 Text(ride.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
                     .font(Theme.text(16, .semibold))
                 details
+                if let top = ride.notes?.first {
+                    Label {
+                        Text(top.text).font(Theme.text(13, .medium))
+                    } icon: {
+                        Image(systemName: top.pb ? "star.fill" : "sparkle").font(.system(size: 10))
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(Theme.cobalt)
+                }
                 if let cut = ride.excluded?.first {
                     Text("\(Format.number(cut.km, decimals: 1)) km in a car left out")
                         .font(Theme.text(12)).foregroundStyle(Theme.heart)
@@ -157,6 +166,12 @@ struct RideDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 4)
+
+                if let notes = ride.notes, !notes.isEmpty {
+                    NoteList(notes: notes)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16).surfaceCard()
+                }
 
                 ProfilePanel(ride: ride, profile: profile)
 

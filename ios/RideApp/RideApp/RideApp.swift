@@ -28,6 +28,7 @@ struct RideApp: App {
 final class AppModel: ObservableObject {
     @Published var connections: [Connection] = []
     @Published var rides: [RideSummary] = []
+    @Published var you: YouSummary?
     @Published var error: String?
     @Published var isLoading = false
 
@@ -43,7 +44,9 @@ final class AppModel: ObservableObject {
         do {
             async let c = api.connections()
             async let r = api.rides()
+            async let y = try? api.you()  // an older server has no /v1/you: the rest still loads
             (connections, rides) = try await (c, r)
+            you = await y
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -67,6 +70,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             RidesView().tabItem { Label("Rides", systemImage: "bicycle") }
+            YouView().tabItem { Label("You", systemImage: "person.crop.circle") }
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }

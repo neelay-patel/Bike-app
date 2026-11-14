@@ -222,3 +222,15 @@ def test_rides_hide_false_starts_unless_asked(env):
     assert len(client.get("/v1/rides").json()) == 1
     every = client.get("/v1/rides?include_hidden=true").json()
     assert sorted(str(d["hidden"]) for d in every) == ["None", "false_start"]
+
+
+def test_you_and_ride_notes(env):
+    be, uid, client, _ = env
+    client.put("/v1/connections/garmin_personal?since=2026-01-01", json={"api_key": API_KEY})
+    y = client.get("/v1/you").json()
+    assert y["all"]["rides"] == 2 and y["all"]["km"] == 37.5
+    assert {b["kind"] for b in y["bests"]} >= {"distance", "climbing"}
+    assert [r["ride_id"] for r in y["recent"]] == [str(int(T0 + 86400)), str(int(T0))]
+    rides = client.get("/v1/rides").json()
+    assert all(isinstance(r["notes"], list) for r in rides)
+    assert client.get(f"/v1/rides/{int(T0)}").json()["notes"] == []  # too few rides to compare yet

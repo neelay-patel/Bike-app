@@ -14,6 +14,7 @@ import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from rideengine.analysis import records
 from rideengine.analysis.basics import summary
 from rideengine.clean import hidden_reasons
 from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
@@ -226,14 +227,32 @@ class Backend:
                                    (user_id,)).fetchall()
         rides = [Ride.from_json(r["data"]) for r in rows]
         hide = hidden_reasons(rides)
+        notes = records.notes_by_ride([r for i, r in enumerate(rides) if i not in hide])
         out = []
         for i, (row, ride) in enumerate(zip(rows, rides)):
             if i in hide and not include_hidden:
                 continue
             d = describe(row["ride_id"], ride)
             d["hidden"] = hide.get(i)
+            d["notes"] = notes.get(row["ride_id"], [])
             out.append(d)
         return out
+
+    def visible_rides(self, user_id: int) -> list[Ride]:
+        with self.lock:
+            rows = self.db.execute("SELECT data FROM rides WHERE user_id = ? ORDER BY start_t",
+                                   (user_id,)).fetchall()
+        rides = [Ride.from_json(r["data"]) for r in rows]
+        hide = hidden_reasons(rides)
+        return [r for i, r in enumerate(rides) if i not in hide]
+
+    def you(self, user_id: int) -> dict:
+        """Tallies, streaks, personal bests and the latest rides' notes (rideengine.analysis.records)."""
+        return records.you(self.visible_rides(user_id))
+
+    def notes(self, user_id: int, ride_id: str) -> list[dict]:
+        """What's notable about one ride, compared with the rides before it."""
+        return records.notes_by_ride(self.visible_rides(user_id)).get(ride_id, [])
 
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:
