@@ -155,17 +155,18 @@ struct RideRow: View {
 struct RideDetailView: View {
     let ride: RideSummary
     @State private var profile: Profile?
+    @StateObject private var card = CardRenderer()
+    @State private var confirmShare = false
+    @State private var shareImage: UIImage?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    MonoLabel("\(ride.date.formatted(.dateTime.hour().minute())) · \(Format.sourceList(ride.sources))")
-                    Text(ride.date.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                        .font(Theme.heading(42)).foregroundStyle(Theme.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 4)
+                MonoLabel("\(ride.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())) · \(Format.sourceList(ride.sources))")
+                    .padding(.horizontal, 4)
+
+                // The collectible card first: it's the ride's story, and what gets shared.
+                RideCard(renderer: card, rideId: ride.rideId)
 
                 if let notes = ride.notes, !notes.isEmpty {
                     NoteList(notes: notes)
@@ -201,11 +202,43 @@ struct RideDetailView: View {
         }
         .background(Theme.ground.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if shareCleared { Task { await share() } } else { confirmShare = true }
+                } label: {
+                    Label("Share card", systemImage: "square.and.arrow.up")
+                }
+                .disabled(!card.isLoaded)
+            }
+        }
+        .confirmationDialog("Share this card?", isPresented: $confirmShare, titleVisibility: .visible) {
+            Button("Share anyway") { Task { await share() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This ride uses data from \(blockedNames), whose terms on showing data to other people haven't been reviewed yet. Fine to keep for yourself; check before posting.")
+        }
+        .sheet(isPresented: Binding(get: { shareImage != nil }, set: { if !$0 { shareImage = nil } })) {
+            if let shareImage {
+                ShareSheet(items: [shareImage]).presentationDetents([.medium, .large])
+            }
+        }
         .task {
             if profile == nil, let trace = try? await APIClient().trace(ride.rideId) {
                 profile = Profile(trace: trace, km: ride.summary.km)
             }
         }
+    }
+
+    private var shareCleared: Bool { ride.use["share"]?.allowed ?? false }
+
+    private var blockedNames: String {
+        let names = (ride.use["share"]?.blockedBy ?? []).map(Format.sourceName)
+        return names.isEmpty ? "a source" : names.joined(separator: " and ")
+    }
+
+    private func share() async {
+        shareImage = await card.image()
     }
 
     private var secondary: String? {

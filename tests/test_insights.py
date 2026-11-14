@@ -135,3 +135,31 @@ def test_time_zone(env):
     r = client.put("/v1/me", json={"tz": "America/Toronto"})
     assert r.status_code == 200 and r.json()["tz"] == "America/Toronto"
     assert client.get("/v1/me").json()["tz"] == "America/Toronto"
+
+
+def test_ride_card_endpoint(env):
+    be, uid, client = env
+    rides = loops()
+    for n, r in enumerate(rides):
+        upload(client, r, n)
+    rid = str(int(rides[4].start))
+    r = client.get(f"/v1/rides/{rid}/card?fonts=local&background=transparent")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    html = r.text
+    assert "googleapis" not in html and "Doto-Black.ttf" in html  # the app's own fonts
+    assert ">Home loop</h1>" in html and "NO. 5 ·" in html        # the route's name, its number in the year
+    assert "Your fastest home loop yet." in html                   # the top note as headline
+    assert client.get("/v1/rides/1/card").status_code == 404
+    assert client.get(f"/v1/rides/{rid}/card?fonts=comic").status_code == 400
+    assert client.get(f"/v1/rides/{rid}/card?background=red;x").status_code == 400
+
+
+def test_card_route_is_cut_around_home():
+    from rideengine.card.ride_card import PRIVACY_M, trim_near
+    from rideengine.model import haversine
+    ride = out_and_back(0, 25)
+    home = (ride.samples[0].lat, ride.samples[0].lon)
+    cut = trim_near(ride, [home])
+    assert len(cut.samples) < len(ride.samples)
+    assert all(haversine(*home, s.lat, s.lon) > PRIVACY_M for s in cut.samples)
+    assert cut.totals == ride.totals  # only the drawing changes

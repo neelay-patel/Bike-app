@@ -19,8 +19,20 @@ Canvas with the current prototypes: https://claude.ai/artifact/6vEqXrfwo3ozkCh8b
 - Five open-arc dials (gap at the bottom, label in the gap): distance; speed (average, thin inner band for max); metres climbed; heart rate (average, max); calories (Apple Watch active).
 - Power: a vertical strip down the right of the map, average and max watts only, hidden when there's no power data, tagged SIM when simulated.
 
+## In the app (14 Nov 2026)
+- The card sits at the top of each ride's screen; the elevation panel and the rest follow below.
+- The server draws it (`GET /v1/rides/{id}/card`, `rideengine/card/ride_card.py`), so the screen and the shared
+  picture are one design. `fonts=local`: the app embeds its own bundled fonts (works offline, nothing asked of Google).
+- Filled in automatically: the route's name when the ride is a lap of one ("Home loop"), else the main town on it
+  ("Cannington loop"); its number in the year; its top note as the headline; towns from GeoNames.
+- **Privacy zone:** the drawn route is cut within 500 m of home (where most rides start), so a shared card doesn't
+  show where the rider lives. Totals are unchanged.
+- **Share** makes a 1080 x 1920 image on white. If any source in the ride isn't cleared for sharing
+  (`SOURCE_POLICY["share"]`, e.g. Garmin until its terms are read), the app explains and asks first.
+- Same card from the command line: `python -m backend card --user 1 <ride_id>`.
+
 ## Open items
-- Pick places, stops and the headline automatically for any ride.
+- Pick places, stops and the headline automatically for any ride. (Done for the app card: route or town name, top note.)
 - Fit the map to each route's shape (tall, narrow routes leave empty space).
 - Dial scales are placeholders (0–160 km, 0–60 km/h, 0–1,500 m, 0–200 bpm, 0–3,000 kcal); make them relative to the rider's own bests.
 - Indoor (KICKR) card: power trace as the "map".

@@ -2,7 +2,10 @@
 
     html = ride_card(ride, number=34, name="Durham Forest", headline="Lunch in Uxbridge, earned.")
 
-Writes one self-contained HTML page (fonts from Google Fonts), 360×640 CSS px, 9:16 for sharing.
+Writes one self-contained HTML page, 360×640 CSS px, 9:16 for sharing. Fonts come from Google Fonts,
+or (fonts="local") from files beside the page: the iPhone app loads it with its own bundled fonts.
+hide_near: points (home) whose surroundings are cut from the drawn route, so a shared card doesn't
+show where the rider lives (PRIVACY_M around each).
 Colours and fonts come from design/tokens.json. Everything shown is the ride's own data: the route
 is the real track filling the map, the dots behind it are a real-distance grid (1 km apart, wider
 steps on long rides; no legend: dense dots mean a big ride), the heart-rate peak is where the merged
@@ -14,6 +17,7 @@ import html
 import json
 import math
 import os
+from dataclasses import replace
 from datetime import datetime
 
 from ..analysis.basics import summary
@@ -21,6 +25,24 @@ from ..model import Ride, haversine
 
 TOKENS = os.path.join(os.path.dirname(__file__), "..", "..", "design", "tokens.json")
 W, MAP_H = 336, 262
+PRIVACY_M = 500   # the route is cut this close to home
+
+# Font files bundled in the iPhone app (ios/RideApp/RideApp/Fonts), for fonts="local".
+LOCAL_FONTS = """@font-face{font-family:'Doto';font-weight:900;src:url('Doto-Black.ttf')}
+@font-face{font-family:'Instrument Serif';src:url('InstrumentSerif-Regular.ttf')}
+@font-face{font-family:'IBM Plex Mono';font-weight:400;src:url('IBMPlexMono-Regular.ttf')}
+@font-face{font-family:'IBM Plex Mono';font-weight:500;src:url('IBMPlexMono-Medium.ttf')}"""
+GOOGLE_FONTS = ('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:ROND,wght@100,900'
+                '&amp;family=Instrument+Serif&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap">')
+
+
+def trim_near(ride: Ride, points, radius: float = PRIVACY_M) -> Ride:
+    """The ride without its samples within `radius` of any of `points` (for drawing only: totals stay)."""
+    if not points:
+        return ride
+    kept = [s for s in ride.samples if s.lat is None or s.lon is None
+            or all(haversine(s.lat, s.lon, a, b) > radius for a, b in points)]
+    return replace(ride, samples=kept) if len(kept) >= 10 else ride
 
 
 def _tokens() -> dict:
@@ -109,9 +131,11 @@ def _place_label(x: float, y: float, text: str, taken: list) -> tuple[float, flo
 
 
 def ride_card(ride: Ride, number: int | None = None, name: str | None = None, headline: str | None = None,
-              places: list | None = None) -> str:
+              places: list | None = None, fonts: str = "google", hide_near=None, background: str = "#FFFFFF") -> str:
     """places: None finds towns automatically (rideengine.places: where you stopped, else the biggest);
-    or a list of [label, lat, lon] to mark instead; [] for none."""
+    or a list of [label, lat, lon] to mark instead; [] for none. fonts: "google" or "local".
+    hide_near: [(lat, lon)] to keep off the drawn route (home). background: behind the card."""
+    ride = trim_near(ride, hide_near)
     t = _tokens()
     c, f = t["color"], t["font"]
     s = summary(ride)
@@ -173,10 +197,10 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(name)} · ride card</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:ROND,wght@100,900&amp;family=Instrument+Serif&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap">
-<style>body{{margin:0;background:#FFFFFF;display:flex;justify-content:center}}</style></head>
+{GOOGLE_FONTS if fonts == "google" else "<style>" + LOCAL_FONTS + "</style>"}
+<style>body{{margin:0;background:{background};display:flex;justify-content:center}}</style></head>
 <body>
-<article style="width:360px;height:640px;box-sizing:border-box;background:#FFFFFF;padding:12px;display:flex;flex-direction:column;color:{c['ink']}">
+<article style="width:360px;height:640px;box-sizing:border-box;background:{background};padding:12px;display:flex;flex-direction:column;color:{c['ink']}">
 <header style="background:{c['strip']};color:#FFFFFF;border-radius:14px 14px 0 0;padding:10px 14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px">
 <h1 style="margin:0;font-family:'{f['heading']}',serif;font-size:30px;font-weight:400;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{html.escape(name)}</h1>
 <span style="font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:#E2DADC;white-space:nowrap">{no}</span>

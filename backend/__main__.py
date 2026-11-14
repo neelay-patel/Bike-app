@@ -95,29 +95,22 @@ def main(argv=None) -> int:
                 print(f"{f}: {rec.source} {datetime.fromtimestamp(rec.start):%Y-%m-%d %H:%M} "
                       f"-> ride {be.ride_id_for(a.user, rec.start, rec.end)}")
         elif a.cmd == "card":
-            from rideengine.card.ride_card import ride_card
             from rideengine.sources import blocked_sources
-            ride = be.ride(a.user, a.ride_id)
-            if ride is None:
-                print(f"error: no ride {a.ride_id}", file=sys.stderr)
-                return 1
-            year = datetime.fromtimestamp(ride.start).year
-            same_year = sorted(d["ride_id"] for d in be.rides(a.user)
-                               if datetime.fromtimestamp(d["summary"]["start"]).year == year)
-            number = same_year.index(a.ride_id) + 1 if a.ride_id in same_year else None
             places = []
             for p in a.place:
                 label, la, lo = p.rsplit(",", 2)
                 places.append([label, float(la), float(lo)])
+            html = be.card_html(a.user, a.ride_id, name=a.name, headline=a.headline,
+                                places=[] if a.no_places else (places or None))
+            if html is None:
+                print(f"error: no ride {a.ride_id}", file=sys.stderr)
+                return 1
             out = a.out or os.path.join("data", "cards", f"ride_{a.ride_id}.html")
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, "w", encoding="utf-8") as fh:
-                from rideengine.analysis.records import headline
-                fh.write(ride_card(ride, number=number, name=a.name,
-                                   headline=a.headline or headline(be.notes(a.user, a.ride_id)),
-                                   places=[] if a.no_places else (places or None)))
-            print(f"Ride card written to {out}" + (f" (ride {number} of {year})" if number else ""))
-            blocked = blocked_sources(ride.provenance, "share")
+                fh.write(html)
+            print(f"Ride card written to {out} (route cut around home)")
+            blocked = blocked_sources(be.ride(a.user, a.ride_id).provenance, "share")
             if blocked:
                 print(f"Note: sharing isn't cleared yet for data from {', '.join(sorted(blocked))} "
                       f"(provider terms not reviewed). Fine for you to look at; check before posting.")

@@ -379,6 +379,13 @@ struct APIClient {
         _ = try await send(request("PATCH", path, body: JSONEncoder().encode(Body(name: name))))
     }
 
+    /// The ride's card as HTML, drawn by the server, with font files the app supplies.
+    func cardHTML(_ rideId: String) async throws -> String {
+        let data = try await send(request("GET", "v1/rides/\(rideId)/card", query: [
+            URLQueryItem(name: "fonts", value: "local"), URLQueryItem(name: "background", value: "transparent")]))
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func trace(_ rideId: String) async throws -> RideTrace {
         try await get("v1/rides/\(rideId)", query: [URLQueryItem(name: "samples", value: "true")])
     }

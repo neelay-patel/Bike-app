@@ -7,10 +7,11 @@ Apple replaces this with the iPhone app).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings
 from .connectors import ConnectorError
@@ -128,6 +129,18 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         if not be.insights.rename(uid, "climb", climb_id, body.get("name")):
             raise HTTPException(404, "No such climb")
         return {"id": climb_id, "name": body.get("name")}
+
+    @app.get("/v1/rides/{ride_id}/card", response_class=HTMLResponse)
+    def card(ride_id: str, fonts: str = "google", background: str = "#FFFFFF", uid: int = Depends(user)):
+        """The ride's collectible card as one HTML page (360x640). fonts=local: the app supplies the
+        font files. The route is cut around home. Whether the ride may be shared is in the ride's
+        "use" (sources' terms); the app asks before sharing when it isn't cleared."""
+        if fonts not in ("google", "local") or not re.fullmatch(r"#[0-9A-Fa-f]{6}|transparent", background):
+            raise HTTPException(400, "fonts must be google or local; background a #RRGGBB colour or transparent")
+        html = be.card_html(uid, ride_id, fonts=fonts, background=background)
+        if html is None:
+            raise HTTPException(404, "No such ride")
+        return HTMLResponse(html)
 
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):

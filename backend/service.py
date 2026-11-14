@@ -304,6 +304,43 @@ class Backend:
         """What's notable about one ride, compared with the rides before it."""
         return self.insights.notes(user_id).get(ride_id, [])
 
+    def card_html(self, user_id: int, ride_id: str, name: Optional[str] = None, headline: Optional[str] = None,
+                  places: Optional[list] = None, fonts: str = "google", background: str = "#FFFFFF",
+                  privacy: bool = True) -> Optional[str]:
+        """The ride's collectible card (rideengine/card/ride_card.py), filled in from what's stored:
+        the route's name if the ride is a lap of one, its number in the year, its top note as the
+        headline, and (privacy) the route cut around home so a shared card doesn't show it."""
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import records, repeats
+        from rideengine.card.ride_card import ride_card
+        ride = self.ride(user_id, ride_id)
+        if ride is None:
+            return None
+        with self.lock:
+            feats = self.insights._features(user_id)
+            visible = feat_mod.visible_ids(feats)
+            found = self.insights._found(user_id, visible)
+        tz = self.insights.tz(user_id)
+        year = datetime.fromtimestamp(ride.start, tz).year
+        same_year = [f["ride_id"] for f in feats if f["ride_id"] in visible
+                     and datetime.fromtimestamp(f["start"], tz).year == year]
+        number = same_year.index(ride_id) + 1 if ride_id in same_year else None
+        if name is None:
+            name = next((r["name"] for r in found["routes"] if any(l["ride_id"] == ride_id for l in r["laps"])), None)
+        if name is None and not ride.indoor:
+            # Not a repeated route: name it after the main town on it ("Cannington loop").
+            from rideengine.places import places_on_route
+            on = places_on_route(ride, limit=1)
+            f = next((x for x in feats if x["ride_id"] == ride_id), None)
+            if on and f and f.get("first"):
+                loop = repeats.haversine(*f["first"], *f["last"]) <= repeats.LOOP_M
+                name = f"{on[0]['name']} {'loop' if loop else 'ride'}"
+        if headline is None:
+            headline = records.headline(self.notes(user_id, ride_id))
+        home = repeats.home_point([f for f in feats if f["ride_id"] in visible]) if privacy else None
+        return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,
+                         hide_near=[home] if home else None, background=background)
+
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:
             row = self.db.execute("SELECT data FROM rides WHERE user_id = ? AND ride_id = ?",
