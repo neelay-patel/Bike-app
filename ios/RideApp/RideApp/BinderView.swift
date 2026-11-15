@@ -240,11 +240,16 @@ private struct MiniCard: View {
             RouteShape(points: card.shape)
                 .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
                 .padding(10)
+                .overlay {
+                    if card.shape.isEmpty {
+                        Image(systemName: "figure.indoor.cycle").font(.system(size: 22)).foregroundStyle(Theme.cobaltSoft)
+                    }
+                }
                 .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
                 .background(Theme.cobalt)
             VStack(alignment: .leading, spacing: 1) {
                 Text(card.name ?? BadgeTile.day(card.date)).font(Theme.text(10, .semibold)).lineLimit(1)
-                Text("\(Format.number(card.km, decimals: 1)) km").font(Theme.mono(9)).foregroundStyle(Theme.inkSoft)
+                Text(card.km < 0.05 ? "indoor" : "\(Format.number(card.km, decimals: 1)) km").font(Theme.mono(9)).foregroundStyle(Theme.inkSoft)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 7).padding(.vertical, 5)

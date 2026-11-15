@@ -111,6 +111,9 @@ struct RideSummary: Decodable, Identifiable {
     }
 
     var date: Date { Date(timeIntervalSince1970: summary.start) }
+
+    /// An indoor session with no distance (spin bike, trainer without a sensor): shown by time, not km.
+    var noDistance: Bool { summary.km < 0.05 }
 }
 
 /// "Your longest ride yet": one thing worth saying about a ride.

@@ -15,7 +15,7 @@ from .basics import summary
 from .climbs import find_climbs
 from .repeats import Track
 
-VERSION = 3  # 2: heart-rate recovery after the ride; 3: route shape for binder thumbnails
+VERSION = 4  # 2: HR recovery after the ride; 3: route shape; 4: indoor time from the workout's length
 
 
 def extract(ride: Ride) -> dict:

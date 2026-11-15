@@ -53,13 +53,16 @@ def stops(ride: Ride, min_s: float = 120) -> list[dict]:
 def summary(ride: Ride) -> dict:
     """One flat dict per ride, preferring device totals over our own derivations."""
     tot = ride.totals
-    km = (tot.get("distance_m") or distances(ride)[-1]) / 1000
+    km = (tot.get("distance_m") or (distances(ride)[-1] if ride.samples else 0.0)) / 1000
     mv = tot.get("moving_s") or moving_time(ride)
+    if not mv and (ride.indoor or km < 0.05):
+        # Indoors (or no GPS) there's no speed to tell moving from stopped: the workout's own length.
+        mv = tot.get("elapsed_s") or (ride.end - ride.start)
     return {
         "start": ride.start,
         "km": round(km, 2),
         "moving_h": round(mv / 3600, 3),
-        "avg_kmh": round(km / (mv / 3600), 2) if mv else None,
+        "avg_kmh": round(km / (mv / 3600), 2) if mv and km >= 0.05 else None,
         "ascent_m": tot.get("ascent_m"),
         "avg_hr": tot.get("avg_hr"),
         "max_hr": tot.get("max_hr"),

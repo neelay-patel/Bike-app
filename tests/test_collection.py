@@ -153,3 +153,19 @@ def test_api(tmp_path, monkeypatch):
     assert "Neelay" in client.get("/v1/rider/card?fonts=local").text
     client.put("/v1/me", json={"avatar": None})
     assert client.get("/v1/me").json()["avatar"] is None
+
+
+def test_indoor_session_without_distance():
+    """Apple Watch indoor cycling: heart rate and calories, no GPS, no distance."""
+    from rideengine.analysis.basics import summary
+    from rideengine.model import Ride, Sample
+    t0 = 1_790_000_000.0
+    ride = Ride(start=t0, end=t0 + 1800, sport="cycling", indoor=True,
+                samples=[Sample(t=t0 + i * 5, hr=120 + (i % 40)) for i in range(361)],
+                totals={"elapsed_s": 1800, "calories": 300, "avg_hr": 135, "max_hr": 159},
+                provenance={"channel:hr": "apple_watch"}, recordings=["healthkit:x"])
+    s = summary(ride)
+    assert s["km"] == 0 and s["moving_h"] == 0.5 and s["avg_kmh"] is None  # time from the workout, not 0
+    html = ride_card(ride, places=[])
+    assert "30 minutes indoors." in html and "INDOOR · HEART RATE" in html and "DISTANCE" not in html
+    assert "MAX HEART RATE" in html and "indoor ride" in html

@@ -121,9 +121,18 @@ struct RideRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(Format.number(ride.summary.km, decimals: 1)).font(Theme.text(26, .semibold)).monospacedDigit()
-                Text("km").font(Theme.text(13, .medium)).foregroundStyle(Theme.inkMuted)
+            Group {
+                if ride.noDistance {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(Format.duration(hours: ride.summary.movingH)).font(Theme.text(26, .semibold)).monospacedDigit()
+                        Text("indoor").font(Theme.text(13, .medium)).foregroundStyle(Theme.inkMuted)
+                    }
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(Format.number(ride.summary.km, decimals: 1)).font(Theme.text(26, .semibold)).monospacedDigit()
+                        Text("km").font(Theme.text(13, .medium)).foregroundStyle(Theme.inkMuted)
+                    }
+                }
             }
             .frame(width: 96, alignment: .leading)
             VStack(alignment: .leading, spacing: 3) {
@@ -156,7 +165,12 @@ struct RideRow: View {
     }
 
     private var details: Text {
-        var parts = [ride.date.formatted(.dateTime.hour().minute()), Format.duration(hours: ride.summary.movingH)]
+        var parts = [ride.date.formatted(.dateTime.hour().minute())]
+        if ride.noDistance {
+            if let kcal = ride.summary.calories { parts.append("\(Format.number(kcal, decimals: 0)) kcal") }
+        } else {
+            parts.append(Format.duration(hours: ride.summary.movingH))
+        }
         if let up = ride.summary.ascentM { parts.append("\(Format.number(up, decimals: 0)) m") }
         let base = Text(parts.joined(separator: " · ")).font(Theme.mono(12)).foregroundColor(Theme.inkMuted)
         guard let hr = ride.summary.avgHr else { return base }
@@ -303,6 +317,16 @@ struct ProfilePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if ride.noDistance {
+                // Indoors: no route or elevation (the card above shows heart rate across the session).
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                          alignment: .leading, spacing: 12) {
+                    HeroStat(label: "Time", value: Format.duration(hours: ride.summary.movingH), unit: nil)
+                    HeroStat(label: "Calories", value: ride.summary.calories.map { Format.hero($0, decimals: 0) } ?? "–", unit: "kcal")
+                    HeroStat(label: "Avg heart rate", value: ride.summary.avgHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
+                    HeroStat(label: "Max heart rate", value: ride.summary.maxHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
+                }
+            } else {
             ElevationProfile(profile: profile, totalKm: ride.summary.km)
                 .frame(height: 118)
             Rectangle().fill(Theme.panelLine).frame(height: 1)
@@ -316,6 +340,7 @@ struct ProfilePanel: View {
                 } else {
                     HeroStat(label: "Avg speed", value: ride.summary.avgKmh.map { Format.number($0, decimals: 1) } ?? "–", unit: "km/h")
                 }
+            }
             }
         }
         .foregroundStyle(.white)

@@ -112,6 +112,34 @@ background-size:300% 300%!important;animation:sheen 7s linear infinite}
 @media (prefers-reduced-motion:reduce){.holo{animation:none}}"""
 
 
+def _hr_trace(ride: Ride, c: dict) -> str:
+    """No route indoors: the map shows heart rate across the session instead, with its peak marked."""
+    pts = [(x.t, x.hr) for x in ride.samples if x.hr is not None]
+    if len(pts) < 5:
+        return (f'<text x="{W / 2}" y="{MAP_H / 2}" text-anchor="middle" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
+                f'font-size="12" letter-spacing="2">INDOOR RIDE</text>')
+    t0, t1 = pts[0][0], pts[-1][0]
+    lo, hi = min(h for _, h in pts), max(h for _, h in pts)
+    left, right, top, bottom = 24, W - 24, MAP_TOP + 24, MAP_H - 30
+    step = max(1, len(pts) // 300)
+    def xy(t, h):
+        return (round(left + (t - t0) / max(t1 - t0, 1) * (right - left), 1),
+                round(bottom - (h - lo) / max(hi - lo, 1) * (bottom - top), 1))
+    line = "M" + " L".join(f"{x} {y}" for x, y in (xy(t, h) for t, h in pts[::step]))
+    pt, ph = max(pts, key=lambda p: p[1])
+    px, py = xy(pt, ph)
+    label_x, anchor = (px + 10, "start") if px < W / 2 else (px - 10, "end")
+    mins = round((t1 - t0) / 60)
+    return (f'<path d="{line}" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{px}" cy="{py}" r="6" fill="#FFFFFF"/>'
+            f'<text x="{label_x}" y="{py - 8}" text-anchor="{anchor}" fill="#FFFFFF" font-family="IBM Plex Mono, monospace" '
+            f'font-size="11" letter-spacing="1">♥ {round(ph)}</text>'
+            f'<text x="{left}" y="{MAP_H - 10}" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" font-size="10" '
+            f'letter-spacing="1.5">INDOOR · HEART RATE</text>'
+            f'<text x="{right}" y="{MAP_H - 10}" text-anchor="end" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
+            f'font-size="10" letter-spacing="1.5">{mins} MIN</text>')
+
+
 def _avatar_layer(spec: dict, cobalt: str, uid: str) -> str:
     """The rider's avatar, big and in tints of the map's blue, behind the km dots and the route."""
     from .avatar import _shade, avatar_svg
@@ -162,8 +190,13 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     when = datetime.fromtimestamp(ride.start).astimezone()
     km = s["km"]
     up = s["ascent_m"]
-    name = name or f"{when:%A} ride"
-    lead = f"{_num(up)} m in {round(km)} km." if up else f"{_num(km, 1)} km."
+    name = name or f"{when:%A} {'indoor ' if km < 0.05 else ''}ride"
+    indoor = km < 0.05
+    minutes = round((s["moving_h"] or 0) * 60)
+    if indoor:
+        lead = f"{minutes} minutes indoors."
+    else:
+        lead = f"{_num(up)} m in {round(km)} km." if up else f"{_num(km, 1)} km."
     title = f"{lead} {headline}" if headline else lead
 
     path, proj, ppk, dot_km = route_path(ride)
@@ -193,12 +226,14 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
                        f'font-size="11" letter-spacing="1.5">{html.escape(text)}</text>')
     marks = dots + labels
 
-    stats = [("Distance", f"{_hero(km, 1)} km")]
+    stats = [] if indoor else [("Distance", f"{_hero(km, 1)} km")]
     if up:
         stats.append(("Climbing", f"{_hero(up)} m"))
-    stats.append(("Moving time", _duration(s["moving_h"] * 3600)))
+    stats.append(("Time" if indoor else "Moving time", _duration(s["moving_h"] * 3600)))
     if s["avg_hr"]:
         stats.append(("Avg heart rate", f"{round(s['avg_hr'])}", True))
+    if indoor and s["max_hr"]:
+        stats.append(("Max heart rate", f"{round(s['max_hr'])}", True))
     elif s["avg_kmh"]:
         stats.append(("Avg speed", f"{_hero(s['avg_kmh'], 1)} km/h"))
     if s["calories"]:
@@ -230,6 +265,7 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
 {_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
 {_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
 <path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
+{_hr_trace(ride, c) if indoor else ""}
 {marks}
 </svg>
 <p style="position:absolute;left:14px;top:12px;margin:0;font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:#E3E8F7">{when:%a %-d %b %Y}</p>
