@@ -130,6 +130,40 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         from rideengine.card.avatar import avatar_svg
         return Response(avatar_svg(spec, size=240), media_type="image/svg+xml")
 
+    @app.get("/v1/goals/options")
+    def goal_options(uid: int = Depends(user)):
+        """The four objectives and what each can look like, quoting the rider's own bests; their seasons."""
+        return be.goal_options(uid)
+
+    @app.post("/v1/goals/preview")
+    def goal_preview(goal: dict = Body(...), uid: int = Depends(user)):
+        """What a goal would mean (the reveal) and what we'd watch (markers), without saving it."""
+        try:
+            return be.goal_view(uid, be.check_goal(uid, goal))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.put("/v1/goals/current")
+    def set_goal(goal: dict = Body(...), uid: int = Depends(user)):
+        """Set the rider's goal ({"objective", "aspiration", "words", "tags", "params", "ready_by"}). The previous
+        one is kept as history."""
+        try:
+            return be.set_goal(uid, goal)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get("/v1/goals/current")
+    def current_goal(uid: int = Depends(user)):
+        """The active goal with its reveal and markers worked out from today's data, or 404 if none."""
+        g = be.current_goal(uid)
+        if g is None:
+            raise HTTPException(404, "No goal set")
+        return g
+
+    @app.delete("/v1/goals/current")
+    def end_goal(uid: int = Depends(user)):
+        return {"ended": be.end_goal(uid)}
+
     @app.get("/v1/collection")
     def collection(uid: int = Depends(user)):
         """The fun bucket: badges (earned or how close), the rider card's ratings out of 99, and the

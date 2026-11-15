@@ -19,6 +19,7 @@ struct YouView: View {
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
 
+                    GoalCard()
                     if let recovery = model.recovery, recovery.hasAnything {
                         RecoverySection(recovery: recovery)
                     }

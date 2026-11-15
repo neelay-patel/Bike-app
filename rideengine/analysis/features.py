@@ -13,9 +13,10 @@ from __future__ import annotations
 from ..model import Ride
 from .basics import summary
 from .climbs import find_climbs
+from .goals import power_curve
 from .repeats import Track
 
-VERSION = 4  # 2: HR recovery after the ride; 3: route shape; 4: indoor time from the workout's length
+VERSION = 5  # 2: HR recovery after the ride; 3: route shape; 4: indoor time; 5: power curve
 
 
 def extract(ride: Ride) -> dict:
@@ -26,6 +27,7 @@ def extract(ride: Ride) -> dict:
          # Only measured power reaches a Ride (simulated power never does).
          "power": s["avg_power"] if ride.provenance.get("channel:power") else None,
          "hr_drop_60s": s["hr_drop_60s"],
+         "power_curve": power_curve(ride.samples) if ride.provenance.get("channel:power") else {},
          "cells": [], "first": None, "last": None, "bbox": None, "track_km": 0.0, "climbs": []}
     if ride.indoor:
         return f

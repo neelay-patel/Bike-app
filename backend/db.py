@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS deleted_recordings (
     PRIMARY KEY (user_id, provider, external_id)
 );
 
+-- The rider's goals (rideengine/analysis/goals.py). One active at a time; older ones kept as history.
+CREATE TABLE IF NOT EXISTS goals (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    goal_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    data          TEXT NOT NULL,        -- objective, aspiration, the rider's words, tags, params, ready_by
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    REAL NOT NULL,
+    ended_at      REAL
+);
+CREATE INDEX IF NOT EXISTS goals_user ON goals (user_id, active);
+
 -- Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery). Never shared.
 CREATE TABLE IF NOT EXISTS metrics (
     user_id       INTEGER NOT NULL REFERENCES users(id),

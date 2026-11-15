@@ -30,6 +30,7 @@ final class AppModel: ObservableObject {
     @Published var rides: [RideSummary] = []
     @Published var you: YouSummary?
     @Published var recovery: RecoverySummary?
+    @Published var goal: GoalView?
     @Published var error: String?
     @Published var isLoading = false
 
@@ -51,9 +52,11 @@ final class AppModel: ObservableObject {
             async let r = api.rides()
             async let y = try? api.you()  // an older server has no /v1/you: the rest still loads
             async let rc = try? api.recovery()
+            async let g = try? api.currentGoal()
             (connections, rides) = try await (c, r)
             you = await y
             recovery = await rc
+            goal = (await g) ?? nil
             error = nil
         } catch {
             self.error = error.localizedDescription

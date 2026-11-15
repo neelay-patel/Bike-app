@@ -82,6 +82,23 @@ widening of what we read from Apple Health, at this stage.
   ("travelling Tue–Thu"), the coach proposes a reshuffled week to accept or decline; quick context buttons (ill,
   something hurts, short on time, feeling great).
 
+## Built so far (15 Nov 2026)
+**The goals engine** (`rideengine/analysis/goals.py`, API under `/v1/goals/…`), no app screens yet:
+- `options`: the four objectives and their aspirations, quoting the rider's own bests ("Your home loop best:
+  26.4 km/h", "My first 120 km ride").
+- `seasons`: each month outdoor / indoor / mixed from two years of history; now, and when outdoor riding starts
+  (Neelay: outdoors May–September, indoor now, outdoor again from 1 May 2027).
+- `reveal`: the gap and what to build, every quoted figure returned with it. Solo pace = median of the last 12
+  flat-ish outdoor rides of 25 km+ (Neelay 25.8 km/h); drafting estimate from flat-road physics with the group taking
+  ~30% off the aero power (30 km/h in the draft ≈ 12% more power than solo 25.8). Labelled an estimate.
+- `markers`: the matching rider-card rating (weekly history), home loop speed **scaled to the same heart rate**
+  (lap speed × ((ref − resting) / (lap HR − resting))^⅓, ref = recent median lap HR; Neelay 25.6 km/h at 136 bpm,
+  up from 25.1 in September), the main climb's best, longest recent ride, and power markers (best 5 s, 1, 5, 20 min
+  from measured power; pending until KICKR/Zwift rides arrive). Targets are proposals (+8 rating, +5% speed,
+  −5% climb time, +8% power).
+- Goals stored per rider, one active, older kept as history; `ready_by` defaults to the start of the outdoor season.
+- Ride features v5 carry each ride's power curve (measured power only).
+
 ## Order of work
 1. **Data first:** Wahoo (KICKR power) this week; Zwift linked to Garmin Connect when Neelay starts; Garmin
    business tier for other riders; history on day one; sync health and gap spotting.

@@ -406,6 +406,94 @@ class Backend:
         return rider_card(r, r["avatar"], name=r["name"], badges_earned=r["badges_earned"],
                           badges_total=r["badges_total"], fonts=fonts, background=background)
 
+    # --- goals (rideengine/analysis/goals.py, docs/coaching.md) --------------------------------------
+    def _goal_context(self, user_id: int) -> dict:
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import goals as g
+        from rideengine.analysis import records
+        with self.lock:
+            feats = self.insights._features(user_id)
+            visible = feat_mod.visible_ids(feats)
+            found = self.insights._found(user_id, visible)
+        tz = self.insights.tz(user_id)
+        vfeats = [f for f in feats if f["ride_id"] in visible]
+        es = records.entries_from_features(vfeats, tz)
+        today = datetime.now(tz).astimezone(tz).date()
+        rest = self.recovery(user_id)["resting_hr"].get("usual")
+        return {"es": es, "found": found, "today": today, "rest": rest,
+                "power": g.best_power_curve(vfeats, today - timedelta(days=120))}
+
+    def goal_options(self, user_id: int) -> dict:
+        from rideengine.analysis import goals as g
+        c = self._goal_context(user_id)
+        return {"objectives": g.options(c["es"], c["found"], c["today"]), "season": g.seasons(c["es"], c["today"])}
+
+    def check_goal(self, user_id: int, goal: dict) -> dict:
+        """A goal as the app sends it, checked and tidied. Raises ValueError with a message to show."""
+        from rideengine.analysis import goals as g
+        if not isinstance(goal, dict):
+            raise ValueError("A goal is an object")
+        objective, aspiration = goal.get("objective"), goal.get("aspiration")
+        opts = {o["id"]: {a["id"]: a for a in o["aspirations"]} for o in self.goal_options(user_id)["objectives"]}
+        if objective not in opts or aspiration not in opts[objective]:
+            raise ValueError(f"Unknown goal {objective!r} / {aspiration!r}")
+        p = goal.get("params") or {}
+        if not isinstance(p, dict):
+            raise ValueError("params must be an object")
+        params: dict = {}
+        for key, lo, hi in (("group_kmh", 15, 50), ("ride_hours", 0.5, 12), ("target_km", 10, 1000),
+                            ("event_km", 5, 1000), ("event_climbing_m", 0, 10000), ("weekly_hours", 1, 30)):
+            if p.get(key) is not None:
+                v = float(p[key])
+                if not lo <= v <= hi:
+                    raise ValueError(f"{key} must be between {lo} and {hi}")
+                params[key] = v
+        if p.get("terrain") is not None:
+            if p["terrain"] not in ("flat", "rolling", "hilly"):
+                raise ValueError("terrain must be flat, rolling or hilly")
+            params["terrain"] = p["terrain"]
+        if objective == "further" and "target_km" not in params and opts[objective][aspiration].get("target_km"):
+            params["target_km"] = opts[objective][aspiration]["target_km"]
+        ready_by = goal.get("ready_by")
+        if ready_by in (None, "", "season"):
+            ready_by = self.goal_options(user_id)["season"]["outdoor_from"]
+        else:
+            date.fromisoformat(str(ready_by))  # raises ValueError for a bad date
+        words = str(goal.get("words") or "").strip()[:500] or None
+        tags = [str(t)[:40] for t in (goal.get("tags") or [])][:10]
+        return {"objective": objective, "aspiration": aspiration, "title": opts[objective][aspiration]["title"],
+                "params": params, "ready_by": ready_by, "words": words, "tags": tags}
+
+    def goal_view(self, user_id: int, goal: dict) -> dict:
+        """A goal with what it means (the reveal) and how we'll see it working (markers), from the rider's data."""
+        from rideengine.analysis import goals as g
+        c = self._goal_context(user_id)
+        return {"goal": goal, "reveal": g.reveal(goal, c["es"], c["found"], c["today"], c["rest"]),
+                "markers": g.markers(goal, c["es"], c["found"], c["today"], c["rest"], c["power"]),
+                "season": g.seasons(c["es"], c["today"])}
+
+    def set_goal(self, user_id: int, goal: dict) -> dict:
+        goal = self.check_goal(user_id, goal)
+        with self.lock:
+            self.db.execute("UPDATE goals SET active = 0, ended_at = ? WHERE user_id = ? AND active = 1", (db.now(), user_id))
+            cur = self.db.execute("INSERT INTO goals (user_id, data, active, created_at) VALUES (?, ?, 1, ?)",
+                                  (user_id, json.dumps(goal), db.now()))
+        return self.goal_view(user_id, {**goal, "id": cur.lastrowid})
+
+    def current_goal(self, user_id: int) -> Optional[dict]:
+        with self.lock:
+            row = self.db.execute("SELECT goal_id, data, created_at FROM goals WHERE user_id = ? AND active = 1 "
+                                  "ORDER BY goal_id DESC LIMIT 1", (user_id,)).fetchone()
+        if row is None:
+            return None
+        return self.goal_view(user_id, {**json.loads(row["data"]), "id": row["goal_id"], "set_at": row["created_at"]})
+
+    def end_goal(self, user_id: int) -> bool:
+        with self.lock:
+            cur = self.db.execute("UPDATE goals SET active = 0, ended_at = ? WHERE user_id = ? AND active = 1",
+                                  (db.now(), user_id))
+        return cur.rowcount > 0
+
     def card_html(self, user_id: int, ride_id: str, name: Optional[str] = None, headline: Optional[str] = None,
                   places: Optional[list] = None, fonts: str = "google", background: str = "#FFFFFF",
                   privacy: bool = True) -> Optional[str]:

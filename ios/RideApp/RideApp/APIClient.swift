@@ -182,6 +182,141 @@ struct YouSummary: Decodable {
 
 enum RepeatKind { case route, climb }
 
+/// A number or a short text (a climb time like "13:43"), as the goals engine sends them.
+enum NumOrText: Decodable, Hashable {
+    case number(Double), text(String)
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let d = try? c.decode(Double.self) { self = .number(d) } else { self = .text(try c.decode(String.self)) }
+    }
+
+    func formatted(decimals: Int = 1) -> String {
+        switch self {
+        case .number(let d): return d.rounded() == d ? String(Int(d)) : Format.number(d, decimals: decimals)
+        case .text(let s): return s
+        }
+    }
+
+    var number: Double? { if case .number(let d) = self { d } else { nil } }
+}
+
+struct GoalOptions: Decodable {
+    let objectives: [Objective]
+    let season: Season
+
+    struct Objective: Decodable, Identifiable, Hashable {
+        let id: String
+        let title: String
+        let line: String
+        let aspirations: [Aspiration]
+    }
+
+    struct Aspiration: Decodable, Identifiable, Hashable {
+        let id: String
+        let title: String
+        let line: String
+        let targetKm: Double?
+    }
+}
+
+struct Season: Decodable, Hashable {
+    let now: String                 // outdoor | indoor | mixed | none
+    let outdoorMonths: [Int]
+    let outdoorFrom: String?
+    let outdoorUntil: String?
+}
+
+/// A goal as the rider builds it in the flow; sent as JSON in the server's own key names.
+struct GoalDraft: Hashable {
+    var objective = ""
+    var aspiration = ""
+    var words = ""
+    var groupKmh: Double = 30
+    var rideHours: Double = 1.75
+    var terrain = "rolling"
+    var targetKm: Double?
+    var eventKm: Double?
+    var eventClimbingM: Double?
+    var weeklyHours: Double = 4.5
+    var readyBy: Date?              // nil: when outdoor riding starts
+
+    func json() throws -> Data {
+        var params: [String: Any] = ["weekly_hours": weeklyHours]
+        if aspiration == "keep_up_group" {
+            params["group_kmh"] = groupKmh
+            params["ride_hours"] = rideHours
+            params["terrain"] = terrain
+        }
+        if let targetKm { params["target_km"] = targetKm }
+        if let eventKm { params["event_km"] = eventKm }
+        if let eventClimbingM { params["event_climbing_m"] = eventClimbingM }
+        var body: [String: Any] = ["objective": objective, "aspiration": aspiration, "params": params]
+        let w = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !w.isEmpty { body["words"] = w }
+        if let readyBy {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            body["ready_by"] = f.string(from: readyBy)
+        }
+        return try JSONSerialization.data(withJSONObject: body)
+    }
+}
+
+/// A goal with what it means (the reveal) and how we'll see it working (markers).
+struct GoalView: Decodable {
+    let goal: Goal
+    let reveal: Reveal
+    let markers: [Marker]
+    let season: Season
+
+    struct Goal: Decodable {
+        let id: Int?
+        let objective: String
+        let aspiration: String
+        let title: String
+        let readyBy: String?
+        let words: String?
+    }
+
+    struct Reveal: Decodable {
+        let headline: String
+        let figures: Figures
+        let build: [Build]
+        let notes: [String]
+    }
+
+    struct Figures: Decodable {
+        let groupKmh: Double?
+        let soloKmh: Double?
+        let soloBestKmh: Double?
+        let draftPowerPct: Double?
+    }
+
+    struct Build: Decodable, Identifiable {
+        let id: String
+        let title: String
+        let line: String
+    }
+
+    struct Marker: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let unit: String
+        let current: NumOrText?
+        let target: NumOrText?
+        let better: String
+        let history: [Point]
+        let pending: String?
+        let how: String?
+
+        struct Point: Decodable { let date: String; let value: Double }
+
+        var unitText: String { unit == "time" || unit.isEmpty ? "" : " " + unit }
+    }
+}
+
 struct Me: Decodable {
     let id: Int
     let tz: String?
@@ -432,6 +567,28 @@ struct APIClient {
     func you() async throws -> YouSummary { try await get("v1/you") }
 
     func collection() async throws -> CollectionSummary { try await get("v1/collection") }
+
+    // MARK: Goals (rideengine/analysis/goals.py)
+
+    func goalOptions() async throws -> GoalOptions { try await get("v1/goals/options") }
+
+    /// What a goal would mean and what we'd watch, without saving it.
+    func goalPreview(_ draft: GoalDraft) async throws -> GoalView {
+        try Self.decoder.decode(GoalView.self, from: await send(request("POST", "v1/goals/preview", body: draft.json())))
+    }
+
+    func setGoal(_ draft: GoalDraft) async throws -> GoalView {
+        try Self.decoder.decode(GoalView.self, from: await send(request("PUT", "v1/goals/current", body: draft.json())))
+    }
+
+    /// The active goal, or nil if none is set.
+    func currentGoal() async throws -> GoalView? {
+        do { return try await get("v1/goals/current") } catch let e as APIError where e.message == "No goal set" { return nil }
+    }
+
+    func endGoal() async throws {
+        _ = try await send(request("DELETE", "v1/goals/current"))
+    }
 
     func me() async throws -> Me { try await get("v1/me") }
 
