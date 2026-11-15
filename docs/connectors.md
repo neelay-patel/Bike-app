@@ -7,6 +7,23 @@ once and every ride arrives on its own, merged.
 Connectors needed: **Apple Health, Garmin, Wahoo, Hammerhead, Whoop, Oura, Fitbit (Google).**
 Strava stays excluded (terms bar AI use and showing data to others).
 
+## Data strategy (15 Nov 2026)
+The coach (`docs/coaching.md`) is only as good as the data, so: **every source, automatically.**
+- **Go to where data is recorded** (the device makers), not to aggregators or archives. Strava records
+  nothing itself apart from its phone app, so it holds nothing we can't get first-hand. No archive
+  importers: they break "connect once, everything arrives". (Strava phone-app riders: Strava can write
+  to Apple Health; we skip Strava-written workouts today. Revisit later.)
+- **Two hubs** collect most things with no extra work: **Apple Health** (the iPhone app; many apps write
+  to it, so Coros, Polar, Suunto, Peloton... riders often arrive this way) and **Garmin Connect** (Zwift and
+  many training apps sync to it).
+- **Zwift: link it to Garmin Connect** (Zwift → Settings → Connections). Every Zwift ride then reaches us
+  through the Garmin connector with power, cadence and virtual distance. Nothing to build.
+- **Being good at sources** also means: history on day one (check what Garmin's business tier allows; it
+  pushes new rides only); sync health per source (last synced, flag when quiet); gap spotting (a Watch
+  ride with no Garmin copy); merging, never duplicating.
+- **Personal use:** on Neelay's own setup every source counts as cleared for AI, for him alone (he handles
+  approvals). Product default for other riders stays strict (`SOURCE_POLICY`).
+
 ## Decisions
 - **Direct integrations, not an aggregator.** At our scale the official APIs are free (Garmin up to
   ~1,000 users, Wahoo, Whoop, Oura, Google). They give us original .FIT files, which aggregators
@@ -55,11 +72,11 @@ backend/  connections (encrypted tokens) → raw file kept → connector.normali
 ## Order of work
 1. Done 13 Nov 2026: backend skeleton + connector framework; Garmin personal-key connector (pull);
    upload endpoint for Apple Health.
-2. Built 13 Nov 2026, not yet run on a device: iPhone app with the Apple Health connector (permission
+2. Built 13 Nov 2026, running on Neelay's iPhone since 14 Nov 2026: iPhone app with the Apple Health connector (permission
    for workouts, routes, heart rate, active energy and cycling distance; history import; background
-   delivery; upload), Connections and Rides screens, dev login. Next: run it, then Sign in with Apple.
+   delivery; upload), Connections and Rides screens, dev login. Next: Sign in with Apple.
 3. Garmin Starter (OAuth + push webhook), so other riders can connect.
-4. Wahoo (in time for the KICKR).
+4. Wahoo (in time for the KICKR, week of 16 Nov 2026). Zwift: via Garmin Connect, no code.
 5. Whoop, Oura, Google Health. Need a tester who owns each device.
 6. Hammerhead once access is agreed, else the aggregator fallback.
 

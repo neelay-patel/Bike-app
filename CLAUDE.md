@@ -21,7 +21,9 @@ each account once and every ride arrives on its own, merged. Connectors: Apple H
 Wahoo, Hammerhead, Whoop, Oura, Fitbit (Google). Direct integrations, not an aggregator.
 Summaries, insights and cards come later. See `docs/connectors.md`.
 After that, three buckets in order (`docs/roadmap.md`): insight and tallies (started 13 Nov 2026), fun (avatar, rider card,
-badges), training and coaching. Notes and coaching text stay rule-based until the providers' AI terms are read.
+badges), training and coaching. Coaching is planned in `docs/coaching.md` (15 Nov 2026): data first (every source
+automatically, no archive importers; Strava records nothing itself), goals in the rider's words, progress read from
+normal riding, an AI coach that explains while the engine calculates. Data strategy: `docs/connectors.md`.
 
 ## Repo layout
 - `rideengine/model.py`: canonical format. `Recording` = one device's view; `Ride` = merged, with `provenance`.
@@ -96,3 +98,4 @@ python -m backend serve                             # API docs at http://127.0.0
 ## Linked work in claude.ai (Project "Cycling app")
 - Share card canvas: https://claude.ai/artifact/6vEqXrfwo3ozkCh8byzDin
 - Ride Trends dashboard: https://claude.ai/artifact/Tu5CgKUFQ84t6EsheDeLey
+- Goal setting flow (mock-up, approved 15 Nov 2026): https://claude.ai/artifact/JCQyTJQ5XDZi9gvpCkXXcB

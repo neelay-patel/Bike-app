@@ -71,15 +71,19 @@ Our own drawing style, not a copy of any existing card game's art.
   and its original file go; it's remembered as deleted (`deleted_recordings`) so a Garmin sync or Health upload doesn't
   bring it back. `DELETE /v1/rides/{id}`, `python -m backend delete-ride --user N <id>`. No undo yet.
 
-## Bucket 3: training and coaching (next, from 14 Nov 2026)
-- [ ] **Goals**: a distance (a first 150 km day), a date (a gran fondo), a climb time to beat.
-- [ ] **Plans that adapt** to what was ridden and how tired the rider is. Needs heart rate (Apple Health
-  on the real phone) and power (KICKR).
-- [ ] **Send workouts to the devices**: Wahoo's API to the KICKR; Garmin's Training API (Starter tier).
-  Plan, ride, analyse, adjust.
-- [ ] **AI coach** once the terms allow it, on allowed rides only.
+## Bucket 3: training and coaching (planned 15 Nov 2026, `docs/coaching.md`)
+- [ ] **Data first**: every source automatically (Wahoo this week; Zwift via Garmin Connect; Garmin business
+  tier; history on day one; sync health; gap spotting). Personal-use AI setting for Neelay's own setup.
+- [ ] **Goals**: stronger, further, faster, event; asked in the rider's words, revealed from their own data.
+  Design the flow as a mock-up first.
+- [ ] **The engine**: power curve and best efforts from normal rides, heart rate against speed and power,
+  drift, seasons, plan rules, recovery-driven adjustment; tracking both "did you do it" and "is it working".
+- [ ] **Plans that adapt daily**; KICKR workouts sent through Wahoo; strength and mobility reminders only.
+- [ ] **AI coach** on top of the engine (explains, reviews, adjusts within limits).
+- [ ] Later: Garmin workouts outdoors, events.
 
 ## What only Neelay can unblock
-- Run the app on the iPhone and connect Apple Health (heart rate for efficiency, drift, fitness).
+- ~~Run the app on the iPhone and connect Apple Health~~ (done 14 Nov 2026).
+- Link Zwift to Garmin Connect when Zwift starts.
 - Ride the KICKR (week of 16 Nov 2026) for power.
 - Read or skim the Garmin and Wahoo API terms (AI and sharing), so `SOURCE_POLICY` can be filled in.
