@@ -182,6 +182,85 @@ struct YouSummary: Decodable {
 
 enum RepeatKind { case route, climb }
 
+/// GET /v1/plan: weeks of structured sessions with targets and status.
+struct TrainingPlan: Decodable {
+    let planId: Int
+    let start: String
+    let readyBy: String
+    let days: [String]
+    let times: [String: String]
+    let weeklyHours: Double
+    let ftp: FTP
+    let hrZones: [String: [Int]]?
+    let maxHr: Double?
+    let thisWeek: Int?
+    let weeks: [Week]
+
+    struct FTP: Decodable { let watts: Double?; let source: String }
+
+    struct Week: Decodable, Identifiable {
+        var id: String { weekStart }
+        let weekStart: String
+        let phase: String
+        let index: Int
+        let hours: Double
+        let sessions: [PlanSession]
+        let done: Int
+        let total: Int
+    }
+
+    var sessions: [PlanSession] { weeks.flatMap(\.sessions) }
+}
+
+struct PlanSession: Decodable, Identifiable, Hashable {
+    static func == (a: PlanSession, b: PlanSession) -> Bool { a.id == b.id && a.status == b.status }
+    func hash(into h: inout Hasher) { h.combine(id) }
+
+    let id: String
+    let date: String
+    let time: String
+    let kind: String
+    let title: String
+    let purpose: String
+    let indoor: Bool
+    let offBike: Bool
+    let seconds: Double
+    let steps: [PlanStep]
+    let status: String          // done | missed | today | upcoming
+    let summary: String?
+    let load: Double?
+
+    var day: Date? { GoalText.date(date) }
+}
+
+/// A step ("Hard, 1 min, Z6") or a set of repeated steps ("6 × 1 min hard / 2 min easy").
+struct PlanStep: Decodable, Hashable {
+    let label: String?
+    let seconds: Double?
+    let zone: String?
+    let rampTo: String?
+    let target: PlanTarget?
+    let set: String?
+    let `repeat`: Int?
+    let steps: [PlanStep]?
+
+    /// Every step in order, sets expanded.
+    var flat: [PlanStep] {
+        guard let steps, let n = `repeat` else { return [self] }
+        return (0..<n).flatMap { _ in steps.flatMap(\.flat) }
+    }
+
+    var totalSeconds: Double { flat.reduce(0) { $0 + ($1.seconds ?? 0) } }
+}
+
+struct PlanTarget: Decodable, Hashable {
+    let pctFtp: [Int]
+    let zoneName: String
+    let rpe: Int
+    let watts: [Int]?
+    let hr: [Int]?
+}
+
 /// A number or a short text (a climb time like "13:43"), as the goals engine sends them.
 enum NumOrText: Decodable, Hashable {
     case number(Double), text(String)
@@ -584,6 +663,36 @@ struct APIClient {
     /// The active goal, or nil if none is set.
     func currentGoal() async throws -> GoalView? {
         do { return try await get("v1/goals/current") } catch let e as APIError where e.message == "No goal set" { return nil }
+    }
+
+    // MARK: Training plan (rideengine/analysis/plan.py)
+
+    /// The plan for the active goal, or nil if there's no goal.
+    func plan() async throws -> TrainingPlan? {
+        do { return try await get("v1/plan") } catch let e as APIError where e.message.hasPrefix("No plan") { return nil }
+    }
+
+    func planSettings(days: [String], times: [String: String], weeklyHours: Double) async throws -> TrainingPlan {
+        let body = try JSONSerialization.data(withJSONObject: ["days": days, "times": times, "weekly_hours": weeklyHours])
+        return try Self.decoder.decode(TrainingPlan.self, from: await send(request("PUT", "v1/plan/settings", body: body)))
+    }
+
+    func setDone(_ sessionId: String, _ done: Bool) async throws {
+        _ = try await send(request(done ? "PUT" : "DELETE", "v1/plan/sessions/\(sessionId)/done"))
+    }
+
+    /// The session as a Zwift workout file.
+    func zwift(_ sessionId: String) async throws -> Data {
+        try await send(request("GET", "v1/plan/sessions/\(sessionId)/zwift"))
+    }
+
+    struct CalendarLink: Decodable { let url: String; let webcal: String }
+
+    func calendarLink() async throws -> CalendarLink { try await get("v1/plan/calendar") }
+
+    func setFTP(_ watts: Double?) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["ftp": watts as Any? ?? NSNull()])
+        _ = try await send(request("PUT", "v1/me", body: body))
     }
 
     func endGoal() async throws {

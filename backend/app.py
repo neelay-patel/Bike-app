@@ -112,6 +112,8 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         removes it (cards go back to having none)."""
         try:
             return be.update_me(uid, body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             if "tz" in body:
                 raise HTTPException(400, f"Unknown time zone {body['tz']!r}") from exc
@@ -163,6 +165,69 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
     @app.delete("/v1/goals/current")
     def end_goal(uid: int = Depends(user)):
         return {"ended": be.end_goal(uid)}
+
+    @app.get("/v1/plan")
+    def plan(uid: int = Depends(user)):
+        """The training plan for the active goal: weeks of structured sessions with targets (watts when FTP
+        is known, heart rate always) and each session's status (done, missed, today, upcoming)."""
+        v = be.plan_view(uid)
+        if v is None:
+            raise HTTPException(404, "No plan: set a goal first")
+        return v
+
+    @app.put("/v1/plan/settings")
+    def plan_settings(body: dict = Body(...), uid: int = Depends(user)):
+        """{"days": ["Mon", ...], "times": {"Mon": "07:00"}, "weekly_hours": 4.5}: rebuilds from today on."""
+        try:
+            if be.make_plan(uid, body.get("days"), body.get("times"), body.get("weekly_hours")) is None:
+                raise HTTPException(404, "No plan: set a goal first")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, str(exc))
+        return be.plan_view(uid)
+
+    @app.get("/v1/plan/sessions/{session_id}")
+    def plan_session(session_id: str, uid: int = Depends(user)):
+        s = be.plan_session(uid, session_id)
+        if s is None:
+            raise HTTPException(404, "No such session")
+        return s
+
+    @app.put("/v1/plan/sessions/{session_id}/done")
+    def session_done(session_id: str, uid: int = Depends(user)):
+        if not be.mark_done(uid, session_id, True):
+            raise HTTPException(404, "No such session")
+        return {"id": session_id, "done": True}
+
+    @app.delete("/v1/plan/sessions/{session_id}/done")
+    def session_undone(session_id: str, uid: int = Depends(user)):
+        if not be.mark_done(uid, session_id, False):
+            raise HTTPException(404, "No such session")
+        return {"id": session_id, "done": False}
+
+    @app.get("/v1/plan/sessions/{session_id}/zwift")
+    def session_zwo(session_id: str, uid: int = Depends(user)):
+        """The session as a Zwift workout (.zwo): put it in Documents/Zwift/Workouts and Zwift sets the
+        KICKR's resistance for each step."""
+        zwo = be.session_zwo(uid, session_id)
+        if zwo is None:
+            raise HTTPException(404, "No such structured session")
+        return Response(zwo, media_type="application/xml",
+                        headers={"Content-Disposition": f'attachment; filename="{session_id}.zwo"'})
+
+    @app.get("/v1/plan/calendar")
+    def plan_calendar(request: Request, reset: bool = False, uid: int = Depends(user)):
+        """The address of the rider's training calendar feed, to subscribe to from any calendar app."""
+        token = be.calendar_token(uid, reset=reset)
+        url = str(request.base_url).rstrip("/") + f"/calendar/{token}.ics"
+        return {"url": url, "webcal": "webcal://" + url.split("://", 1)[1]}
+
+    @app.get("/calendar/{token}.ics")
+    def calendar_feed(token: str):
+        """The training plan as a calendar feed. No login: the address itself is the secret."""
+        ics = be.calendar_ics(token)
+        if ics is None:
+            raise HTTPException(404, "Unknown calendar")
+        return Response(ics, media_type="text/calendar; charset=utf-8")
 
     @app.get("/v1/collection")
     def collection(uid: int = Depends(user)):

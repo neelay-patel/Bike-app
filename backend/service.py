@@ -357,9 +357,9 @@ class Backend:
     def me(self, user_id: int) -> dict:
         from rideengine.card.avatar import clean
         with self.lock:
-            row = self.db.execute("SELECT id, tz, display_name, avatar FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = self.db.execute("SELECT id, tz, display_name, avatar, ftp FROM users WHERE id = ?", (user_id,)).fetchone()
         return {"id": row["id"], "tz": row["tz"], "name": row["display_name"] or "Rider",
-                "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None}
+                "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None, "ftp": row["ftp"]}
 
     def update_me(self, user_id: int, body: dict) -> dict:
         """{"tz": ..., "name": ..., "avatar": {...}}: any of them. The avatar is cleaned to known parts."""
@@ -373,7 +373,157 @@ class Backend:
             if "avatar" in body:
                 spec = json.dumps(clean(body["avatar"])) if isinstance(body["avatar"], dict) else None
                 self.db.execute("UPDATE users SET avatar = ? WHERE id = ?", (spec, user_id))
+            if "ftp" in body:
+                ftp = body["ftp"]
+                if ftp is not None and not (50 <= float(ftp) <= 600):
+                    raise ValueError("FTP must be between 50 and 600 watts")
+                self.db.execute("UPDATE users SET ftp = ? WHERE id = ?", (None if ftp is None else float(ftp), user_id))
         return self.me(user_id)
+
+    # --- training plan (rideengine/analysis/plan.py) -----------------------------------------------
+    def _plan_context(self, user_id: int) -> dict:
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import goals as g
+        from rideengine.analysis import plan as p
+        tz = self.insights.tz(user_id)
+        with self.lock:
+            feats = self.insights._features(user_id)
+        visible = feat_mod.visible_ids(feats)
+        vfeats = [f for f in feats if f["ride_id"] in visible]
+        today = datetime.now(tz).astimezone(tz).date()
+        recent = [f for f in vfeats if f["start"] >= (datetime.now() - timedelta(days=365)).timestamp()]
+        starts = [datetime.fromtimestamp(f["start"], tz).astimezone(tz) for f in recent]
+        power = g.best_power_curve(vfeats, today - timedelta(days=120))
+        me = self.me(user_id)
+        rest = self.recovery(user_id)["resting_hr"].get("usual")
+        max_hr = p.max_hr_estimate([f.get("max_hr") for f in recent])
+        return {"tz": tz, "today": today, "feats": vfeats, "starts": starts,
+                "ftp": p.ftp_estimate(me.get("ftp"), power), "hr_zones": p.hr_zones(max_hr, rest),
+                "max_hr": max_hr, "resting_hr": rest}
+
+    def _active_plan(self, user_id: int) -> Optional[dict]:
+        with self.lock:
+            row = self.db.execute("SELECT plan_id, data FROM plans WHERE user_id = ? AND active = 1 "
+                                  "ORDER BY plan_id DESC LIMIT 1", (user_id,)).fetchone()
+        return {**json.loads(row["data"]), "plan_id": row["plan_id"]} if row else None
+
+    def make_plan(self, user_id: int, days: Optional[list] = None, times: Optional[dict] = None,
+                  weekly_hours: Optional[float] = None) -> Optional[dict]:
+        """(Re)build the plan from the active goal. Days and times default to the rider's usual ones; weeks
+        already past are kept as they were, so "did you do it" history survives a change."""
+        from rideengine.analysis import goals as g
+        from rideengine.analysis import plan as p
+        with self.lock:
+            row = self.db.execute("SELECT goal_id, data FROM goals WHERE user_id = ? AND active = 1 "
+                                  "ORDER BY goal_id DESC LIMIT 1", (user_id,)).fetchone()
+        if row is None:
+            return None
+        goal = {**json.loads(row["data"]), "id": row["goal_id"]}
+        c = self._plan_context(user_id)
+        old = self._active_plan(user_id)
+        same_goal = old and old.get("goal_id") == goal["id"]
+        hours = float(weekly_hours or (old["weekly_hours"] if same_goal else None)
+                      or goal.get("params", {}).get("weekly_hours") or 4.5)
+        n = p.sessions_for(hours)
+        days = days or (old["days"] if same_goal else None) or p.usual_days(c["starts"], n)
+        bad = [d for d in days if d not in p.WEEKDAYS]
+        if bad or not days:
+            raise ValueError("days must be some of Mon Tue Wed Thu Fri Sat Sun")
+        times = {**p.usual_times(c["starts"]), **((old or {}).get("times", {}) if same_goal else {}), **(times or {})}
+        for d, t in times.items():
+            datetime.strptime(t, "%H:%M")  # raises ValueError for a bad time
+        season = g.seasons(records_entries(c["feats"], c["tz"]), c["today"])
+        new = p.build_plan(goal, c["today"], season, days, times, hours)
+        if same_goal:  # keep the sessions before today
+            kept = [s for w in old["weeks"] for s in w["sessions"] if s["date"] < c["today"].isoformat()]
+            if kept and new["weeks"]:
+                first = new["weeks"][0]
+                prior = [w for w in old["weeks"] if w["week_start"] < first["week_start"]]
+                first["sessions"] = sorted([s for s in kept if s["date"] >= first["week_start"]] + first["sessions"],
+                                           key=lambda s: s["date"])
+                new["weeks"] = prior + new["weeks"]
+                new["start"] = old["start"]
+        with self.lock:
+            self.db.execute("UPDATE plans SET active = 0 WHERE user_id = ?", (user_id,))
+            self.db.execute("INSERT INTO plans (user_id, goal_id, data, active, created_at) VALUES (?, ?, ?, 1, ?)",
+                            (user_id, goal["id"], json.dumps(new), db.now()))
+        return new
+
+    def plan_view(self, user_id: int) -> Optional[dict]:
+        """The active plan with targets filled in (current FTP and heart-rate zones) and each session's status."""
+        from rideengine.analysis import plan as p
+        plan = self._active_plan(user_id)
+        if plan is None:
+            return None
+        c = self._plan_context(user_id)
+        by_day: dict[str, list] = {}
+        for f in c["feats"]:
+            by_day.setdefault(datetime.fromtimestamp(f["start"], c["tz"]).astimezone(c["tz"]).date().isoformat(), []).append(f)
+        with self.lock:
+            done = {r["session_id"] for r in self.db.execute("SELECT session_id FROM plan_done WHERE user_id = ?", (user_id,))}
+        today = c["today"]
+        weeks = []
+        for w in plan["weeks"]:
+            sessions = []
+            for s in w["sessions"]:
+                t = p.targets(s, c["ftp"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
+                t["status"] = p.status(s, by_day.get(s["date"], []), today, done)
+                t["summary"] = p.describe(t) if s["steps"] else s["purpose"]
+                sessions.append(t)
+            weeks.append({**w, "sessions": sessions,
+                          "done": sum(1 for s in sessions if s["status"] == "done"), "total": len(sessions)})
+        this_week = next((w for w in weeks if w["week_start"] <= today.isoformat() <
+                          (date.fromisoformat(w["week_start"]) + timedelta(days=7)).isoformat()), None)
+        return {"plan_id": plan["plan_id"], "goal_id": plan.get("goal_id"), "start": plan["start"],
+                "ready_by": plan["ready_by"], "days": plan["days"], "times": plan["times"],
+                "weekly_hours": plan["weekly_hours"], "ftp": c["ftp"], "hr_zones": c["hr_zones"],
+                "max_hr": c["max_hr"], "resting_hr": c["resting_hr"],
+                "zones": {z: {"name": v["name"], "pct_ftp": [round(v["ftp"][0] * 100), round(v["ftp"][1] * 100)]}
+                          for z, v in p.ZONES.items()},
+                "this_week": this_week["index"] if this_week else None, "weeks": weeks}
+
+    def plan_session(self, user_id: int, session_id: str) -> Optional[dict]:
+        view = self.plan_view(user_id)
+        if view is None:
+            return None
+        return next((s for w in view["weeks"] for s in w["sessions"] if s["id"] == session_id), None)
+
+    def mark_done(self, user_id: int, session_id: str, done: bool = True) -> bool:
+        if self.plan_session(user_id, session_id) is None:
+            return False
+        with self.lock:
+            if done:
+                self.db.execute("INSERT OR REPLACE INTO plan_done (user_id, session_id, at) VALUES (?, ?, ?)",
+                                (user_id, session_id, db.now()))
+            else:
+                self.db.execute("DELETE FROM plan_done WHERE user_id = ? AND session_id = ?", (user_id, session_id))
+        return True
+
+    def session_zwo(self, user_id: int, session_id: str) -> Optional[str]:
+        from rideengine.analysis import plan as p
+        s = self.plan_session(user_id, session_id)
+        return p.to_zwo(s) if s and s["steps"] else None
+
+    def calendar_token(self, user_id: int, reset: bool = False) -> str:
+        """The secret in the calendar feed's address (calendar apps can't send a login). Reset makes a new
+        one, so old subscriptions stop updating."""
+        with self.lock:
+            row = self.db.execute("SELECT calendar_token FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row["calendar_token"] and not reset:
+                return row["calendar_token"]
+            token = secrets.token_urlsafe(24)
+            self.db.execute("UPDATE users SET calendar_token = ? WHERE id = ?", (token, user_id))
+            return token
+
+    def calendar_ics(self, token: str) -> Optional[str]:
+        from rideengine.analysis import plan as p
+        with self.lock:
+            row = self.db.execute("SELECT id FROM users WHERE calendar_token = ?", (token,)).fetchone()
+        if row is None:
+            return None
+        view = self.plan_view(row["id"])
+        sessions = [s for w in (view or {}).get("weeks", []) for s in w["sessions"]]
+        return p.to_ics(sessions, self.insights.tz(row["id"]))
 
     # --- the fun bucket: badges, rider card, binder ------------------------------------------------
     def collection(self, user_id: int) -> dict:
@@ -478,6 +628,7 @@ class Backend:
             self.db.execute("UPDATE goals SET active = 0, ended_at = ? WHERE user_id = ? AND active = 1", (db.now(), user_id))
             cur = self.db.execute("INSERT INTO goals (user_id, data, active, created_at) VALUES (?, ?, 1, ?)",
                                   (user_id, json.dumps(goal), db.now()))
+        self.make_plan(user_id)
         return self.goal_view(user_id, {**goal, "id": cur.lastrowid})
 
     def current_goal(self, user_id: int) -> Optional[dict]:
@@ -492,6 +643,7 @@ class Backend:
         with self.lock:
             cur = self.db.execute("UPDATE goals SET active = 0, ended_at = ? WHERE user_id = ? AND active = 1",
                                   (db.now(), user_id))
+            self.db.execute("UPDATE plans SET active = 0 WHERE user_id = ?", (user_id,))
         return cur.rowcount > 0
 
     def card_html(self, user_id: int, ride_id: str, name: Optional[str] = None, headline: Optional[str] = None,
@@ -555,3 +707,8 @@ def describe(ride_id: str, ride: Ride) -> dict:
             "provenance": ride.provenance, "recordings": ride.recordings, "excluded": ride.excluded,
             "use": {u: {"allowed": allowed(ride.provenance, u),
                         "blocked_by": sorted(blocked_sources(ride.provenance, u))} for u in ("ai", "share")}}
+
+
+def records_entries(feats: list[dict], tz):
+    from rideengine.analysis import records
+    return records.entries_from_features(feats, tz)

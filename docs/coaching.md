@@ -99,6 +99,23 @@ widening of what we read from Apple Health, at this stage.
 - Goals stored per rider, one active, older kept as history; `ready_by` defaults to the start of the outdoor season.
 - Ride features v5 carry each ride's power curve (measured power only).
 
+**The training plan** (`rideengine/analysis/plan.py`, API under `/v1/plan…`, the Plan tab), 15 Nov 2026:
+- Built from the active goal when it's set: from now to the ready-by date in phases (base, build, sharpen, taper),
+  an easier week every fourth, ramping up gently. On the rider's usual days and times (from a year of rides; most
+  ridden weekdays, spread out), changeable in the app. Indoor or outdoor by their season.
+- Sessions by focus (keep up with a group: surges, sweet spot, a group ride (Zwift in winter), endurance). Each has a
+  warm-up, a main set (how many, how long, how hard, the recovery between), cool-down; reps grow through the build.
+  Strength and mobility: a reminder on a rest day, ticked off by hand.
+- Targets: % of FTP, watts once FTP is known (the rider's own, or 95% of best 20 min from rides with power), heart rate
+  from heart-rate reserve (max HR = 98th percentile of rides' max, resting HR from Apple Health) for efforts over 2
+  minutes (heart rate lags shorter ones), and feel (1–10). A training load per session.
+- Did you do it: a ride that day of at least 60% of the planned time counts as done; missed sessions show as missed.
+- **Calendar:** a subscribed feed (`webcal://…/calendar/<secret>.ics`), every session with its structure in the notes,
+  updating itself when the plan changes. Apple Calendar from the app; any calendar from the copied link. Reset the link
+  to stop old subscriptions. Needs the server reachable from wherever the calendar fetches (Google fetches from its
+  servers: works once the backend is hosted).
+- **Zwift:** each indoor session exports as a .zwo workout; in Zwift's workouts folder, Zwift sets the KICKR's resistance.
+
 ## Order of work
 1. **Data first:** Wahoo (KICKR power) this week; Zwift linked to Garmin Connect when Neelay starts; Garmin
    business tier for other riders; history on day one; sync health and gap spotting.

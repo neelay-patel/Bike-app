@@ -67,6 +67,23 @@ CREATE TABLE IF NOT EXISTS goals (
 );
 CREATE INDEX IF NOT EXISTS goals_user ON goals (user_id, active);
 
+-- Training plans (rideengine/analysis/plan.py): one active per rider, built from the active goal.
+CREATE TABLE IF NOT EXISTS plans (
+    plan_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    goal_id       INTEGER,
+    data          TEXT NOT NULL,        -- weeks of sessions (structure; targets filled in when shown)
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plans_user ON plans (user_id, active);
+CREATE TABLE IF NOT EXISTS plan_done (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    session_id    TEXT NOT NULL,        -- ticked off by hand (off-bike sessions, or a ride we didn't see)
+    at            REAL NOT NULL,
+    PRIMARY KEY (user_id, session_id)
+);
+
 -- Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery). Never shared.
 CREATE TABLE IF NOT EXISTS metrics (
     user_id       INTEGER NOT NULL REFERENCES users(id),
@@ -145,6 +162,8 @@ MIGRATIONS = [
     ("users", "tz", "TEXT"),        # the rider's IANA time zone, e.g. America/Toronto
     ("users", "display_name", "TEXT"),  # shown on the rider card
     ("users", "avatar", "TEXT"),        # avatar spec as JSON (rideengine/card/avatar.py)
+    ("users", "ftp", "REAL"),           # the rider's own FTP in watts, if they gave one
+    ("users", "calendar_token", "TEXT"),  # secret in the training calendar feed's address
 ]
 
 

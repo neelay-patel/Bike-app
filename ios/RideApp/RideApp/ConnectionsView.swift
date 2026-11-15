@@ -3,14 +3,22 @@ import SwiftUI
 /// One card per source: connect once, then rides arrive on their own.
 struct ConnectionsView: View {
     @EnvironmentObject var model: AppModel
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        MonoLabel("Where your rides come from")
-                        Text("Sources").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            MonoLabel("Where your rides come from")
+                            Text("Sources").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                        }
+                        Spacer()
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape").font(.system(size: 20)).frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Settings")
                     }
                     .padding(.horizontal, 4).padding(.top, 8)
                     if let error = model.error {
@@ -27,6 +35,7 @@ struct ConnectionsView: View {
             .background(Theme.ground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
+            .sheet(isPresented: $showSettings) { SettingsView().presentationDragIndicator(.visible) }
         }
     }
 }

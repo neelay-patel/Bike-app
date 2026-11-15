@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     @Published var you: YouSummary?
     @Published var recovery: RecoverySummary?
     @Published var goal: GoalView?
+    @Published var plan: TrainingPlan?
     @Published var error: String?
     @Published var isLoading = false
 
@@ -53,10 +54,12 @@ final class AppModel: ObservableObject {
             async let y = try? api.you()  // an older server has no /v1/you: the rest still loads
             async let rc = try? api.recovery()
             async let g = try? api.currentGoal()
+            async let pl = try? api.plan()
             (connections, rides) = try await (c, r)
             you = await y
             recovery = await rc
             goal = (await g) ?? nil
+            plan = (await pl) ?? nil
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -80,10 +83,10 @@ struct ContentView: View {
     var body: some View {
         TabView {
             RidesView().tabItem { Label("Rides", systemImage: "bicycle") }
+            PlanView().tabItem { Label("Plan", systemImage: "calendar") }
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }
             BinderView().tabItem { Label("Binder", systemImage: "rectangle.stack.fill") }
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }
-            SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .tint(Theme.cobalt)
         .font(Theme.text())
