@@ -43,6 +43,8 @@ struct BinderView: View {
                         }
                     }
 
+                    YourBike(spec: model.bike) { builder = .full }
+
                     if let c = collection {
                         BadgeGrid(badges: c.badges, rides: model.rides)
                         if !c.binder.isEmpty {
@@ -57,7 +59,7 @@ struct BinderView: View {
             .refreshable { await load(force: true) }
             .task { await load(force: false) }
             .sheet(item: $builder, onDismiss: { Task { await load(force: true) } }) { mode in
-                AvatarBuilder(quick: mode == .quick)
+                AvatarBuilder(quick: mode == .quick).environmentObject(model)
             }
         }
     }
@@ -338,7 +340,7 @@ private struct MakeAvatarPrompt: View {
             Image(systemName: "person.crop.circle.badge.plus").font(.system(size: 30)).foregroundStyle(Theme.cobalt)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Make your avatar").font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
-                Text("Four quick questions. It goes on your rider card and behind your ride cards.")
+                Text("Five quick questions, your bike included. It goes on your rider card and behind your ride cards.")
                     .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -356,6 +358,7 @@ private struct MakeAvatarPrompt: View {
 /// "More options" opens every part.
 struct AvatarBuilder: View {
     var quick = false
+    @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var step = 0
     @State private var showAll = false
@@ -369,17 +372,25 @@ struct AvatarBuilder: View {
     private let order: [(key: String, label: String)] = [
         ("skin", "Skin"), ("face", "Face"), ("hair", "Hair"), ("hair_color", "Hair colour"), ("beard", "Beard"),
         ("moustache", "Moustache"), ("glasses", "Glasses"), ("headwear", "On your head"), ("helmet_color", "Helmet or cap colour"),
-        ("jersey", "Jersey"), ("accent", "Jersey stripe"), ("pattern", "Jersey pattern"), ("bike", "Bike"),
+        ("jersey", "Jersey"), ("accent", "Jersey stripe"), ("pattern", "Jersey pattern"),
     ]
+    private let bikeOrder: [(key: String, label: String)] = [
+        ("bike", "Bike"), ("bike_color", "Frame"), ("bike_accent", "Bar tape and details"), ("tyres", "Tyres"),
+    ]
+    private var bike: BikeSpec { BikeSpec(avatar: spec) }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    SVGView(svg: svg)
-                        .frame(width: 200, height: 240)
-                        .frame(maxWidth: .infinity)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    if quick && !showAll && steps[min(step, steps.count - 1)].keys.contains(where: { $0.0 == "bike" }) {
+                        bikePreview
+                    } else {
+                        SVGView(svg: svg)
+                            .frame(width: 200, height: 240)
+                            .frame(maxWidth: .infinity)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    }
                     if quick && !showAll {
                         quickStep
                     } else {
@@ -388,6 +399,9 @@ struct AvatarBuilder: View {
                             .submitLabel(.done)
                         if let options {
                             ForEach(order, id: \.key) { item in row(item.key, item.label, options: options) }
+                            Text("Your bike").font(Theme.heading(28)).foregroundStyle(Theme.ink).padding(.top, 8)
+                            bikePreview
+                            ForEach(bikeOrder, id: \.key) { item in row(item.key, item.label, options: options) }
                         }
                     }
                     if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
@@ -415,7 +429,18 @@ struct AvatarBuilder: View {
          ("And your hair?", [("hair", "Style"), ("hair_color", "Colour")]),
          ("Beard or moustache?", [("beard", "Beard"), ("moustache", "Moustache")]),
          ("Helmet or cap?", [("headwear", "On your head"), ("helmet_color", "Colour")]),
+         ("What do you ride?", [("bike", "Bike"), ("bike_color", "Frame")]),
          ("What should your rider card say?", [])]
+    }
+
+    /// The bike, drawn on the phone as you pick (no server round trip).
+    private var bikePreview: some View {
+        BikeArt(spec: bike)
+            .frame(height: 210)
+            .padding(.horizontal, 14).padding(.vertical, 18)
+            .frame(maxWidth: .infinity)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .animation(.easeInOut(duration: 0.2), value: bike)
     }
 
     @ViewBuilder private var quickStep: some View {
@@ -438,7 +463,7 @@ struct AvatarBuilder: View {
                     Button("Done") { Task { await save() } }.buttonStyle(PrimaryButton()).disabled(saving)
                 }
             }
-            Button("More options: face, glasses, jersey") { showAll = true }
+            Button("More options: face, glasses, jersey, bike") { showAll = true }
                 .font(Theme.text(14, .medium)).tint(Theme.cobalt)
         }
     }
@@ -463,14 +488,17 @@ struct AvatarBuilder: View {
         let selected = spec[key] == choice
         let hex: String? = key == "skin" ? options.colors.skin[choice]
             : key == "hair_color" ? options.colors.hairColor[choice]
-            : ["helmet_color", "jersey", "accent"].contains(key) ? options.colors.kit[choice] : nil
+            : ["helmet_color", "jersey", "accent", "bike_accent"].contains(key) ? options.colors.kit[choice]
+            : key == "bike_color" ? (options.colors.frame?[choice] ?? BikePalette.frame[choice].map { String(format: "#%06X", $0) })
+            : key == "tyres" ? (options.colors.tyres?[choice] ?? BikePalette.tyres[choice].map { String(format: "#%06X", $0) })
+            : nil
         Button { spec[key] = choice } label: {
             if let hex, let value = UInt32(hex.dropFirst(), radix: 16) {
                 Circle().fill(Color(hex: value)).frame(width: 30, height: 30)
                     .overlay(Circle().stroke(selected ? Theme.cobalt : Theme.line, lineWidth: selected ? 3 : 1))
                     .accessibilityLabel(choice)
             } else {
-                Text(choice.replacingOccurrences(of: "_", with: " ").capitalized)
+                Text(["mtb": "Mountain", "indoor": "Indoor trainer"][choice] ?? choice.replacingOccurrences(of: "_", with: " ").capitalized)
                     .font(Theme.text(14, selected ? .semibold : .regular))
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(selected ? Theme.cobalt : Theme.surface, in: Capsule())
@@ -487,7 +515,7 @@ struct AvatarBuilder: View {
             async let m = APIClient().me()
             let (opts, me) = try await (o, m)
             options = opts
-            spec = me.avatar ?? opts.defaults
+            spec = opts.defaults.merging(me.avatar ?? [:]) { _, mine in mine }
             name = me.name == "Rider" ? "" : me.name
         } catch {
             self.error = error.localizedDescription
@@ -505,11 +533,33 @@ struct AvatarBuilder: View {
         saving = true
         defer { saving = false }
         do {
-            _ = try await APIClient().updateMe(name: name, avatar: spec)
+            let me = try await APIClient().updateMe(name: name, avatar: spec)
+            model.bike = BikeSpec(avatar: me.avatar)
             dismiss()
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// Your bike, under the rider card. Tap to change it.
+private struct YourBike: View {
+    let spec: BikeSpec
+    let edit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                MonoLabel("Your bike")
+                Spacer()
+                Text(spec.label).font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
+            }
+            BikeArt(spec: spec).frame(height: 190).frame(maxWidth: .infinity)
+        }
+        .padding(16).surfaceCard(radius: 22)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: edit)
+        .accessibilityAddTraits(.isButton)
     }
 }
 

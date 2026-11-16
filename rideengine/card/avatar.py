@@ -15,6 +15,10 @@ HAIR_COLOR = {"black": "#1E1714", "brown": "#5A3A26", "auburn": "#8A4026", "blon
               "grey": "#9C9693", "white": "#E9E4E0"}
 KIT = {"cobalt": "#1D3A8C", "wine": "#7C1E3E", "ink": "#1B1618", "sand": "#F1E2B6", "sky": "#4A86E8",
        "red": "#D7263D", "green": "#3A9D4A", "yellow": "#F3C623", "white": "#FBF8F8", "orange": "#E9772E"}
+# The bike's frame: any kit colour, or bare carbon or titanium. The app draws the bike itself
+# (BikeArt.swift copies these colours; tests/test_design.py checks they match).
+FRAME = {"carbon": "#26252A", "titanium": "#B9B4AC", **KIT}
+TYRES = {"black": "#1C1A1B", "tan": "#C49A63"}
 OPTIONS = {
     "skin": list(SKIN),
     "face": ["oval", "round", "long"],
@@ -29,10 +33,14 @@ OPTIONS = {
     "accent": list(KIT),
     "pattern": ["band", "sash", "hoops", "plain"],
     "bike": ["road", "gravel", "mtb", "indoor"],
+    "bike_color": list(FRAME),
+    "bike_accent": list(KIT),
+    "tyres": list(TYRES),
 }
 DEFAULT = {"skin": "s3", "face": "oval", "hair": "short", "hair_color": "brown", "beard": "none", "moustache": "none",
            "glasses": "none", "headwear": "helmet", "helmet_color": "white", "jersey": "cobalt",
-           "accent": "sand", "pattern": "band", "bike": "road"}
+           "accent": "sand", "pattern": "band", "bike": "road",
+           "bike_color": "carbon", "bike_accent": "sand", "tyres": "black"}
 
 
 def clean(spec: dict | None) -> dict:

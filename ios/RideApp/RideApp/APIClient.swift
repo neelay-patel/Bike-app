@@ -413,6 +413,8 @@ struct AvatarOptions: Decodable {
         let skin: [String: String]
         let hairColor: [String: String]
         let kit: [String: String]
+        let frame: [String: String]?   // bike frame colours (an older server has none)
+        let tyres: [String: String]?
     }
 
     enum CodingKeys: String, CodingKey { case options, defaults = "default", colors }

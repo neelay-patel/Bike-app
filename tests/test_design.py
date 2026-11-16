@@ -77,3 +77,14 @@ def test_labels_avoid_each_other():
         boxes.append((x0, float(y) - 11, x0 + w, float(y) + 3))
     a, b = boxes
     assert a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]   # no overlap
+
+
+def test_swift_bike_palette_matches_avatar():
+    """BikeArt.swift draws the bike on the phone with copies of avatar.py's frame and tyre colours."""
+    from rideengine.card import avatar
+    swift = open(os.path.join(APP, "RideApp", "BikeArt.swift")).read()
+    for table, colours in (("frame", avatar.FRAME), ("tyres", avatar.TYRES)):
+        block = re.search(rf"static let {table}: \[String: UInt32\] = \[(.*?)\]", swift, re.S).group(1)
+        found = {k: v.upper() for k, v in re.findall(r'"(\w+)": 0x([0-9A-Fa-f]{6})', block)}
+        assert found == {k: v.lstrip("#").upper() for k, v in colours.items()}, table
+    assert set(avatar.OPTIONS["bike"]) == {"road", "gravel", "mtb", "indoor"}

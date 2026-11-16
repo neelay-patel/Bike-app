@@ -6,7 +6,7 @@ Our own drawing style, not a copy of any existing card game's art.
 ## Avatar (`rideengine/card/avatar.py`)
 - Drawn in code as SVG from parts: skin (6), face (3), hair (5) and colour (6), beard (none, stubble, goatee, short,
   full) and moustache (none, moustache, handlebar) as two choices so any pair works, glasses (4), helmet / cap / none
-  and its colour, jersey and stripe colours (10 each), pattern (band, sash, hoops, plain). Bike is stored, not drawn yet.
+  and its colour, jersey and stripe colours (10 each), pattern (band, sash, hoops, plain). Your bike (16 Nov 2026): type (road, gravel, mountain, indoor trainer), frame colour (any kit colour, carbon or titanium), bar tape and details, tyres (black or tan walls). Drawn on the phone (`BikeArt.swift`) from real geometry in millimetres (frame angles, 700c wheels, chainrings and cogs by tooth count), so it stays sharp at full resolution: big in the Binder and the builder, and as the Rides tab icon (in colour when selected, an outline otherwise). Debug builds launched with `-renderBikes` write every type as PNGs to Documents/bikes.
   Specs saved before beard and moustache were split keep their look (`clean()`).
 - **Until a rider makes one**: the rider card shows a plain silhouette (never a default face), ride cards have no
   background figure, and the Binder shows "Make your avatar". The first Binder visit opens **four quick questions**

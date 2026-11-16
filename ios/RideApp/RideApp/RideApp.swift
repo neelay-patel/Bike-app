@@ -6,6 +6,14 @@ struct RideApp: App {
     @StateObject private var health = HealthSync.shared
 
     init() {
+        #if DEBUG
+        // Dev only: launch with RIDE_DEV_SERVER and RIDE_DEV_TOKEN in the environment to point the Simulator at a server.
+        let env = ProcessInfo.processInfo.environment
+        if let server = env["RIDE_DEV_SERVER"].flatMap(URL.init(string:)), let token = env["RIDE_DEV_TOKEN"] {
+            ServerConfig.serverURL = server
+            ServerConfig.token = token
+        }
+        #endif
         // HealthKit only wakes the app for new rides while an observer is registered, and that
         // has to happen at every launch, including the background launches HealthKit triggers.
         Task { @MainActor in
@@ -32,6 +40,10 @@ final class AppModel: ObservableObject {
     @Published var recovery: RecoverySummary?
     @Published var goal: GoalView?
     @Published var plan: TrainingPlan?
+    /// The rider's bike (from the avatar spec), remembered for the tab icon at launch.
+    @Published var bike = BikeSpec.saved {
+        didSet { if bike != oldValue { BikeSpec.saved = bike } }
+    }
     @Published var error: String?
     @Published var isLoading = false
 
@@ -55,11 +67,13 @@ final class AppModel: ObservableObject {
             async let rc = try? api.recovery()
             async let g = try? api.currentGoal()
             async let pl = try? api.plan()
+            async let me = try? api.me()
             (connections, rides) = try await (c, r)
             you = await y
             recovery = await rc
             goal = (await g) ?? nil
             plan = (await pl) ?? nil
+            if let me = await me { bike = BikeSpec(avatar: me.avatar) }
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -79,19 +93,26 @@ final class AppModel: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @State private var tab = 0
 
     var body: some View {
-        TabView {
-            RidesView().tabItem { Label("Rides", systemImage: "bicycle") }
-            PlanView().tabItem { Label("Plan", systemImage: "calendar") }
-            YouView().tabItem { Label("You", systemImage: "person.crop.circle") }
-            BinderView().tabItem { Label("Binder", systemImage: "rectangle.stack.fill") }
-            ConnectionsView().tabItem { Label("Sources", systemImage: "link") }
+        TabView(selection: $tab) {
+            // Your own bike: in its colours when you're on Rides, an outline otherwise.
+            RidesView().tabItem {
+                Label { Text("Rides") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
+            }.tag(0)
+            PlanView().tabItem { Label("Plan", systemImage: "calendar") }.tag(1)
+            YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
+            BinderView().tabItem { Label("Binder", systemImage: "rectangle.stack.fill") }.tag(3)
+            ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)
         }
         .tint(Theme.cobalt)
         .font(Theme.text())
         .foregroundStyle(Theme.ink)
         .preferredColorScheme(.light)  // the D look is light-only for now; a dark variant comes later
         .task { await model.refresh() }
+        #if DEBUG
+        .onAppear { BikeArtRender.runIfAsked() }
+        #endif
     }
 }

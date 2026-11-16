@@ -124,7 +124,8 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         """Every avatar part and its choices, with colours for the swatches (no login needed)."""
         from rideengine.card import avatar as av
         return {"options": av.OPTIONS, "default": av.DEFAULT,
-                "colors": {"skin": av.SKIN, "hair_color": av.HAIR_COLOR, "kit": av.KIT}}
+                "colors": {"skin": av.SKIN, "hair_color": av.HAIR_COLOR, "kit": av.KIT, "frame": av.FRAME,
+                           "tyres": av.TYRES}}
 
     @app.post("/v1/avatar/preview")
     def avatar_preview(spec: dict = Body(...), uid: int = Depends(user)):
