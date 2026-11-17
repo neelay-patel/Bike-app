@@ -345,9 +345,33 @@ class Backend:
         return [r for i, r in enumerate(rides) if i not in hide]
 
     def you(self, user_id: int) -> dict:
-        """Tallies, streaks, personal bests, repeated routes and climbs, and the latest rides' notes,
-        from what backend/insights.py keeps stored."""
-        return self.insights.you(user_id)
+        """Tallies, streaks, personal bests, repeated routes and climbs, the latest rides' notes (from
+        what backend/insights.py keeps stored), and the rider's power."""
+        out = self.insights.you(user_id)
+        out["power"] = self.power(user_id)
+        return out
+
+    POWER_DAYS = 120  # bests and the FTP estimate come from this recent a window (as the plan's do)
+
+    def power(self, user_id: int) -> Optional[dict]:
+        """FTP (the rider's own, or estimated from the best 20 minutes), best 20 minutes and best minute
+        over the last POWER_DAYS, and the latest ride with measured power. None before any power."""
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import goals as g
+        from rideengine.analysis import plan as p
+        tz = self.insights.tz(user_id)
+        with self.lock:
+            feats = self.insights._features(user_id)
+        visible = feat_mod.visible_ids(feats)
+        with_power = [f for f in feats if f["ride_id"] in visible and f.get("power_curve")]
+        if not with_power:
+            return None
+        today = datetime.now(tz).astimezone(tz).date()
+        best = g.best_power_curve(with_power, today - timedelta(days=self.POWER_DAYS))
+        latest = max(with_power, key=lambda f: f["start"])
+        return {"ftp": p.ftp_estimate(self.me(user_id).get("ftp"), best),
+                "best_1200s": best.get("1200"), "best_60s": best.get("60"), "days": self.POWER_DAYS,
+                "latest": {"ride_id": latest["ride_id"], "start": latest["start"], "avg_power": latest.get("power")}}
 
     def notes(self, user_id: int, ride_id: str) -> list[dict]:
         """What's notable about one ride, compared with the rides before it."""

@@ -13,7 +13,7 @@ final class HealthSync: ObservableObject {
     @Published private(set) var isWorking = false
     @Published private(set) var progress: (done: Int, total: Int)?
     @Published private(set) var lastMessage: String?
-    /// Apple Health has types to ask about (the recovery ones, for riders who connected before).
+    /// Apple Health has types to ask about (ones added after the rider connected: recovery, power).
     @Published private(set) var needsPermission = false
 
     let reader = HealthKitReader()
@@ -24,6 +24,7 @@ final class HealthSync: ObservableObject {
         static let connected = "health.connected"
         static let anchor = "health.anchor"
         static let uploaded = "health.uploaded"
+        static let powerResent = "health.powerResent.v2"  // v1 was set even when nothing was found
         static func metricAnchor(_ kind: String) -> String { "health.metricAnchor.\(kind)" }
     }
 
@@ -58,7 +59,7 @@ final class HealthSync: ObservableObject {
         observer = nil
         try? await reader.store.disableAllBackgroundDelivery()
         isConnected = false
-        for key in [Keys.connected, Keys.anchor, Keys.uploaded] + HealthKitReader.metricTypes.map({ Keys.metricAnchor($0.kind) }) {
+        for key in [Keys.connected, Keys.anchor, Keys.uploaded, Keys.powerResent] + HealthKitReader.metricTypes.map({ Keys.metricAnchor($0.kind) }) {
             UserDefaults.standard.removeObject(forKey: key)
         }
         do {
@@ -101,6 +102,7 @@ final class HealthSync: ObservableObject {
             if sent > 0 { lastMessage = "Sent \(sent) new ride\(sent == 1 ? "" : "s")." }
             isWorking = false
             await syncMetrics()
+            await resendRidesWithPower()
             return sent
         } catch {
             lastMessage = "Sync failed: \(error.localizedDescription)"
@@ -131,14 +133,48 @@ final class HealthSync: ObservableObject {
 
     // MARK: Recovery and fitness readings
 
-    /// Ask for the recovery types (VO2 max, HRV, resting heart rate, Cardio Recovery), then send them.
-    func allowRecoveryData() async {
+    /// Ask for types added since the rider connected (recovery readings; power, cadence and speed),
+    /// send the readings, and re-send rides that turn out to have power.
+    func allowNewData() async {
         do {
             try await reader.requestAuthorization()
             needsPermission = false
+            await resendRidesWithPower()
             await syncMetrics()
         } catch {
-            lastMessage = "Couldn't ask for recovery data: \(error.localizedDescription)"
+            lastMessage = "Couldn't ask Apple Health: \(error.localizedDescription)"
+        }
+    }
+
+    /// Rides uploaded before power could be read: send again the ones that have power (the server
+    /// replaces the earlier copy). Runs at each sync until it has sent them all once.
+    func resendRidesWithPower() async {
+        guard isConnected, !UserDefaults.standard.bool(forKey: Keys.powerResent) else { return }
+        while isWorking { try? await Task.sleep(for: .milliseconds(300)) }  // a sync may be running
+        isWorking = true
+        defer { isWorking = false; progress = nil }
+        do {
+            var withPower: [HKWorkout] = []
+            var elsewhere: Set<String> = []
+            let recent = Date().addingTimeInterval(-14 * 86400)
+            for workout in try await reader.cyclingWorkouts(since: nil) {
+                if await reader.hasPower(workout) {
+                    withPower.append(workout)
+                } else if workout.endDate > recent {
+                    elsewhere.formUnion(await reader.powerSourceNames(workout))
+                }
+            }
+            let (sent, failed) = await upload(withPower)
+            if sent > 0 && failed == 0 { UserDefaults.standard.set(true, forKey: Keys.powerResent) }
+            if sent > 0 {
+                lastMessage = "Sent \(sent) ride\(sent == 1 ? "" : "s") again with power."
+            } else if !elsewhere.isEmpty {
+                lastMessage = "Power during your rides was recorded by \(elsewhere.sorted().joined(separator: ", ")), not the workout's own device."
+            } else {
+                lastMessage = "No rides with power found in Apple Health. Check that Cycling Power is on for Ride in Health."
+            }
+        } catch {
+            lastMessage = "Couldn't re-send rides with power: \(error.localizedDescription)"
         }
     }
 

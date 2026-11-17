@@ -19,9 +19,10 @@ CHANNEL_PRIORITY = {
     # Heart rate: the wearable (any wearable for other riders). Whoop has no HR stream in its API,
     # so in practice it only supplies totals; Oura's ring HR ranks after wrist wearables.
     "hr": ["apple_watch", "fitbit", "whoop", "oura"] + _HEAD_UNITS + ["gpx"],
-    # Power and cadence: whatever device actually measured them. Never estimated here.
-    "power": ["kickr"] + _HEAD_UNITS + ["gpx"],
-    "cadence": ["kickr"] + _HEAD_UNITS + ["gpx"],
+    # Power and cadence: whatever device actually measured them. Never estimated here. The Watch
+    # only relays a paired sensor (trainer, power meter), so it ranks after the direct sources.
+    "power": ["kickr"] + _HEAD_UNITS + ["apple_watch", "gpx"],
+    "cadence": ["kickr"] + _HEAD_UNITS + ["apple_watch", "gpx"],
     "temp": _HEAD_UNITS + ["gpx"],
 }
 
@@ -36,7 +37,8 @@ TOTAL_PRIORITY = {
     # route source (e.g. a plain GPX) carries no totals of its own.
     # Calories: wearable first; then energy from measured power; then the head unit's guess.
     "calories": ["apple_watch", "whoop", "fitbit", "oura", "@power"] + _HEAD_UNITS + ["kickr"],
-    # Used only when no recording has a heart-rate stream (e.g. Whoop, which gives totals only);
+    # Used when no recording has a heart-rate stream (e.g. Whoop, which gives totals only), or when
+    # the ride is one recording that carries its own figures (the Watch's, which leave out pauses);
     # otherwise merge() recomputes these from the merged channel.
     "avg_hr": ["apple_watch", "fitbit", "whoop", "oura"] + _HEAD_UNITS,
     "max_hr": ["apple_watch", "fitbit", "whoop", "oura"] + _HEAD_UNITS,
@@ -78,13 +80,13 @@ SOURCE_POLICY = {
 def sources_used(provenance: dict) -> set[str]:
     """Every source that contributed a channel or a total to a merged ride.
 
-    Derived values ("derived:hr", "derived:power", "derived:garmin") come from channels that are
+    Derived values ("derived:hr", "derived:power", "derived:cadence", "derived:garmin") come from channels that are
     already counted, or name the source they were derived from.
     """
     out = set()
     for key, val in provenance.items():
         src = val.split(":", 1)[1] if val.startswith("derived:") else val
-        if key.startswith("channel:") or src not in ("hr", "power"):
+        if key.startswith("channel:") or src not in ("hr", "power", "cadence"):
             out.add(src)
     return out
 

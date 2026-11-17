@@ -46,13 +46,16 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
 
 ## Rules
 - **Never commit personal data.** Ride files, the Apple Health export and anything derived live in `data/` (git-ignored). Tests that need them must skip when absent.
-- From Apple Health, read **only** (Neelay agreed; widened 14 Nov 2026): cycling workouts with their route, heart rate,
-  calories and distance; heart rate in the **3 minutes after** each ride (recovery); and **VO2 max, HRV (SDNN), resting
+- From Apple Health, read **only** (Neelay agreed; widened 14 Nov and 17 Nov 2026): cycling workouts with their route,
+  heart rate, calories and distance, and **power, cadence and speed** from a sensor paired with the Watch (e.g. the KICKR)
+  during them; heart rate in the **3 minutes after** each ride (recovery); and **VO2 max, HRV (SDNN), resting
   heart rate and Cardio Recovery** (recovery and fitness insights). Never sleep, other workouts, or anything else.
   Recovery data (`metrics`) is **never shown to other people**, whatever `SOURCE_POLICY` says.
 - **Strava is not a data source.** Its API terms bar AI use and showing a user's data to others.
 - Prefer device totals (barometric climbing, moving time, wearable calories) over values derived from GPS. Record where every value came from.
 - **Simulated power must always be labelled** (SIM) and never feed real totals (calories, load).
+- A trainer's km aren't road km: indoor rides count 0 km in tallies, bests and month totals (17 Nov 2026), and show
+  time, power and heart rate instead. Average power is over pedalling time (zeros left out), as Zwift shows it.
 - Calories: the wearable wins (Neelay's call), then energy from measured power, then the head unit.
 - Python 3.11+, standard library only for the engine (keeps it portable to a backend). pytest for tests.
 - Request only the data a ride needs from every provider (workouts and HR during them), keep the original files, and delete a provider's data when the rider disconnects it.

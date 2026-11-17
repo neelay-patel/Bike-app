@@ -308,15 +308,12 @@ def best_power_curve(feats: list[dict], since: date | None = None) -> dict[str, 
 
 
 def power_curve(samples, durations=(5, 60, 300, 1200, 3600)) -> dict[str, int]:
-    """Best average power over each duration in one ride, from measured power (1 s steps; gaps count
-    as zero so a pause can't inflate an effort)."""
-    pts = [(s.t, s.power) for s in samples if s.power is not None]
-    if len(pts) < 2:
+    """Best average power over each duration in one ride, from measured power (model.power_series:
+    1 s steps; long gaps count as zero so a pause can't inflate an effort)."""
+    from ..model import power_series
+    _, series = power_series(samples)
+    if not series:
         return {}
-    t0 = int(pts[0][0])
-    series = [0.0] * (int(pts[-1][0]) - t0 + 1)
-    for t, p in pts:
-        series[int(t) - t0] = p
     csum = [0.0]
     for p in series:
         csum.append(csum[-1] + p)

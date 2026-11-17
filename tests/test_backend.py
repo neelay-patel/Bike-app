@@ -264,3 +264,25 @@ def test_delete_ride_stays_deleted(env):
     assert client.delete("/v1/rides/123").status_code == 404
     # Insights forget it too.
     assert client.get("/v1/you").json()["all"]["rides"] == 1
+
+
+def test_you_power_from_a_trainer_ride(env):
+    be, uid, client, _ = env
+    assert client.get("/v1/you").json()["power"] is None  # no measured power yet
+    # An indoor Watch ride with a paired trainer: heart rate, plus power and cadence about once a second.
+    start, minutes = T0 + 3 * 86400, 30
+    samples = [{"t": start + i, "hr": 140} for i in range(0, minutes * 60, 5)]
+    samples += [{"t": start + i * 1.05, "power": 0.0 if 600 <= i < 660 else 180.0, "cadence": 85}
+                for i in range(int(minutes * 60 / 1.05))]
+    rec = {"format": "rideengine.recording/1", "source": "apple_watch", "device": "Apple Watch", "start": start,
+           "end": start + minutes * 60, "sport": "cycling", "indoor": True, "origin": "healthkit:TRAINER-1",
+           "totals": {"distance_m": 15000.0, "calories": 400.0, "avg_hr": 140.0, "max_hr": 150.0,
+                      "elapsed_s": minutes * 60.0}, "samples": samples}
+    assert client.post("/v1/uploads/apple_health", content=json.dumps(rec)).status_code == 201
+    be.insights.refresh(uid)
+    p = client.get("/v1/you").json()["power"]
+    assert p["latest"]["avg_power"] == 180.0            # pedalling time only: the minute at zero is left out
+    assert p["best_60s"] == 180 and p["best_1200s"] == 171   # every 20 minutes includes the stopped minute
+    assert p["ftp"] == {"watts": 162, "source": "estimated from your best 20 minutes"}
+    y = client.get("/v1/you").json()
+    assert y["all"]["km"] == 0  # a trainer's km aren't road km

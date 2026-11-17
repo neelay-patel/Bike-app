@@ -99,6 +99,10 @@ struct RideSummary: Decodable, Identifiable {
         let avgHr: Double?
         let maxHr: Double?
         let avgPower: Double?
+        /// Best 1 minute and best 20 minutes of measured power, and average cadence.
+        let power60S: Double?
+        let power1200S: Double?
+        let avgCadence: Double?
         let calories: Double?
         /// Heart rate fallen in the minute after the ride (recovery), when the watch kept measuring.
         let hrDrop60S: Double?
@@ -113,7 +117,8 @@ struct RideSummary: Decodable, Identifiable {
     var date: Date { Date(timeIntervalSince1970: summary.start) }
 
     /// An indoor session with no distance (spin bike, trainer without a sensor): shown by time, not km.
-    var noDistance: Bool { summary.km < 0.05 }
+    /// Indoors (a trainer's distance isn't road distance) or no distance at all: shown by time.
+    var noDistance: Bool { summary.indoor || summary.km < 0.05 }
 }
 
 /// "Your longest ride yet": one thing worth saying about a ride.
@@ -142,6 +147,19 @@ struct YouSummary: Decodable {
     let recent: [Recent]
     /// True while the server is still working new rides in (routes, climbs and notes may lag a little).
     let updating: Bool?
+    /// FTP, recent bests and the latest ride's average power; nil before any ride with measured power.
+    let power: PowerSummary?
+
+    struct PowerSummary: Decodable {
+        let ftp: FTPValue
+        let best1200S: Double?
+        let best60S: Double?
+        let days: Int
+        let latest: Latest
+
+        struct FTPValue: Decodable { let watts: Double?; let source: String }
+        struct Latest: Decodable { let rideId: String; let start: Double; let avgPower: Double? }
+    }
 
     struct Tally: Decodable {
         let label: String?

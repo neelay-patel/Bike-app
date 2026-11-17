@@ -41,7 +41,7 @@ def test_crow_flies():
 def test_tallies_streaks_and_bests():
     rides = weekly(7) + [ride("2025-06-01", 90, up=1500), ride("2026-04-20", 60, up=300, indoor=True)]
     y = records.you(rides, today=date(2026, 4, 22), tz=UTC)
-    assert y["all"]["rides"] == 9 and y["all"]["km"] == 430
+    assert y["all"]["rides"] == 9 and y["all"]["km"] == 370  # the indoor ride's 60 km are trainer km: not counted
     assert y["all"]["ascent_m"] == 2500 and y["all"]["everests"] == round(2500 / 8849, 2)
     assert y["year"]["rides"] == 8 and y["last_year"]["km"] == 90
     assert y["month"]["label"] == "April 2026" and y["month"]["rides"] == 3

@@ -111,3 +111,38 @@ def test_build_rides_end_to_end():
     rides = build_rides([line_ride(60), watch(T0, 60), line_ride(30, start=T0 + 86400)])
     assert len(rides) == 2
     assert summary(rides[0])["avg_kmh"] > 24
+
+
+def test_watch_indoor_ride_takes_power_from_paired_trainer():
+    # The Watch relays a paired KICKR: separate heart-rate and power samples, no route.
+    rec = watch(T0, 30, bpm=130)
+    rec.samples += [Sample(t=T0 + i, power=200.0, cadence=88.0) for i in range(0, 1800, 2)]
+    rec.samples.sort(key=lambda s: s.t)
+    rec.indoor = True
+    ride = merge([rec])
+    assert ride.provenance["channel:power"] == "apple_watch"
+    assert ride.totals["avg_power"] == 200.0
+    assert ride.provenance["channel:hr"] == "apple_watch"
+    assert all(s.hr == 130 for s in ride.samples)
+
+
+def test_single_recording_keeps_its_own_heart_rate_figures():
+    # The Watch's average leaves out pauses; the raw samples (taken while paused too) would not.
+    rec = watch(T0, 60, bpm=120)
+    rec.totals.update({"avg_hr": 133.0, "max_hr": 161.0})
+    ride = merge([rec])
+    assert ride.totals["avg_hr"] == 133.0 and ride.totals["max_hr"] == 161.0
+    assert ride.provenance["total:avg_hr"] == "apple_watch"
+    # With a head unit merged in, the figures come from the merged channel as before.
+    both = merge([line_ride(minutes=60), rec])
+    assert both.totals["avg_hr"] == 120 and both.provenance["total:avg_hr"] == "derived:hr"
+
+
+def test_power_average_is_over_pedalling_time():
+    from rideengine.merge import power_stats
+    watts = [200.0] * 600 + [0.0] * 300 + [200.0] * 570 + [0.0] * 30 + [200.0] * 600  # 5 min stop, 30 s coast
+    s = [Sample(t=T0 + i * 1.05, power=w, cadence=80 if w else 0) for i, w in enumerate(watts)]  # ~1 reading/s
+    st = power_stats(s)
+    assert st["avg_power"] == 200               # neither the stop nor the coast counts (as Zwift shows it)
+    assert st["power_1200s"] < 200 and st["power_60s"] == 200
+    assert st["avg_cadence"] == 80

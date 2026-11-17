@@ -112,6 +112,44 @@ background-size:300% 300%!important;animation:sheen 7s linear infinite}
 @media (prefers-reduced-motion:reduce){.holo{animation:none}}"""
 
 
+def _power_trace(ride: Ride, c: dict) -> str:
+    """Indoors with power: power across the session (30 s average), the best 20 minutes shaded."""
+    from ..model import power_series
+    t0, series = power_series(ride.samples)
+    n = len(series)
+    if n < 120:
+        return _hr_trace(ride, c)
+    csum = [0.0]
+    for p in series:
+        csum.append(csum[-1] + p)
+    smooth = [(csum[min(n, i + 15)] - csum[max(0, i - 15)]) / (min(n, i + 15) - max(0, i - 15)) for i in range(n)]
+    hi = max(smooth) or 1
+    left, right, top, bottom = 24, W - 24, MAP_TOP + 24, MAP_H - 30
+    def x(i):
+        return round(left + i / max(n - 1, 1) * (right - left), 1)
+    def y(p):
+        return round(bottom - p / hi * (bottom - top), 1)
+    step = max(1, n // 300)
+    line = "M" + " L".join(f"{x(i)} {y(smooth[i])}" for i in range(0, n, step))
+    band = ""
+    if n >= 1200:
+        k = max(range(n - 1199), key=lambda i: csum[i + 1200] - csum[i])
+        w20 = round((csum[k + 1200] - csum[k]) / 1200)
+        bx0, bx1 = x(k), x(k + 1199)
+        label = f"BEST 20 MIN · {w20} W"
+        half = len(label) * LABEL_CHAR_PX / 2
+        lx, anchor = min(max((bx0 + bx1) / 2, left + half), right - half), "middle"
+        band = (f'<rect x="{bx0}" y="{top - 14}" width="{round(bx1 - bx0, 1)}" height="{bottom - top + 14}" fill="#FFFFFF" opacity="0.22"/>'
+                f'<text x="{lx}" y="{top - 2}" text-anchor="{anchor}" fill="#FFFFFF" font-family="IBM Plex Mono, monospace" '
+                f'font-size="11" letter-spacing="1">{label}</text>')
+    return (band +
+            f'<path d="{line}" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<text x="{left}" y="{MAP_H - 10}" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" font-size="10" '
+            f'letter-spacing="1.5">INDOOR · POWER</text>'
+            f'<text x="{right}" y="{MAP_H - 10}" text-anchor="end" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
+            f'font-size="10" letter-spacing="1.5">{round(n / 60)} MIN</text>')
+
+
 def _hr_trace(ride: Ride, c: dict) -> str:
     """No route indoors: the map shows heart rate across the session instead, with its peak marked."""
     pts = [(x.t, x.hr) for x in ride.samples if x.hr is not None]
@@ -190,8 +228,8 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     when = datetime.fromtimestamp(ride.start).astimezone()
     km = s["km"]
     up = s["ascent_m"]
-    name = name or f"{when:%A} {'indoor ' if km < 0.05 else ''}ride"
-    indoor = km < 0.05
+    indoor = s["indoor"] or km < 0.05  # a smart trainer reports a distance, but it's still indoors
+    name = name or f"{when:%A} {'indoor ' if indoor else ''}ride"
     minutes = round((s["moving_h"] or 0) * 60)
     if indoor:
         lead = f"{minutes} minutes indoors."
@@ -199,7 +237,7 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
         lead = f"{_num(up)} m in {round(km)} km." if up else f"{_num(km, 1)} km."
     title = f"{lead} {headline}" if headline else lead
 
-    path, proj, ppk, dot_km = route_path(ride)
+    path, proj, ppk, dot_km = route_path(ride) if not indoor else ("", [], 0, 0)
     if places is None:
         from ..places import places_on_route
         places = [[p["name"], p["lat"], p["lon"]] for p in places_on_route(ride)]
@@ -227,14 +265,19 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     marks = dots + labels
 
     stats = [] if indoor else [("Distance", f"{_hero(km, 1)} km")]
-    if up:
+    if up and not indoor:
         stats.append(("Climbing", f"{_hero(up)} m"))
     stats.append(("Time" if indoor else "Moving time", _duration(s["moving_h"] * 3600)))
+    power = indoor and s["power_60s"] is not None
+    if power:
+        stats.append(("Avg power", f"{round(s['avg_power'])} W"))
+        if s["power_1200s"]:
+            stats.append(("Best 20 min", f"{s['power_1200s']} W"))
     if s["avg_hr"]:
         stats.append(("Avg heart rate", f"{round(s['avg_hr'])}", True))
-    if indoor and s["max_hr"]:
+    if indoor and not power and s["max_hr"]:
         stats.append(("Max heart rate", f"{round(s['max_hr'])}", True))
-    elif s["avg_kmh"]:
+    elif s["avg_kmh"] and not indoor:
         stats.append(("Avg speed", f"{_hero(s['avg_kmh'], 1)} km/h"))
     if s["calories"]:
         stats.append(("Calories", _hero(s["calories"])))
@@ -247,7 +290,7 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
         for i, st in enumerate(stats))
     stripes = "".join(f'<div style="height:4px;background:{x}"></div>' for x in c["stripes"])
     no = f"NO. {number} · {when:%Y}" if number else f"{when:%Y}"
-    aria = f"Route of {html.escape(name)}, {_num(km, 1)} km" + (f", heart rate peaked at {round(peak[3])} bpm" if peak else "")
+    aria = (f"{html.escape(name)}: power across the session" if power else f"Route of {html.escape(name)}, {_num(km, 1)} km") + (f", heart rate peaked at {round(peak[3])} bpm" if peak else "")
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -265,7 +308,7 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
 {_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
 {_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
 <path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
-{_hr_trace(ride, c) if indoor else ""}
+{(_power_trace(ride, c) if power else _hr_trace(ride, c)) if indoor else ""}
 {marks}
 </svg>
 <p style="position:absolute;left:14px;top:12px;margin:0;font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:#E3E8F7">{when:%a %-d %b %Y}</p>

@@ -82,16 +82,19 @@ struct MonthTotal {
     let rides: Int
     let climbed: Double
     let longest: Double
+    /// Time on the bike, indoors included: what the month shows when it has no road km.
+    let hours: Double
 
     init?(rides all: [RideSummary]) {
         guard let latest = all.map(\.date).max() else { return nil }
         let cal = Calendar.current
         let month = all.filter { cal.isDate($0.date, equalTo: latest, toGranularity: .month) }
         title = latest.formatted(.dateTime.month(.wide).year())
-        km = month.reduce(0) { $0 + $1.summary.km }
+        km = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.km) }  // trainer km aren't road km
         rides = month.count
         climbed = month.reduce(0) { $0 + ($1.summary.ascentM ?? 0) }
-        longest = month.map(\.summary.km).max() ?? 0
+        longest = month.map { $0.noDistance ? 0 : $0.summary.km }.max() ?? 0
+        hours = month.reduce(0) { $0 + $1.summary.movingH }
     }
 }
 
@@ -101,12 +104,22 @@ struct MonthHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             MonoLabel("This month", color: Theme.cobaltSoft)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Format.hero(month.km, decimals: 0)).font(Theme.hero(64))
-                Text("km").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
+            if month.km < 0.5 {
+                // All indoors so far: time is the month's number.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Format.duration(hours: month.hours)).font(Theme.hero(64))
+                    Text("hours").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
+                }
+                Text("\(month.rides) ride\(month.rides == 1 ? "" : "s"), all indoors")
+                    .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Format.hero(month.km, decimals: 0)).font(Theme.hero(64))
+                    Text("km").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
+                }
+                Text("\(month.rides) ride\(month.rides == 1 ? "" : "s") · \(Format.number(month.climbed, decimals: 0)) m climbed · longest \(Format.number(month.longest, decimals: 1)) km")
+                    .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
             }
-            Text("\(month.rides) ride\(month.rides == 1 ? "" : "s") · \(Format.number(month.climbed, decimals: 0)) m climbed · longest \(Format.number(month.longest, decimals: 1)) km")
-                .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +180,9 @@ struct RideRow: View {
     private var details: Text {
         var parts = [ride.date.formatted(.dateTime.hour().minute())]
         if ride.noDistance {
-            if let kcal = ride.summary.calories { parts.append("\(Format.number(kcal, decimals: 0)) kcal") }
+            if ride.summary.power60S != nil, let w = ride.summary.avgPower {
+                parts.append("\(Int(w.rounded())) W")
+            } else if let kcal = ride.summary.calories { parts.append("\(Format.number(kcal, decimals: 0)) kcal") }
         } else {
             parts.append(Format.duration(hours: ride.summary.movingH))
         }
@@ -292,8 +307,11 @@ struct RideDetailView: View {
 
     private var secondary: String? {
         var parts: [String] = []
-        if ride.summary.avgHr != nil, let v = ride.summary.avgKmh { parts.append("\(Format.number(v, decimals: 1)) km/h average") }
-        if let v = ride.summary.avgPower { parts.append("\(Int(v.rounded())) W average") }
+        let powerLeads = ride.noDistance && ride.summary.power60S != nil  // already in the panel
+        if !ride.noDistance, ride.summary.avgHr != nil, let v = ride.summary.avgKmh { parts.append("\(Format.number(v, decimals: 1)) km/h average") }
+        if !powerLeads, let v = ride.summary.avgPower { parts.append("\(Int(v.rounded())) W average") }
+        if let v = ride.summary.power60S { parts.append("best minute \(Int(v)) W") }
+        if let v = ride.summary.avgCadence { parts.append("cadence \(Int(v)) rpm") }
         if let v = ride.summary.hrDrop60S { parts.append("heart rate fell \(Int(v.rounded())) bpm in the minute after") }
         if let v = ride.summary.calories {
             let from = ride.provenance["total:calories"].map(Format.sourceName) ?? ""
@@ -322,9 +340,15 @@ struct ProfilePanel: View {
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
                           alignment: .leading, spacing: 12) {
                     HeroStat(label: "Time", value: Format.duration(hours: ride.summary.movingH), unit: nil)
-                    HeroStat(label: "Calories", value: ride.summary.calories.map { Format.hero($0, decimals: 0) } ?? "–", unit: "kcal")
+                    if let watts = ride.summary.avgPower, ride.summary.power60S != nil {
+                        // A trainer or power meter: power leads.
+                        HeroStat(label: "Avg power", value: "\(Int(watts.rounded()))", unit: "W")
+                        HeroStat(label: "Best 20 min", value: ride.summary.power1200S.map { "\(Int($0))" } ?? "–", unit: "W")
+                    } else {
+                        HeroStat(label: "Calories", value: ride.summary.calories.map { Format.hero($0, decimals: 0) } ?? "–", unit: "kcal")
+                        HeroStat(label: "Max heart rate", value: ride.summary.maxHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
+                    }
                     HeroStat(label: "Avg heart rate", value: ride.summary.avgHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
-                    HeroStat(label: "Max heart rate", value: ride.summary.maxHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
                 }
             } else {
             ElevationProfile(profile: profile, totalKm: ride.summary.km)

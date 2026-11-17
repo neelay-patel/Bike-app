@@ -16,7 +16,7 @@ from .climbs import find_climbs
 from .goals import power_curve
 from .repeats import Track
 
-VERSION = 6  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR
+VERSION = 7  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling
 
 
 def extract(ride: Ride) -> dict:

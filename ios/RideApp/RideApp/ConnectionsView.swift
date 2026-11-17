@@ -54,10 +54,10 @@ struct AppleHealthCard: View {
                 Spacer()
                 StateBadge(state: health.isConnected ? "connected" : "not_connected")
             }
-            Text("Cycling workouts, their routes, and the heart rate, calories and distance recorded during them. For recovery: heart rate for 3 minutes after each ride, VO2 max, HRV, resting heart rate and Cardio Recovery. Recovery data is only ever shown to you.")
+            Text("Cycling workouts, their routes, and the heart rate, calories, distance, power, cadence and speed recorded during them. For recovery: heart rate for 3 minutes after each ride, VO2 max, HRV, resting heart rate and Cardio Recovery. Recovery data is only ever shown to you.")
                 .font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
             if health.isConnected && health.needsPermission {
-                Button("Allow recovery data") { Task { await health.allowRecoveryData(); await model.refresh() } }
+                Button("Allow new data") { Task { await health.allowNewData(); await model.refresh() } }
                     .buttonStyle(PrimaryButton())
             }
             if !health.isConnected {

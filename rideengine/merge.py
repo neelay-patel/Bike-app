@@ -12,7 +12,7 @@ from dataclasses import replace
 
 from . import clean
 from .analysis.wellness import ride_recovery
-from .model import CHANNELS, Recording, Ride, Sample, haversine
+from .model import CHANNELS, Recording, Ride, Sample, haversine, power_series
 from .sources import ALIGN_TOLERANCE, CHANNEL_PRIORITY, DEFAULT_TOLERANCE, TOTAL_PRIORITY, rank
 
 MIN_OVERLAP = 0.5  # share of the shorter recording that must overlap
@@ -141,17 +141,22 @@ def merge(group_: list[Recording]) -> Ride:
     if excluded:
         _totals_without_cuts(totals, provenance, full, samples, cuts)
 
-    # Heart-rate and power summaries come from the merged channels, over the base window.
+    # Heart-rate and power summaries come from the merged channels, over the base window; a ride
+    # that is one recording keeps that device's own heart-rate figures (they leave out pauses).
     hr = [s.hr for s in samples if s.hr is not None]
-    if hr:
+    own = group_[0].totals if len(group_) == 1 and not excluded else {}
+    if hr and "avg_hr" in own and "max_hr" in own:
+        totals["avg_hr"], totals["max_hr"] = round(own["avg_hr"], 1), own["max_hr"]
+        provenance["total:avg_hr"] = provenance["total:max_hr"] = group_[0].source
+    elif hr:
         totals["avg_hr"] = round(sum(hr) / len(hr), 1)
         totals["max_hr"] = max(hr)
         provenance["total:avg_hr"] = provenance["total:max_hr"] = "derived:hr"
-    pw = [s.power for s in samples if s.power is not None]
-    if pw:
-        totals["avg_power"] = round(sum(pw) / len(pw), 1)
-        totals["max_power"] = max(pw)
-        provenance["total:avg_power"] = provenance["total:max_power"] = "derived:power"
+    stats = power_stats(samples)
+    if stats:
+        totals.update(stats)
+        for key in stats:
+            provenance[f"total:{key}"] = "derived:power" if key != "avg_cadence" else "derived:cadence"
 
     # Heart-rate recovery after the ride, from the wearable that kept measuring once it ended.
     for rec in sorted((r for r in group_ if r.after), key=lambda r: rank(CHANNEL_PRIORITY["hr"], r.source)):
@@ -166,6 +171,26 @@ def merge(group_: list[Recording]) -> Ride:
     return Ride(start=samples[0].t, end=samples[-1].t, sport=base.sport,
                 indoor=all(r.indoor for r in group_), samples=samples, totals=totals,
                 provenance=provenance, recordings=[r.origin for r in group_], excluded=excluded)
+
+
+def power_stats(samples: list[Sample]) -> dict:
+    """Average and best power from measured power, on 1 s steps (model.power_series). The average is
+    over the seconds you were pedalling (zeros left out), as Zwift shows it."""
+    _, series = power_series(samples)
+    if not series:
+        return {}
+    riding = [p for p in series if p > 0]
+    out = {"avg_power": round(sum(riding) / len(riding), 1) if riding else 0.0, "max_power": max(series)}
+    csum = [0.0]
+    for p in series:
+        csum.append(csum[-1] + p)
+    for d in (60, 1200):
+        if d <= len(series):
+            out[f"power_{d}s"] = round(max(csum[i + d] - csum[i] for i in range(len(series) - d + 1)) / d)
+    cad = [s.cadence for s in samples if s.cadence]
+    if cad:
+        out["avg_cadence"] = round(sum(cad) / len(cad))
+    return out
 
 
 # Head units whose totals cover the whole recording, vehicle stretch included.

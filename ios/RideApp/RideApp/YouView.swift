@@ -19,6 +19,9 @@ struct YouView: View {
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
 
+                    if let power = model.you?.power {
+                        PowerPanel(power: power)
+                    }
                     GoalCard()
                     if let recovery = model.recovery, recovery.hasAnything {
                         RecoverySection(recovery: recovery)
@@ -107,6 +110,43 @@ private struct TotalsPanel: View {
         let now = you.streak.currentWeeks
         line += now > 0 ? " \(now) week\(now == 1 ? "" : "s") in a row right now." : " Your next ride starts a new streak."
         return line
+    }
+}
+
+/// Power, up front: FTP, recent bests and the latest ride's average (measured power only).
+private struct PowerPanel: View {
+    let power: YouSummary.PowerSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonoLabel("Power", color: Theme.panelLabel)
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 14) {
+                HeroStat(label: "FTP", value: watts(power.ftp.watts), unit: "W")
+                HeroStat(label: "Best 20 min", value: watts(power.best1200S), unit: "W")
+                HeroStat(label: "Best minute", value: watts(power.best60S), unit: "W")
+                HeroStat(label: "Last ride avg", value: watts(power.latest.avgPower), unit: "W")
+            }
+            Rectangle().fill(Theme.panelLine).frame(height: 1)
+            Text(footnote).font(Theme.text(14)).foregroundStyle(Theme.panelLabel)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func watts(_ v: Double?) -> String { v.map { "\(Int($0.rounded()))" } ?? "–" }
+
+    private var footnote: String {
+        let last = Date(timeIntervalSince1970: power.latest.start).formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+        let bests = "Bests from the last \(power.days) days. Last ride with power: \(last)."
+        switch power.ftp.source {
+        case "yours": return "FTP is the one you set. " + bests
+        case let s where power.ftp.watts != nil:
+            return "FTP \(s) (95% of it). A flat-out 20 minutes on the trainer gives a truer number. " + bests
+        default: return bests
+        }
     }
 }
 

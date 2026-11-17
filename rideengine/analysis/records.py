@@ -83,12 +83,13 @@ def ride_id(ride: Ride) -> str:
 
 
 def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
-    """One flat record per ride, oldest first, in the rider's local time."""
+    """One flat record per ride, oldest first, in the rider's local time. A trainer's km aren't road km:
+    indoor rides count 0 km in tallies and bests."""
     out = []
     for r in rides:
         s = summary(r)
         out.append(_Entry(ride_id(r), r.start, datetime.fromtimestamp(r.start, tz).astimezone(tz).date(),
-                          s["km"] or 0.0, s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
+                          0.0 if r.indoor else s["km"] or 0.0, s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
                           s["avg_power"] if r.provenance.get("channel:power") else None, r.indoor,
                           s["hr_drop_60s"]))
     return sorted(out, key=lambda e: e.start)
@@ -97,7 +98,7 @@ def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
 def entries_from_features(feats: list[dict], tz: tzinfo | None = None) -> list[_Entry]:
     """The same records from stored per-ride features (features.extract), without the samples."""
     out = [_Entry(f["ride_id"], f["start"], datetime.fromtimestamp(f["start"], tz).astimezone(tz).date(),
-                  f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
+                  0.0 if f["indoor"] else f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
                   f.get("hr_drop_60s")) for f in feats]
     return sorted(out, key=lambda e: e.start)
 

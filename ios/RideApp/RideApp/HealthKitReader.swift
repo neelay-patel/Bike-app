@@ -5,7 +5,8 @@ import HealthKit
 /// Reads cycling workouts from Apple Health and turns each into a `RecordingPayload`.
 ///
 /// Scope (agreed with Neelay; CLAUDE.md): cycling workouts, their routes, and the heart rate, active
-/// energy and cycling distance recorded during them; heart rate in the 3 minutes after each ride
+/// energy, cycling distance, power, cadence and speed recorded during them (power, cadence and speed
+/// come from a sensor paired with the Watch, e.g. a smart trainer; added 17 Nov 2026); heart rate in the 3 minutes after each ride
 /// (recovery); and VO2 max, HRV, resting heart rate and Cardio Recovery. Nothing else is requested or read.
 final class HealthKitReader {
     let store = HKHealthStore()
@@ -13,6 +14,14 @@ final class HealthKitReader {
     static let heartRate = HKQuantityType(.heartRate)
     static let activeEnergy = HKQuantityType(.activeEnergyBurned)
     static let cyclingDistance = HKQuantityType(.distanceCycling)
+
+    /// Sensor channels recorded during a ride: (HealthKit type, unit, where the value goes).
+    static let sensorTypes: [(type: HKQuantityType, unit: HKUnit, field: WritableKeyPath<SamplePayload, Double?>)] = [
+        (HKQuantityType(.cyclingPower), .watt(), \.power),
+        (HKQuantityType(.cyclingCadence), HKUnit.count().unitDivided(by: .minute()), \.cadence),
+        (HKQuantityType(.cyclingSpeed), HKUnit.meter().unitDivided(by: .second()), \.speed),
+    ]
+    static let cyclingPower = HKQuantityType(.cyclingPower)
 
     /// Recovery and fitness readings: (HealthKit type, rideengine kind, unit).
     static let metricTypes: [(type: HKQuantityType, kind: String, unit: HKUnit)] = [
@@ -26,6 +35,7 @@ final class HealthKitReader {
 
     static var readTypes: Set<HKObjectType> {
         Set([HKObjectType.workoutType(), HKSeriesType.workoutRoute(), heartRate, activeEnergy, cyclingDistance]
+            + sensorTypes.map { $0.type as HKObjectType }
             + metricTypes.map { $0.type as HKObjectType })
     }
 
@@ -90,7 +100,13 @@ final class HealthKitReader {
     func recording(for workout: HKWorkout) async throws -> RecordingPayload? {
         guard let source = Self.sourceKey(for: workout) else { return nil }
         var samples = try await routeSamples(for: workout)
+        let hasRoute = !samples.isEmpty
         samples += try await heartRateSamples(for: workout)
+        for sensor in Self.sensorTypes {
+            // Outdoors the route already gives speed; a sensor's speed is only used indoors.
+            if sensor.field == \SamplePayload.speed && hasRoute { continue }
+            samples += try await sensorSamples(sensor, for: workout)
+        }
         samples.sort { $0.t < $1.t }
         let after = try await heartRateSamples(for: workout, from: workout.endDate,
                                                to: workout.endDate.addingTimeInterval(Self.afterRideSeconds))
@@ -159,6 +175,50 @@ final class HealthKitReader {
                                      hr: result.quantity.doubleValue(for: bpm)))
         }
         return out
+    }
+
+    /// Readings from a sensor paired with the workout's device (power meter, smart trainer,
+    /// cadence or speed sensor), during the workout only.
+    func sensorSamples(_ sensor: (type: HKQuantityType, unit: HKUnit, field: WritableKeyPath<SamplePayload, Double?>),
+                       for workout: HKWorkout) async throws -> [SamplePayload] {
+        let query = HKQuantitySeriesSampleQueryDescriptor(
+            predicate: .quantitySample(type: sensor.type, predicate: await duringWorkout(workout, sensor.type)))
+        var out: [SamplePayload] = []
+        for try await result in query.results(for: store) {
+            var sample = SamplePayload(t: result.dateInterval.start.timeIntervalSince1970)
+            sample[keyPath: sensor.field] = result.quantity.doubleValue(for: sensor.unit)
+            out.append(sample)
+        }
+        return out
+    }
+
+    /// True when the workout has power readings (used to re-send rides once power can be read).
+    func hasPower(_ workout: HKWorkout) async -> Bool {
+        let query = HKSampleQueryDescriptor(predicates: [.quantitySample(type: Self.cyclingPower,
+                                                                         predicate: await duringWorkout(workout, Self.cyclingPower))],
+                                            sortDescriptors: [], limit: 1)
+        return ((try? await query.result(for: store)) ?? []).isEmpty == false
+    }
+
+    /// Names of the apps or devices that wrote power readings during the workout, whoever they are
+    /// (to tell the rider where their power is when it didn't come from the workout's own device).
+    func powerSourceNames(_ workout: HKWorkout) async -> Set<String> {
+        let window = HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate, options: [])
+        let query = HKSampleQueryDescriptor(predicates: [.quantitySample(type: Self.cyclingPower, predicate: window)],
+                                            sortDescriptors: [], limit: 50)
+        return Set(((try? await query.result(for: store)) ?? []).map { $0.sourceRevision.source.name })
+    }
+
+    /// Sensor readings come from the workout's own device, or from the sensor Apple paired with it:
+    /// the Watch files a trainer's or power meter's readings under a separate Apple source
+    /// ("Bluetooth Device"). Other apps' readings (Zwift, Wahoo) belong to their own recordings.
+    private func duringWorkout(_ workout: HKWorkout, _ type: HKQuantityType) async -> NSPredicate {
+        let own = workout.sourceRevision.source
+        let all = (try? await HKSourceQueryDescriptor(predicate: .quantitySample(type: type)).result(for: store)) ?? []
+        let sources = Set(all.filter { $0.bundleIdentifier.hasPrefix("com.apple.") }).union([own])
+        return NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate, options: .strictStartDate),
+            HKQuery.predicateForObjects(from: sources)])
     }
 
     // MARK: Recovery and fitness readings

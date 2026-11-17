@@ -4,7 +4,7 @@
 <dict>
 	<!-- Merged with the keys Xcode generates from build settings (GENERATE_INFOPLIST_FILE). -->
 	<key>NSHealthShareUsageDescription</key>
-	<string>Ride reads your cycling workouts, their routes, and the heart rate, calories and distance recorded during them, to build your rides. For recovery it reads your heart rate in the 3 minutes after each ride, VO2 max, heart rate variability, resting heart rate and Cardio Recovery. It reads nothing else, never writes to Health, and never shows your recovery data to anyone else.</string>
+	<string>Ride reads your cycling workouts, their routes, and the heart rate, calories, distance, power, cadence and speed recorded during them, to build your rides. For recovery it reads your heart rate in the 3 minutes after each ride, VO2 max, heart rate variability, resting heart rate and Cardio Recovery. It reads nothing else, never writes to Health, and never shows your recovery data to anyone else.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InstrumentSerif-Regular.ttf</string>

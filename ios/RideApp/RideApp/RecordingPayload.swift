@@ -42,4 +42,6 @@ struct SamplePayload: Codable {
     var ele: Double?
     var speed: Double?
     var hr: Double?
+    var power: Double?
+    var cadence: Double?
 }

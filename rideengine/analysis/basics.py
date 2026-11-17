@@ -68,6 +68,9 @@ def summary(ride: Ride) -> dict:
         "max_hr": tot.get("max_hr"),
         "avg_power": tot.get("avg_power"),
         "max_power": tot.get("max_power"),
+        "power_60s": tot.get("power_60s"),        # best 1 minute
+        "power_1200s": tot.get("power_1200s"),    # best 20 minutes
+        "avg_cadence": tot.get("avg_cadence"),
         "calories": tot.get("calories"),
         "hr_drop_60s": tot.get("hr_drop_60s"),   # heart-rate recovery: bpm fallen 1 min after the end
         "indoor": ride.indoor,

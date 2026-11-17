@@ -98,3 +98,24 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dl = math.radians(lon2 - lon1)
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * r * math.asin(math.sqrt(a))
+
+
+# A power reading holds for up to this many seconds; longer gaps count as zero (a dropout or a stop).
+POWER_HOLD_S = 3
+
+
+def power_series(samples) -> tuple[int, list[float]]:
+    """Measured power on 1 s steps: (first second, watts per second). Each reading holds until the
+    next one, for up to POWER_HOLD_S; sensors report about once a second, never exactly on the beat."""
+    pts = sorted((s.t, s.power) for s in samples if s.power is not None)
+    if len(pts) < 2:
+        return 0, []
+    t0 = int(pts[0][0])
+    series = [0.0] * (int(pts[-1][0]) - t0 + 1)
+    for (t, p), nxt in zip(pts, pts[1:] + [(pts[-1][0] + 1, None)]):
+        start = int(t) - t0
+        end = min(int(nxt[0]) - t0, start + POWER_HOLD_S)
+        for i in range(start, max(end, start + 1)):
+            if i < len(series):
+                series[i] = p
+    return t0, series

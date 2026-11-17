@@ -41,7 +41,7 @@ The coach (`docs/coaching.md`) is only as good as the data, so: **every source, 
 ## Providers (checked 13 Nov 2026)
 | Source | How the rider connects | What we get | Catch |
 |---|---|---|---|
-| Apple Health | Permission screen in our iPhone app | Route, HR (~5 s), calories, climbing | Phone only; background delivery for new rides |
+| Apple Health | Permission screen in our iPhone app | Route, HR (~5 s), calories, climbing; power, cadence and speed from a sensor paired with the Watch (KICKR: first ride 17 Nov 2026) | Phone only; background delivery for new rides |
 | Garmin | Sign in (program reopened Oct 2026, tiers Personal / Starter / Enterprise) | Original .FIT plus JSON summaries | Starter: free, ~1,000 users, push only, **no history**. Enterprise: history, paid. Personal key: one person's own data only, not for multi-user apps |
 | Wahoo (KICKR, ELEMNT) | Sign in (OAuth2) | Original .FIT (KICKR power) | App review before production |
 | Hammerhead (Karoo) | **No official public API** | — | Ask SRAM/Hammerhead for partner access; fallback Terra |
