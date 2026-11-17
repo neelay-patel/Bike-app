@@ -1,66 +1,58 @@
 import SwiftUI
 import WebKit
 
-/// The fun bucket: your rider card at the front, the badges you've earned (and how close the rest
-/// are), and the season binder: every ride's card in order, shiny holo cards for personal bests,
-/// empty slots for the weeks you didn't ride. From GET /v1/collection.
-struct BinderView: View {
+/// The fun bucket, at the bottom of You: your rider card, your bike, the badges you've earned (and how
+/// close the rest are), and the season binder: every ride's card in order, shiny holo cards for
+/// personal bests, empty slots for the weeks you didn't ride. From GET /v1/collection.
+struct BinderSection: View {
     @EnvironmentObject var model: AppModel
     @State private var collection: CollectionSummary?
     @State private var error: String?
     @State private var year: Int?
     @State private var builder: BuilderMode?
-    @AppStorage("avatar.askedOnce") private var askedOnce = false
     @StateObject private var riderCard = CardRenderer()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let c = collection {
-                            MonoLabel("\(c.rider.badgesEarned) of \(c.rider.badgesTotal) badges · \(c.binder.first?.cards.count ?? 0) cards this season")
-                        }
-                        Text("Binder").font(Theme.heading(44)).foregroundStyle(Theme.ink)
-                    }
-                    .padding(.horizontal, 4).padding(.top, 8)
-
-                    if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
-
-                    if let c = collection, c.rider.avatar == nil {
-                        MakeAvatarPrompt { builder = .quick }
-                    }
-                    CardFrame(renderer: riderCard)
-                    HStack {
-                        Button(collection?.rider.avatar == nil ? "Make your avatar" : "Edit avatar") {
-                            builder = collection?.rider.avatar == nil ? .quick : .full
-                        }
-                        .buttonStyle(SecondaryButton())
-                        Spacer()
-                        if let c = collection {
-                            Text("\(c.rider.type) · \(c.rider.overall) overall")
-                                .font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
-                        }
-                    }
-
-                    YourBike(spec: model.bike) { builder = .full }
-
-                    if let c = collection {
-                        BadgeGrid(badges: c.badges, rides: model.rides)
-                        if !c.binder.isEmpty {
-                            BinderPages(pages: c.binder, year: $year, rides: model.rides)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                SectionTitle("Binder").padding(.horizontal, -4)
+                if let c = collection {
+                    MonoLabel("\(c.rider.badgesEarned) of \(c.rider.badgesTotal) badges · \(c.binder.first?.cards.count ?? 0) cards this season")
                 }
-                .padding(.horizontal, 16).padding(.bottom, 24)
             }
-            .background(Theme.ground.ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
-            .refreshable { await load(force: true) }
-            .task { await load(force: false) }
-            .sheet(item: $builder, onDismiss: { Task { await load(force: true) } }) { mode in
-                AvatarBuilder(quick: mode == .quick).environmentObject(model)
+            .padding(.horizontal, 4)
+
+            if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
+
+            if let c = collection, c.rider.avatar == nil {
+                MakeAvatarPrompt { builder = .quick }
             }
+            CardFrame(renderer: riderCard)
+            HStack {
+                Button(collection?.rider.avatar == nil ? "Make your avatar" : "Edit avatar") {
+                    builder = collection?.rider.avatar == nil ? .quick : .full
+                }
+                .buttonStyle(SecondaryButton())
+                Spacer()
+                if let c = collection {
+                    Text("\(c.rider.type) · \(c.rider.overall) overall")
+                        .font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
+                }
+            }
+
+            YourBike(spec: model.bike) { builder = .full }
+
+            if let c = collection {
+                BadgeGrid(badges: c.badges, rides: model.rides)
+                if !c.binder.isEmpty {
+                    BinderPages(pages: c.binder, year: $year, rides: model.rides)
+                }
+            }
+        }
+        // Reload when rides arrive (pull to refresh on You updates them).
+        .task(id: model.you?.all.rides) { await load(force: collection != nil) }
+        .sheet(item: $builder, onDismiss: { Task { await load(force: true) } }) { mode in
+            AvatarBuilder(quick: mode == .quick).environmentObject(model)
         }
     }
 
@@ -73,11 +65,6 @@ struct BinderView: View {
         do {
             collection = try await APIClient().collection()
             error = nil
-            // First visit without an avatar: ask the few quick questions, once.
-            if collection?.rider.avatar == nil && !askedOnce {
-                askedOnce = true
-                builder = .quick
-            }
         } catch {
             self.error = error.localizedDescription
         }

@@ -1,48 +1,15 @@
 import SwiftUI
 
-/// The home loop and other repeated routes, and repeated climbs, on the You screen. Each opens
-/// its full history (rideengine/analysis/repeats.py finds them).
-struct RepeatsSection: View {
-    let routes: [RouteRepeat]
-    let climbs: [ClimbRepeat]
+/// The home loop on the You screen (rideengine/analysis/repeats.py finds it); opens its full history.
+struct HomeLoopLink: View {
+    let route: RouteRepeat
     let rides: [RideSummary]
 
     var body: some View {
-        if let home = routes.first(where: \.home) {
-            NavigationLink { RepeatDetailView(history: .route(home), rides: rides) } label: {
-                HomeLoopCard(route: home)
-            }
-            .buttonStyle(.plain)
+        NavigationLink { RepeatDetailView(history: .route(route), rides: rides) } label: {
+            HomeLoopCard(route: route)
         }
-        let others = routes.filter { !$0.home }
-        if !others.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                MonoLabel("Routes you repeat").padding(.horizontal, 4).padding(.top, 8)
-                ForEach(others) { r in
-                    NavigationLink { RepeatDetailView(history: .route(r), rides: rides) } label: {
-                        RepeatRow(title: r.name,
-                                  detail: "\(Format.number(r.km, decimals: 0)) km · \(r.count) laps",
-                                  value: r.best?.kmh.map { "\(Format.number($0, decimals: 1)) km/h" } ?? "–",
-                                  valueNote: "best")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        if !climbs.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                MonoLabel("Climbs").padding(.horizontal, 4).padding(.top, 8)
-                ForEach(climbs) { c in
-                    NavigationLink { RepeatDetailView(history: .climb(c), rides: rides) } label: {
-                        RepeatRow(title: c.name,
-                                  detail: "\(Format.number(c.lengthM / 1000, decimals: 1)) km · \(Format.number(c.grade, decimals: 1))% · \(c.count) times",
-                                  value: Format.clock(c.best.seconds),
-                                  valueNote: "best · last \(Format.clock(c.last.seconds))")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -80,32 +47,6 @@ private struct HomeLoopCard: View {
             Text(value).font(Theme.text(24, .semibold)).monospacedDigit().foregroundStyle(Theme.ink)
             Text(unit).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
         }
-    }
-}
-
-private struct RepeatRow: View {
-    let title: String
-    let detail: String
-    let value: String
-    let valueNote: String
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(detail).font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(value).font(Theme.text(20, .semibold)).monospacedDigit().foregroundStyle(Theme.ink)
-                Text(valueNote).font(Theme.mono(11)).foregroundStyle(Theme.label)
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .surfaceCard(radius: 16)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 }
 

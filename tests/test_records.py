@@ -128,3 +128,15 @@ def test_at_most_four_notes():
 def test_report_runs():
     out = records.report(records.you(weekly(8) + [ride("2026-05-01", 101)], today=date(2026, 5, 2), tz=UTC))
     assert "Personal bests:" in out and "101.0 km" in out
+
+
+def test_milestones_for_tallies_that_only_go_up():
+    rides = weekly(12, km=50, up=800, hours=2.5)          # 600 km, 30 h, 9,600 m, 12 rides
+    ms = {m["kind"]: m for m in records.milestones(records.entries(rides, UTC))}
+    h = ms["hours"]
+    assert [e["value"] for e in h["earned"]] == [10, 25] and h["next"]["value"] == 50
+    assert h["next"]["to_go"] == 20 and h["next"]["progress"] == 0.2
+    assert h["earned"][1]["ride_id"] == records.ride_id(rides[9])    # 25 h reached on the 10th ride
+    assert [e["value"] for e in ms["km"]["earned"]] == [100, 500] and ms["rides"]["next"]["value"] == 25
+    assert ms["everests"]["earned"][0]["text"] == "1 Everest" and ms["everests"]["next"]["text"] == "2 Everests"
+    assert "milestones" in records.you(rides, date(2026, 6, 1), UTC)

@@ -103,7 +103,6 @@ struct ContentView: View {
             }.tag(0)
             PlanView().tabItem { Label("Plan", systemImage: "calendar") }.tag(1)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
-            BinderView().tabItem { Label("Binder", systemImage: "rectangle.stack.fill") }.tag(3)
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)
         }
         .tint(Theme.cobalt)

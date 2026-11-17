@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from rideengine.analysis import goals, records
+from rideengine.analysis import goals, headline, records
 from rideengine.model import Sample
 
 UTC = timezone.utc
@@ -78,12 +78,66 @@ def test_reveal_and_markers_for_keeping_up():
     r = goals.reveal(g, es, found, TODAY, 55)
     assert r["figures"]["group_kmh"] == 30 and 5 < r["figures"]["draft_power_pct"] < 20
     assert [b["id"] for b in r["build"]][:2] == ["surges", "sustained"] and "rises" in r["build"][0]["line"]
-    ms = {m["id"]: m for m in goals.markers(g, es, found, TODAY, 55)}
-    assert ms["rating_speed"]["target"] == min(99, ms["rating_speed"]["current"] + 8)
-    assert ms["home_loop_same_hr"]["current"] and len(ms["home_loop_same_hr"]["history"]) == 12
-    assert ms["power_60s"]["pending"] and ms["power_1200s"]["current"] is None
-    with_power = {m["id"]: m for m in goals.markers(g, es, found, TODAY, 55, {"60": 410, "1200": 230})}
-    assert with_power["power_60s"]["current"] == 410 and with_power["power_60s"]["target"] == 443
+    # The markers are the four headline numbers with the goal's targets (no route-specific ones).
+    four = headline.four(fs, TODAY, g)
+    ms = {m["id"]: m for m in goals.markers(g, es, TODAY, four["metrics"])}
+    assert list(ms) == ["sustained", "punch", "efficiency", "durability"]
+    assert ms["punch"]["pending"] and ms["sustained"]["current"] is None and ms["punch"]["focus"]
+    fs[-1]["power_curve"] = {"60": 410, "1200": 230}
+    four = headline.four(fs, TODAY, g)
+    ms = {m["id"]: m for m in goals.markers(g, es, TODAY, four["metrics"])}
+    assert ms["punch"]["current"] == 410 and ms["punch"]["target"] == 451  # a focus: +10%
+    assert ms["sustained"]["current"] == 218 and four["targets_changed"]
+
+
+def test_headline_targets_stay_put_as_the_rider_improves():
+    fs = [feat(TODAY - timedelta(days=30 - i), 40) for i in range(10)]
+    for i, f in enumerate(fs):
+        f["m_per_beat"] = 3.0 + i * 0.01
+    fs[0]["power_curve"] = {"60": 300, "1200": 200}
+    g = {"aspiration": "first_distance"}
+    first = headline.four(fs, TODAY, g)
+    m = {x["id"]: x for x in first["metrics"]}
+    assert m["sustained"]["current"] == 190 and m["sustained"]["target"] == 200    # not a focus: +5%
+    assert m["efficiency"]["unit"] == "m/beat" and m["efficiency"]["target"] == round(m["efficiency"]["current"] * 1.06, 2)
+    assert m["durability"]["pending"] and m["durability"]["target"] is None
+    # Later, with the targets kept: a better 20 minutes moves progress, not the target.
+    fs[-1]["power_curve"] = {"60": 310, "1200": 205}
+    later = headline.four(fs, TODAY, {**g, "targets": first["targets"]})
+    s = {x["id"]: x for x in later["metrics"]}["sustained"]
+    assert s["current"] == 195 and s["target"] == 200 and s["progress"] == 0.5 and not later["targets_changed"]
+    # A long ride gives durability its target then.
+    fs[-1]["hold"] = 96.0
+    third = headline.four(fs, TODAY, {**g, "targets": first["targets"]})
+    d = {x["id"]: x for x in third["metrics"]}["durability"]
+    assert d["current"] == 96 and d["target"] == 100 and third["targets_changed"]
+    assert third["next"]["id"] in ("durability", "efficiency")    # a focus metric comes first
+
+
+def test_efficiency_from_power_when_the_rider_has_it_lately():
+    fs = [feat(TODAY - timedelta(days=100 - i), 40) for i in range(5)]
+    for f in fs:
+        f["m_per_beat"] = 3.1
+    assert {x["id"]: x for x in headline.current(fs, TODAY)}["efficiency"]["unit"] == "m/beat"
+    trainer = feat(TODAY - timedelta(days=2), 0, indoor=True)
+    trainer["w_per_beat"] = 1.05
+    eff = {x["id"]: x for x in headline.current(fs + [trainer], TODAY)}["efficiency"]
+    assert eff["unit"] == "W/beat" and eff["current"] == 1.05
+
+
+def test_watts_per_beat_and_durability_from_samples():
+    from rideengine.model import Ride
+    t0 = 1_790_000_000.0
+    n = 3 * 3600
+    # Steady 150 W; heart rate drifts from 125 to 140 bpm over the last quarter: a fade.
+    samples = [Sample(t=t0 + i, power=150, hr=125 if i < 0.75 * n else 140) for i in range(n)]
+    ride = Ride(start=t0, end=t0 + n, sport="cycling", indoor=True, samples=samples, totals={},
+                provenance={"channel:power": "kickr"}, recordings=[])
+    assert headline.watts_per_beat(ride) == 1.2
+    assert headline.hold(ride) == round(100 * 125 / 140, 1)
+    short = Ride(start=t0, end=t0 + 3600, sport="cycling", indoor=True, samples=samples[:3600], totals={},
+                 provenance={"channel:power": "kickr"}, recordings=[])
+    assert headline.hold(short) is None
 
 
 def test_options_quote_the_riders_bests():

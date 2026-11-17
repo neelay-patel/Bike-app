@@ -149,6 +149,53 @@ struct YouSummary: Decodable {
     let updating: Bool?
     /// FTP, recent bests and the latest ride's average power; nil before any ride with measured power.
     let power: PowerSummary?
+    /// The four headline numbers with the goal's targets (rideengine/analysis/headline.py).
+    let headline: Headline?
+    /// Prizes for the tallies that only go up: hours, km, rides, Everests.
+    let milestones: [Milestone]?
+
+    struct Headline: Decodable {
+        let metrics: [Metric]
+        let next: Next?
+        let goal: GoalRef?
+
+        struct Metric: Decodable, Identifiable {
+            let id: String
+            let label: String
+            let plain: String
+            let unit: String
+            let decimals: Int
+            let current: Double?
+            let target: Double?
+            let baseline: Double?
+            let progress: Double?
+            let history: [GoalView.Marker.Point]
+            let pending: String?
+            let detail: String?
+            let action: String
+            let focus: Bool
+        }
+        struct Next: Decodable { let id: String?; let text: String }
+        struct GoalRef: Decodable { let id: Int; let title: String?; let words: String?; let readyBy: String? }
+    }
+
+    struct Milestone: Decodable, Identifiable {
+        var id: String { kind }
+        let kind: String
+        let label: String
+        let total: Double
+        let earned: [Prize]
+        let next: Next?
+
+        struct Prize: Decodable, Identifiable {
+            var id: Double { value }
+            let value: Double
+            let text: String
+            let date: String
+            let rideId: String
+        }
+        struct Next: Decodable { let value: Double; let text: String; let toGo: Double; let progress: Double }
+    }
 
     struct PowerSummary: Decodable {
         let ftp: FTPValue

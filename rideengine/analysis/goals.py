@@ -12,11 +12,9 @@ Estimates are labelled as estimates.
 """
 from __future__ import annotations
 
-import math
 import statistics
 from datetime import date, datetime, timedelta
 
-from .collection import ratings
 from .records import _Entry
 
 # --- physics, for the drafting estimate --------------------------------------------------------
@@ -235,63 +233,20 @@ def reveal(goal: dict, es: list[_Entry], found: dict, today: date, resting_hr: f
 
 
 # --- markers: how we'll see it working ---------------------------------------------------------
-def markers(goal: dict, es: list[_Entry], found: dict, today: date, resting_hr: float | None = None,
-            power_curve: dict | None = None) -> list[dict]:
-    """The measures we'll watch for this goal, each with its current value, a proposed target and its
-    history, read from ordinary riding. Pending markers say what data they're waiting for."""
+def markers(goal: dict, es: list[_Entry], today: date, metrics: list[dict]) -> list[dict]:
+    """The measures we'll watch for this goal: the four headline numbers (headline.four, with the goal's
+    targets), plus the longest recent ride for a distance goal. Each has its current value, target and
+    history, read from ordinary riding; pending ones say what data they're waiting for. No route-specific
+    markers: the same four for every rider, so the You tab's headline card and the goal agree."""
+    out = [dict(m) for m in metrics]
     asp = goal.get("aspiration")
-    out: list[dict] = []
-    rating_key = {"keep_up_group": "speed", "beat_my_roads": "speed", "sprint": "speed", "climb_faster": "climbing",
-                  "own_climbs": "climbing", "first_distance": "endurance", "all_day": "endurance",
-                  "more_power": "speed", "event": "endurance"}.get(asp, "speed")
-
-    # The rider card rating that matches the goal, week by week over the last 16 weeks.
-    hist = []
-    for w in range(15, -1, -1):
-        d = today - timedelta(weeks=w)
-        hist.append({"date": d.isoformat(), "value": ratings([e for e in es if e.day <= d], d)["ratings"][rating_key]})
-    cur = hist[-1]["value"]
-    out.append({"id": f"rating_{rating_key}", "label": f"{rating_key.capitalize()} on your rider card", "unit": "",
-                "current": cur, "target": min(99, cur + 8), "better": "higher", "history": hist})
-
-    if asp in ("keep_up_group", "beat_my_roads", "sprint", "more_power") and (home := home_route(found)):
-        laps = [l for l in home["laps"] if l.get("avg_hr")]
-        rest = resting_hr or 55
-        ref = round(statistics.median(l["avg_hr"] for l in laps[-10:])) if laps else HR_REF
-        series = lap_speeds_at_hr(home, rest, ref)
-        if len(series) >= 3:
-            now = statistics.median(s["value"] for s in series[-5:])
-            out.append({"id": "home_loop_same_hr", "label": f"{home['name']} at {ref} bpm", "unit": "km/h",
-                        "current": round(now, 1), "target": round(now * 1.05, 1), "better": "higher",
-                        "history": [{"date": datetime.fromtimestamp(s["start"]).date().isoformat(),
-                                     "value": s["value"]} for s in series],
-                        "how": "Your lap speed scaled to the same heart rate, so a windy day or an easy lap doesn't mislead."})
-
-    if asp in ("keep_up_group", "climb_faster", "own_climbs") and (climb := main_climb(found)):
-        att = sorted(climb["attempts"], key=lambda a: a["at"])
-        best = min(a["seconds"] for a in att)
-        out.append({"id": "main_climb", "label": climb["name"], "unit": "time", "current": _clock(best),
-                    "target": _clock(math.floor(best * 0.95)), "better": "lower",
-                    "history": [{"date": datetime.fromtimestamp(a["at"]).date().isoformat(), "value": a["seconds"]}
-                                for a in att]})
-
     if asp in ("first_distance", "all_day", "event"):
         recent = [e.km for e in es if not e.indoor and (today - e.day).days <= 56]
+        p = goal.get("params") or {}
         out.append({"id": "longest_recent", "label": "Longest ride, last 8 weeks", "unit": "km",
                     "current": round(max(recent), 1) if recent else None,
-                    "target": (goal.get("params") or {}).get("target_km") or (goal.get("params") or {}).get("event_km"),
-                    "better": "higher", "history": []})
-
-    pc = power_curve or {}
-    want = {"keep_up_group": [("60", "Best 1-minute surge"), ("1200", "Best 20 minutes")],
-            "sprint": [("5", "Best 5-second sprint"), ("60", "Best 1-minute surge")],
-            "more_power": [("300", "Best 5 minutes"), ("1200", "Best 20 minutes")],
-            "climb_faster": [("1200", "Best 20 minutes")], "own_climbs": [("1200", "Best 20 minutes")]}.get(asp, [])
-    for secs, label in want:
-        v = pc.get(secs)
-        out.append({"id": f"power_{secs}s", "label": label, "unit": "W", "current": v,
-                    "target": round(v * 1.08) if v else None, "better": "higher", "history": [],
-                    "pending": None if v else "From your first rides with power (KICKR, Zwift)."})
+                    "target": p.get("target_km") or p.get("event_km"), "better": "higher", "history": [],
+                    "pending": None if recent else "From your next outdoor ride."})
     return out
 
 

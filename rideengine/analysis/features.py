@@ -13,10 +13,13 @@ from __future__ import annotations
 from ..model import Ride
 from .basics import summary
 from .climbs import find_climbs
+from .fitness import efficiency
 from .goals import power_curve
+from .headline import hold, watts_per_beat
 from .repeats import Track
 
-VERSION = 7  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling
+VERSION = 8  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
+             # 8 efficiency and durability (headline.py)
 
 
 def extract(ride: Ride) -> dict:
@@ -28,12 +31,15 @@ def extract(ride: Ride) -> dict:
          "power": s["avg_power"] if ride.provenance.get("channel:power") else None,
          "hr_drop_60s": s["hr_drop_60s"], "max_hr": s["max_hr"],
          "power_curve": power_curve(ride.samples) if ride.provenance.get("channel:power") else {},
+         "w_per_beat": watts_per_beat(ride) if ride.provenance.get("channel:power") else None,
+         "m_per_beat": None, "hold": hold(ride),
          "cells": [], "first": None, "last": None, "bbox": None, "track_km": 0.0, "climbs": []}
     if ride.indoor:
         return f
     t = Track.of(ride)
     if len(t.lat) < 10:
         return f
+    f["m_per_beat"] = None if f["w_per_beat"] else efficiency(ride)
     f.update(cells=sorted([list(c) for c in t.cells]), first=[t.lat[0], t.lon[0]], last=[t.lat[-1], t.lon[-1]],
              bbox=[min(t.lat), min(t.lon), max(t.lat), max(t.lon)], track_km=round(t.km, 2),
              climbs=[{"start": list(c["start"]), "end": list(c["end"]), "gain_m": c["gain_m"],

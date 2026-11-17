@@ -49,6 +49,8 @@ METRICS = [
     Metric("hours", "time", "Longest in the saddle", "longest ride by time", "h", 2),
     Metric("kmh", "speed", f"Fastest average ({SPEED_MIN_KM} km+)", "fastest ride", "km/h", 1),
     Metric("power", "power", "Highest average power", "highest-powered ride", "W", 0),
+    Metric("p1200", "sustained", "Best 20 minutes", "best 20 minutes", "W", 0),
+    Metric("p60", "punch", "Best minute", "best minute", "W", 0),
 ]
 _BY_KEY = {m.key: m for m in METRICS}
 
@@ -70,6 +72,8 @@ class _Entry:
     power: float | None
     indoor: bool
     hr_drop: float | None = None   # heart rate fallen in the minute after the ride
+    p60: float | None = None       # best minute of measured power
+    p1200: float | None = None     # best 20 minutes of measured power
 
     def value(self, key: str) -> float | None:
         v = getattr(self, key)
@@ -85,13 +89,15 @@ def ride_id(ride: Ride) -> str:
 def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
     """One flat record per ride, oldest first, in the rider's local time. A trainer's km aren't road km:
     indoor rides count 0 km in tallies and bests."""
+    from .goals import power_curve
     out = []
     for r in rides:
         s = summary(r)
+        pc = power_curve(r.samples, (60, 1200)) if r.provenance.get("channel:power") else {}
         out.append(_Entry(ride_id(r), r.start, datetime.fromtimestamp(r.start, tz).astimezone(tz).date(),
                           0.0 if r.indoor else s["km"] or 0.0, s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
                           s["avg_power"] if r.provenance.get("channel:power") else None, r.indoor,
-                          s["hr_drop_60s"]))
+                          s["hr_drop_60s"], pc.get("60"), pc.get("1200")))
     return sorted(out, key=lambda e: e.start)
 
 
@@ -99,7 +105,8 @@ def entries_from_features(feats: list[dict], tz: tzinfo | None = None) -> list[_
     """The same records from stored per-ride features (features.extract), without the samples."""
     out = [_Entry(f["ride_id"], f["start"], datetime.fromtimestamp(f["start"], tz).astimezone(tz).date(),
                   0.0 if f["indoor"] else f["km"], f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
-                  f.get("hr_drop_60s")) for f in feats]
+                  f.get("hr_drop_60s"), (f.get("power_curve") or {}).get("60"),
+                  (f.get("power_curve") or {}).get("1200")) for f in feats]
     return sorted(out, key=lambda e: e.start)
 
 
@@ -193,6 +200,50 @@ def tallies(es: list[_Entry], today: date) -> dict:
         "biggest_month": ({"label": date(*big[0], 1).strftime("%B %Y"), **_tally(big[1])} if big else None),
         "streak": streaks(es, today),
     }
+
+
+# --- milestones: prizes for the tallies that only go up ----------------------------------------
+# Time on the bike comes first: it's what every other number grows from.
+MILESTONES = [
+    ("hours", "Hours in the saddle", "h", [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 3000]),
+    ("km", "Kilometres", "km", [100, 500, 1000, 2000, 2500, 5000, 7500, 10000, 15000, 20000, 25000, 30000, 40000, 50000]),
+    ("rides", "Rides", "", [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]),
+    ("everests", "Everests climbed", "", [1, 2, 3, 5, 7, 10, 15, 20, 30, 50]),
+]
+
+
+def _milestone_text(kind: str, v: float) -> str:
+    if kind == "hours":
+        return f"{_num(v)} hours"
+    if kind == "km":
+        return f"{_num(v)} km"
+    if kind == "rides":
+        return f"{_num(v)} rides"
+    return "1 Everest" if v == 1 else f"{_num(v)} Everests"
+
+
+def milestones(es: list[_Entry]) -> list[dict]:
+    """For each tally: every prize earned (when, on which ride) and the next one (how far to go)."""
+    es = sorted(es, key=lambda e: e.start)
+    out = []
+    for kind, label, unit, ladder in MILESTONES:
+        total, earned, i = 0.0, [], 0
+        for n, e in enumerate(es, 1):
+            total = (total + e.hours if kind == "hours" else total + e.km if kind == "km" else n if kind == "rides"
+                     else total + (e.ascent or 0) / EVEREST_M)
+            while i < len(ladder) and total >= ladder[i]:
+                earned.append({"value": ladder[i], "text": _milestone_text(kind, ladder[i]),
+                               "date": e.day.isoformat(), "ride_id": e.ride_id})
+                i += 1
+        nxt = None
+        if i < len(ladder):
+            prev = ladder[i - 1] if i else 0
+            nxt = {"value": ladder[i], "text": _milestone_text(kind, ladder[i]),
+                   "to_go": round(ladder[i] - total, 1),
+                   "progress": round((total - prev) / (ladder[i] - prev), 3)}
+        out.append({"kind": kind, "label": label, "unit": unit, "total": round(total, 2), "earned": earned,
+                    "next": nxt})
+    return out
 
 
 # --- personal bests ------------------------------------------------------------------------
@@ -474,7 +525,7 @@ def you_from(es: list[_Entry], found: dict, ride_notes: dict[str, list[dict]], t
     today = today or datetime.now(tz).astimezone(tz).date()
     latest = [{"ride_id": e.ride_id, "start": e.start, "km": e.km, "notes": ride_notes.get(e.ride_id, [])}
               for e in reversed(es[-recent:])]
-    return {**tallies(es, today), "bests": bests(es), "routes": [_route_view(r) for r in found["routes"]],
+    return {**tallies(es, today), "milestones": milestones(es), "bests": bests(es), "routes": [_route_view(r) for r in found["routes"]],
             "climbs": [_climb_view(c) for c in found["climbs"]], "recent": latest}
 
 

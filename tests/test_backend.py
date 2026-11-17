@@ -286,3 +286,13 @@ def test_you_power_from_a_trainer_ride(env):
     assert p["ftp"] == {"watts": 162, "source": "estimated from your best 20 minutes"}
     y = client.get("/v1/you").json()
     assert y["all"]["km"] == 0  # a trainer's km aren't road km
+    # The headline card: sustained power and punch measured; no goal, so targets are proposals.
+    hl = {m["id"]: m for m in y["headline"]["metrics"]}
+    assert hl["sustained"]["current"] == 162 and hl["sustained"]["target"] == 170 and hl["punch"]["current"] == 180
+    assert y["headline"]["goal"] is None
+    # With a goal, the targets are kept with it and don't move.
+    client.put("/v1/goals/current", json={"objective": "faster", "aspiration": "keep_up_group"})
+    stored = json.loads(be.db.execute("SELECT data FROM goals WHERE user_id = ? AND active = 1", (uid,)).fetchone()[0])
+    assert stored["targets"]["sustained"] == {"baseline": 162, "target": 178, "unit": "W"}
+    hl = {m["id"]: m for m in client.get("/v1/you").json()["headline"]["metrics"]}
+    assert hl["sustained"]["target"] == 178 and hl["sustained"]["focus"] and hl["sustained"]["progress"] == 0

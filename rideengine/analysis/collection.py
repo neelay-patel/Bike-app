@@ -41,7 +41,7 @@ BADGES = [
 ]
 
 
-HOLO_KINDS = {"distance", "climbing", "time", "speed", "power"}
+HOLO_KINDS = {"distance", "climbing", "time", "speed", "power", "sustained", "punch"}
 AWAY_KM = 500   # a ride further than this from home is in another time zone (probably)
 
 

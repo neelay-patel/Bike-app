@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Recovery on the You screen: how recovered you look (HRV and resting heart rate against your own
+/// Fitness and recovery, the second card on You: how recovered you look (HRV and resting heart rate against your own
 /// usual range), VO2 max, and heart-rate recovery after rides. From GET /v1/recovery; only ever
 /// shown to the rider. Rule-based, and says it's not medical advice.
 struct RecoverySection: View {
@@ -8,9 +8,11 @@ struct RecoverySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Circle().fill(color(recovery.readiness.status)).frame(width: 9, height: 9)
-                MonoLabel("Recovery")
+            HStack(alignment: .center, spacing: 8) {
+                Text("Fitness and recovery").font(Theme.heading(24)).foregroundStyle(Theme.ink)
+                Spacer()
+                Circle().fill(color(recovery.readiness.status)).frame(width: 11, height: 11)
+                    .accessibilityHidden(true)
             }
             Text(recovery.readiness.text)
                 .font(Theme.text(16, .medium)).foregroundStyle(Theme.ink)
@@ -80,7 +82,8 @@ private struct MetricTile: View {
 
     private var caption: String {
         if let change = trend.change90D {
-            return "\(change >= 0 ? "+" : "")\(Format.number(change, decimals: 1)) in 90 days"
+            if abs(change) < 0.05 { return "No change in 90 days" }
+            return "\(change > 0 ? "+" : "−")\(Format.number(abs(change), decimals: 1)) in 90 days"
         }
         if let low = trend.low, let high = trend.high {
             let range = "usual \(Format.number(low, decimals: decimals))–\(Format.number(high, decimals: decimals))"

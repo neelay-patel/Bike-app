@@ -12,8 +12,8 @@ from ..model import Ride
 from .basics import distances
 
 
-def efficiency(ride: Ride, window_s: int = 60, min_windows: int = 8) -> float | None:
-    """Median metres per heartbeat over flat (<1.5%), steady (18-40 km/h) one-minute windows."""
+def efficiency_windows(ride: Ride, window_s: int = 60) -> list[tuple[float, float]]:
+    """(seconds into the ride, metres per heartbeat) for each flat (<1.5%), steady (18-40 km/h) minute."""
     cum = distances(ride)
     s = ride.samples
     vals, i = [], 0
@@ -34,11 +34,16 @@ def efficiency(ride: Ride, window_s: int = 60, min_windows: int = 8) -> float | 
         )
         hr = [x.hr for x in s[i:j + 1] if x.hr is not None]
         if flat and steady and 18 <= kmh <= 40 and len(hr) >= 3:
-            vals.append((dd / (dt / 60)) / (sum(hr) / len(hr)))
+            vals.append((s[i].t - s[0].t, (dd / (dt / 60)) / (sum(hr) / len(hr))))
         i = j
+    return vals
+
+
+def efficiency(ride: Ride, window_s: int = 60, min_windows: int = 8) -> float | None:
+    """Median metres per heartbeat over flat (<1.5%), steady (18-40 km/h) one-minute windows."""
+    vals = sorted(v for _, v in efficiency_windows(ride, window_s))
     if len(vals) < min_windows:
         return None
-    vals.sort()
     return round(vals[len(vals) // 2], 3)
 
 

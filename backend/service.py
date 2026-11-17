@@ -349,7 +349,29 @@ class Backend:
         what backend/insights.py keeps stored), and the rider's power."""
         out = self.insights.you(user_id)
         out["power"] = self.power(user_id)
+        out["headline"] = self.headline(user_id)
         return out
+
+    def headline(self, user_id: int) -> dict:
+        """The four headline numbers (rideengine/analysis/headline.py) with the active goal's targets, kept
+        with the goal from the first time each number has a value, so progress has a fixed starting point."""
+        from rideengine.analysis import headline as hl
+        c = self._goal_context(user_id)
+        row = self._active_goal_row(user_id)
+        goal = json.loads(row["data"]) if row else None
+        four = hl.four(c["feats"], c["today"], goal, self.me(user_id).get("ftp"))
+        if row and four["targets_changed"]:
+            with self.lock:
+                self.db.execute("UPDATE goals SET data = ? WHERE goal_id = ?",
+                                (json.dumps({**goal, "targets": four["targets"]}), row["goal_id"]))
+        return {"metrics": four["metrics"], "next": four["next"],
+                "goal": ({"id": row["goal_id"], "title": goal.get("title"), "aspiration": goal.get("aspiration"),
+                          "words": goal.get("words"), "ready_by": goal.get("ready_by")} if row else None)}
+
+    def _active_goal_row(self, user_id: int):
+        with self.lock:
+            return self.db.execute("SELECT goal_id, data, created_at FROM goals WHERE user_id = ? AND active = 1 "
+                                   "ORDER BY goal_id DESC LIMIT 1", (user_id,)).fetchone()
 
     POWER_DAYS = 120  # bests and the FTP estimate come from this recent a window (as the plan's do)
 
@@ -594,7 +616,7 @@ class Backend:
         es = records.entries_from_features(vfeats, tz)
         today = datetime.now(tz).astimezone(tz).date()
         rest = self.recovery(user_id)["resting_hr"].get("usual")
-        return {"es": es, "found": found, "today": today, "rest": rest,
+        return {"es": es, "found": found, "today": today, "rest": rest, "feats": vfeats,
                 "power": g.best_power_curve(vfeats, today - timedelta(days=120))}
 
     def goal_options(self, user_id: int) -> dict:
@@ -641,13 +663,20 @@ class Backend:
     def goal_view(self, user_id: int, goal: dict) -> dict:
         """A goal with what it means (the reveal) and how we'll see it working (markers), from the rider's data."""
         from rideengine.analysis import goals as g
+        from rideengine.analysis import headline as hl
         c = self._goal_context(user_id)
-        return {"goal": goal, "reveal": g.reveal(goal, c["es"], c["found"], c["today"], c["rest"]),
-                "markers": g.markers(goal, c["es"], c["found"], c["today"], c["rest"], c["power"]),
+        four = hl.four(c["feats"], c["today"], goal, self.me(user_id).get("ftp"))
+        return {"goal": {**goal, "targets": four["targets"]},
+                "reveal": g.reveal(goal, c["es"], c["found"], c["today"], c["rest"]),
+                "markers": g.markers(goal, c["es"], c["today"], four["metrics"]),
                 "season": g.seasons(c["es"], c["today"])}
 
     def set_goal(self, user_id: int, goal: dict) -> dict:
+        from rideengine.analysis import headline as hl
         goal = self.check_goal(user_id, goal)
+        c = self._goal_context(user_id)
+        # Targets start from where the rider is today; numbers without a value yet get theirs later.
+        goal["targets"] = hl.four(c["feats"], c["today"], {**goal, "targets": {}}, self.me(user_id).get("ftp"))["targets"]
         with self.lock:
             self.db.execute("UPDATE goals SET active = 0, ended_at = ? WHERE user_id = ? AND active = 1", (db.now(), user_id))
             cur = self.db.execute("INSERT INTO goals (user_id, data, active, created_at) VALUES (?, ?, 1, ?)",
@@ -656,12 +685,16 @@ class Backend:
         return self.goal_view(user_id, {**goal, "id": cur.lastrowid})
 
     def current_goal(self, user_id: int) -> Optional[dict]:
-        with self.lock:
-            row = self.db.execute("SELECT goal_id, data, created_at FROM goals WHERE user_id = ? AND active = 1 "
-                                  "ORDER BY goal_id DESC LIMIT 1", (user_id,)).fetchone()
+        row = self._active_goal_row(user_id)
         if row is None:
             return None
-        return self.goal_view(user_id, {**json.loads(row["data"]), "id": row["goal_id"], "set_at": row["created_at"]})
+        view = self.goal_view(user_id, {**json.loads(row["data"]), "id": row["goal_id"], "set_at": row["created_at"]})
+        stored = json.loads(row["data"])
+        if view["goal"]["targets"] != (stored.get("targets") or {}):
+            with self.lock:
+                self.db.execute("UPDATE goals SET data = ? WHERE goal_id = ?",
+                                (json.dumps({**stored, "targets": view["goal"]["targets"]}), row["goal_id"]))
+        return view
 
     def end_goal(self, user_id: int) -> bool:
         with self.lock:
