@@ -381,3 +381,71 @@ def test_course_tuning_versions_and_undo(env):
     assert client.delete(f"/v1/courses/{c['id']}").status_code == 200
     import os
     assert not [f for f in os.listdir(os.path.join(be.settings.raw_dir, str(uid), "courses"))]
+
+
+def test_plan_routes_from_a_description(env):
+    """Words in, questions for what's missing, then three loops saved and checked like any route."""
+    from rideengine.routes.router import Graph
+    from test_tune import Flat, grid, node
+    be, uid, client, _ = env
+    ways = grid(n=26, gravel_rows=tuple(range(0, 26, 2)))
+    cafe = node(12, 16)
+    stops = [{"id": "n1", "lat": cafe[0], "lon": cafe[1], "kind": "food", "name": "Canter Coffee", "what": "cafe",
+              "hours": ""}]
+    be.area_source = lambda bbox, prefs: (Graph(ways, prefs), stops, [])
+    be.map_source = lambda r: {"ways": ways, "pois": stops, "fetched": None}
+    be.heights = Flat()
+    be.gravel_grid = {}          # no gravel map: no "not much gravel here" question
+    r = client.post("/v1/courses/plan", json={"text": "40-50 km gravel loop, coffee halfway"})
+    assert r.status_code == 200, r.text
+    first = r.json()
+    assert [q["key"] for q in first["questions"]] == ["start"] and "courses" not in first
+    start = node(12, 4)
+    r = client.post("/v1/courses/plan", json={"ask": first["ask"],
+                                              "answers": {"start": {"name": "Goodwood", "lat": start[0], "lon": start[1]}}})
+    assert r.status_code == 200, r.text
+    made = r.json()
+    assert "FROM GOODWOOD" in made["ask"]["tags"] and len(made["courses"]) >= 2
+    c = made["courses"][0]
+    assert c["source"] == "generated" and c["status"] == "ready" and 38 <= c["km"] <= 52
+    assert c["plan"]["stop"]["name"] == "Canter Coffee" and c["plan"]["why"]
+    assert {x["id"] for x in client.get("/v1/courses").json()["courses"]} >= {x["id"] for x in made["courses"]}
+    bad = client.post("/v1/courses/plan", json={"ask": first["ask"], "answers": {"start": {"name": "Sea", "lat": 0.0, "lon": 0.0}}})
+    assert bad.status_code == 422
+    # A street address we can't place ourselves: asked about, with the words, for the app to look up.
+    one = client.post("/v1/courses/plan", json={"text": "One-way from Goodwood to 48 Sample Cres in Markham. Road ride."}).json()
+    assert one["ask"]["shape"] == "oneway" and [q["key"] for q in one["questions"]][0] == "end"
+    assert one["questions"][0]["guess"] == "48 Sample Cres, Markham"
+    end = node(12, 14)
+    r = client.post("/v1/courses/plan", json={"ask": {**first["ask"], **one["ask"], "start": made["ask"]["start"]},
+                                              "answers": {"end": {"name": "48 Sample Cres", "lat": end[0], "lon": end[1]}}})
+    assert r.status_code == 200, r.text
+    assert r.json()["ask"]["guess"] == {} and r.json()["courses"][0]["name"].startswith("Goodwood to 48 Sample Cres")
+    # The café asked for is the route's rest stop.
+    assert any(p["name"] == "Canter Coffee" for p in client.get(f"/v1/courses/{c['id']}").json()["report"]["rest"])
+    # A gravel loop from somewhere with all paved roads around: asked first, and "anyway" makes them.
+    from rideengine.routes import osm
+    be.gravel_grid = {(i, j): {"paved": 50000} for i in range(1090, 1110) for j in range(-1600, -1570)}
+    goodwood = made["ask"]["start"]
+    q = client.post("/v1/courses/plan", json={"ask": {**first["ask"], "start": goodwood}, "answers": {}}).json()
+    assert q["questions"][0]["key"] == "gravel_start" and "Not much gravel" in q["questions"][0]["q"]
+    assert q["questions"][0]["choices"][-1] == {"label": "From Goodwood anyway", "value": "stay"} and "courses" not in q
+    r = client.post("/v1/courses/plan", json={"ask": q["ask"], "answers": {"gravel_start": "stay"}})
+    assert r.status_code == 200 and r.json()["courses"]
+
+
+def test_home_set_by_the_rider_or_from_rides(env):
+    """Home is where most of the past year's rides start, unless the rider sets it."""
+    be, uid, client, _ = env
+    be.gravel_grid = {}
+    first = client.get("/v1/home").json()
+    assert first["source"] in (None, "rides")
+    r = client.put("/v1/home", json={"lat": 43.70, "lon": -79.37, "label": "12 Example St"})
+    assert r.status_code == 200 and r.json() == {"lat": 43.7, "lon": -79.37, "label": "12 Example St",
+                                                 "source": "set", "rides": None}
+    assert be.home_point(uid) == (43.7, -79.37)
+    ask = client.post("/v1/courses/plan", json={"text": "gravel loop from home"}).json()["ask"]
+    assert (ask["start"]["lat"], ask["start"]["lon"]) == (43.7, -79.37)
+    assert client.put("/v1/home", json={"lat": 123, "lon": 0}).status_code == 400
+    back = client.delete("/v1/home").json()
+    assert back["source"] != "set" and be.home_set(uid) is None

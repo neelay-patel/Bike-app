@@ -82,6 +82,60 @@ widening of what we read from Apple Health, at this stage.
   ("travelling Tue–Thu"), the coach proposes a reshuffled week to accept or decline; quick context buttons (ill,
   something hurts, short on time, feeling great).
 
+## 7. Engine and AI: how Efforts, coaching and planning fit together
+Agreed in principle with Neelay 18 Nov 2026; building parked while he thinks it over (routes from a description first).
+
+**The line between them.**
+- **Engine (deterministic):** anything that must be right, repeatable and free, run on every ride including history:
+  merging, false starts, phases and intervals (`analysis/effort.py`), load, fitness and fatigue, zones, power curve,
+  markers, the plan's structure, progression and safety limits, did-you-do-it, tallies.
+- **AI (probabilistic):** interpreting (what today meant for the goal), language (the effort story, "why?", the weekly
+  review), messy input ("travelling Tue–Thu", "knee's sore", "60–70 km gravel loop near Uxbridge with a café"), and
+  choosing and presenting among options the engine already judged valid.
+- **The rule:** the AI never makes up a number and never changes anything directly. It reads a facts packet the
+  engine made, proposes changes in a fixed format; the engine checks them against its limits; the app shows the result.
+
+**One loop, driven by events** (a ride arrives, morning HRV arrives, a day is missed, the rider says something):
+engine compiles the Effort and matches it to the planned session → updates load, markers, recovery → plan rules
+decide: nothing / a small change (automatic) / a bigger change (rider's OK) → the AI explains and negotiates →
+out to the app, the calendar feed, Zwift .zwo (later the KICKR via Wahoo, the Edge via Garmin).
+
+**The joint: matching an Effort to the plan** (engine). Phases already find "6 work blocks of 3–4 min at ~130 W";
+matched against the planned session that becomes "6 of 6, on target" or "stopped after 3 of 6", block by block. Each
+Effort then carries its **intent** (what was planned), **execution** (what happened) and **contribution** (markers
+moved, load), which feed the plan. Needs a goal: on 18 Nov Neelay had none set, so there was no plan to match.
+
+**Where the AI earns its keep, best value first:**
+1. The story of each effort (once per effort): ties the session to the goal and recent weeks ("same watts as last
+   Tuesday, 5 beats lower"; "two hard days in a row"). Asks the one thing data can't tell: how it felt (one tap,
+   fed back to the engine).
+2. The weekly review: the engine sets next week's load; the AI writes the review and picks out what matters.
+3. Conversation: goal by talking (words → structured goal → engine's reveal), plan negotiation (words → constraints
+   → engine re-plans → AI explains), **routes from a description** (words → structured request → our router builds
+   and scores → AI presents). Same pattern each time.
+4. Engine first, AI for the leftovers: where rules are unsure (an odd session, an unclear purpose) the AI settles it,
+   labelled and saved.
+
+**Efficient and trustworthy:**
+- One facts packet per effort and per week (~2–3k tokens), built by the engine; the app and the AI read the same one.
+- Number check: every figure in an AI reply must appear in the packet, or the reply is rejected and rewritten.
+- Generated once and saved, keyed by its inputs; redone only when the data changes. Prompt caching for the stable
+  instructions; Batch API (half price) for history.
+- Rough cost at Claude Opus 5.5 prices: ~2–3¢ per effort story, $1–2 a month per active rider all in. A cheaper model
+  for per-effort stories is Neelay's call later.
+- Always works without AI: the rule-based lines stay as the fallback.
+- Policy: for Neelay's own account every source is cleared for AI (section 1, personal-use setting, still to build);
+  other riders keep `SOURCE_POLICY`. The facts packet leaves out the GPS track and name; recovery data stays out at
+  first.
+
+**Order when building resumes:**
+1. Engine: Effort ↔ planned session matching, each Effort's contribution (markers, load), the facts packet.
+2. AI layer (backend module): facts packet in, fixed-format reply out, number check, saved results, policy gate with
+   the personal-use setting, cost log. First use: the effort story (needs an Anthropic API key in the backend's
+   environment, never in the repo).
+3. Re-planning on events (engine rules) and the AI weekly review.
+4. Conversation: goal setting, plan negotiation, routes from a description.
+
 ## Built so far (15 Nov 2026)
 **The goals engine** (`rideengine/analysis/goals.py`, API under `/v1/goals/…`), no app screens yet:
 - `options`: the four objectives and their aspirations, quoting the rider's own bests ("Your home loop best:

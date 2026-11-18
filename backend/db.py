@@ -187,6 +187,8 @@ MIGRATIONS = [
     ("users", "avatar", "TEXT"),        # avatar spec as JSON (rideengine/card/avatar.py)
     ("users", "ftp", "REAL"),           # the rider's own FTP in watts, if they gave one
     ("users", "calendar_token", "TEXT"),  # secret in the training calendar feed's address
+    ("courses", "plan", "TEXT"),
+    ("users", "home", "TEXT"),          # home the rider set, JSON {"lat", "lon", "label"}; else from their rides        # generated routes: what was asked and why this one, JSON
 ]
 
 

@@ -203,7 +203,8 @@ def _road_label(w: dict | None) -> str:
 
 
 def check(route: Route, data: dict, pace: Pace | None = None, known_cells: set | None = None,
-          places: list[dict] | None = None) -> dict:
+          places: list[dict] | None = None, chosen: list[tuple[float, float]] = ()) -> dict:
+    """`chosen`: stops the rider picked (the café they asked for, stops added in tuning): always listed."""
     pace = pace or Pace()
     pts = route.resample(STEP_M)
     ways = data["ways"]
@@ -320,6 +321,7 @@ def check(route: Route, data: dict, pace: Pace | None = None, known_cells: set |
     gaps = [{"from_km": a, "to_km": b, "km": round(b - a, 1)} for a, b in zip(supply, supply[1:])]
     longest_gap = max(gaps, key=lambda g: g["km"]) if gaps else None
     mid = _midway(stops, _km(total_m))
+    rest = rest_stops(stops, _km(total_m), secs, gaps, chosen)
     # Villages and towns the route goes through (GeoNames): OpenStreetMap misses many rural shops, so a long
     # gap that passes through a village may not really be one.
     towns = []
@@ -336,7 +338,7 @@ def check(route: Route, data: dict, pace: Pace | None = None, known_cells: set |
         cells = {cell(p[0], p[1]) for p in coarse}
         known_share = round(len(cells & known_cells) / len(cells), 2) if cells else None
 
-    cues = cue_sheet(pts, on, ways, cls, stops)
+    cues = cue_sheet(pts, on, ways, cls, rest)
     out = {
         "name": route.name, "source": route.source, "link": route.link,
         "km": _km(total_m), "loop": route.is_loop,
@@ -347,6 +349,7 @@ def check(route: Route, data: dict, pace: Pace | None = None, known_cells: set |
         "unknown_km": _km(km["unknown"]), "assumed_km": _km(assumed_m),
         "singletrack": single, "trails": trails, "busy": busy, "straights": straights, "twice_km": _km(twice_m),
         "climbs": climbs, "stops": stops, "gaps": gaps, "longest_gap": longest_gap, "midway": mid,
+        "rest": rest,
         "towns": towns,
         "time_s": round(secs), "pace": {"kmh": pace.kmh, "source": pace.source},
         "known_share": known_share, "stretches": stretches, "profile": profile, "cues": cues,
@@ -360,7 +363,6 @@ def check(route: Route, data: dict, pace: Pace | None = None, known_cells: set |
 
 RANK = {"food": 0, "shop": 1, "water": 2, "bike": 3, "toilets": 4, "view": 5}
 COFFEE = {"cafe": 0, "bakery": 0, "coffee": 0, "ice_cream": 1, "fast_food": 1, "restaurant": 2, "pub": 2}
-CUE_STOP_KM = 4.0         # stops in the cue sheet at most this often (towns have dozens)
 
 
 def _stops(pts, pois: list[dict], places: list[dict] | None) -> list[dict]:
@@ -410,6 +412,104 @@ def _stops(pts, pois: list[dict], places: list[dict] | None) -> list[dict]:
     return out
 
 
+FILL_KM = 25.0            # other places to eat are listed only where nothing else is within this
+
+
+def _quality(item: dict) -> float:
+    """How good a place is to stop at, lower is better: a local café or bakery, then a chain café, ice
+    cream or a local takeaway, a restaurant or pub, other chains, a shop (petrol station, store), water."""
+    chain = (item["name"] or "").lower() in osm.CHAINS
+    if item["kind"] == "food":
+        base = {"cafe": 0.0, "bakery": 0.0, "coffee": 0.0, "ice_cream": 1.0, "fast_food": 1.2,
+                "restaurant": 1.6, "pub": 1.6}.get(item["what"], 2.0)
+        return base + (1.0 if chain else 0.0) + item["off_m"] / 400
+    if item["kind"] == "shop":
+        return 2.6 + item["off_m"] / 400
+    if item["kind"] == "water":
+        return 4.0 + item["off_m"] / 400
+    return 9.0
+
+
+def _hm(s: float) -> str:
+    h, m = divmod(round(s / 60 / 15) * 15, 60)    # to the quarter hour
+    return f"{h}:{m:02d}" if h else f"{m} min"
+
+
+def rest_stops(stops: list[dict], total_km: float, secs: float, gaps: list[dict] | None = None,
+               chosen: list[tuple[float, float]] = ()) -> list[dict]:
+    """A few sensible places to stop, not every café on the way: how many by riding time (none under
+    1:30, one halfway up to 4:30, two to 7 h, then one every 3 h), the best place near each (local cafés
+    and bakeries first), the rider's own stops (`chosen`), on a short ride a local café about halfway if
+    there is one, plus the last food before a long stretch with none, and, where nothing else is
+    listed for FILL_KM, whatever there is (the countryside has little). Each: {"km", "name", "what",
+    "place", "lat", "lon", "why", "rest": True for a planned stop, "also": [other names there]}."""
+    hours = secs / 3600 if secs else total_km / 22
+    n = 0 if hours < 1.5 else 1 if hours < 4.5 else 2 if hours < 7 else round(hours / 3)
+    supply = [s for s in stops if not s["view"] and (s["food"] or s["shop"] or s["water"])]
+    picked: list[dict] = []
+
+    def entry(st: dict, why: str, rest: bool) -> dict:
+        items = sorted((i for i in st["items"] if i["kind"] in ("food", "shop", "water")),
+                       key=lambda i: _quality({**i, "off_m": i["off_m"]}))
+        top = items[0]
+        also = [i["name"] for i in items[1:] if i["kind"] in ("food", "shop") and i["name"] != top["name"]][:2]
+        return {"km": st["km"], "name": top["name"], "what": top["what"], "kind": top["kind"], "hours": top["hours"],
+                "place": st["place"], "lat": top["lat"], "lon": top["lon"], "off_m": top["off_m"], "why": why,
+                "rest": rest, "also": also}
+
+    def at(km: float) -> str:
+        return _hm(secs * km / total_km) if secs and total_km else ""
+
+    # The rider's own stops first: they chose them.
+    for la, lo in chosen:
+        hit = [(haversine(la, lo, i["lat"], i["lon"]), st, i) for st in supply for i in st["items"]]
+        if hit:
+            d, st, item = min(hit, key=lambda h: h[0])
+            if d < 150:
+                e = entry(st, "your stop", True)
+                e.update(name=item["name"], what=item["what"], kind=item["kind"], lat=item["lat"], lon=item["lon"])
+                picked.append(e)
+    if n == 0 and not picked:       # a short ride: a good café about halfway, if you fancy one
+        cafes = [s for s in supply if 0.35 * total_km <= s["km"] <= 0.65 * total_km
+                 and min(_quality(i) for i in s["items"]) < 1.0]
+        if cafes:
+            best = min(cafes, key=lambda s: abs(s["km"] - total_km / 2))
+            picked.append(entry(best, "about halfway, if you want a coffee", True))
+    window = max(8.0, 0.15 * total_km)
+    for k in range(1, n + 1):
+        target = total_km * k / (n + 1)
+        cands = [s for s in supply if abs(s["km"] - target) <= window and (s["food"] or s["shop"])]
+        if not cands or any(abs(p["km"] - target) <= window for p in picked if p["why"] == "your stop"):
+            continue
+        best = min(cands, key=lambda s: min(_quality(i) for i in s["items"]) + 1.5 * abs(s["km"] - target) / window)
+        if any(abs(best["km"] - p["km"]) < 5 for p in picked):
+            continue
+        why = "about halfway" if n == 1 else ["first stop", "second stop", "third stop", "fourth stop"][min(k, 4) - 1]
+        when = at(best["km"])
+        picked.append(entry(best, f"{why}, after about {when}" if when else why, True))
+    # The last food before a long stretch with none.
+    for g in gaps or []:
+        if g["km"] < GAP_WARN_KM or g["from_km"] < 1:
+            continue
+        before = [s for s in supply if abs(s["km"] - g["from_km"]) < 0.5]
+        if not before:
+            continue
+        near = [p for p in picked if abs(p["km"] - before[0]["km"]) < 3]
+        if near:
+            near[0]["why"] += f"; the last food or water for {g['km']:.0f} km"
+        else:
+            picked.append(entry(before[0], f"last food or water for {g['km']:.0f} km", True))
+    # Elsewhere, only where nothing else is listed for FILL_KM.
+    picked.sort(key=lambda p: p["km"])
+    marks = [0.0] + [p["km"] for p in picked]
+    for st in supply:
+        if all(abs(st["km"] - m) >= FILL_KM for m in marks) and total_km - st["km"] >= FILL_KM / 2:
+            picked.append(entry(st, "on the way", False))
+            marks.append(st["km"])
+    picked.sort(key=lambda p: p["km"])
+    return picked
+
+
 def _midway(stops: list[dict], total_km: float) -> dict | None:
     """The best coffee stop near halfway (35-65% of the way, closest to half, cafés first)."""
     cands = [s for s in stops if (s["food"] or s["shop"]) and 0.35 * total_km <= s["km"] <= 0.65 * total_km]
@@ -421,7 +521,7 @@ def _midway(stops: list[dict], total_km: float) -> dict | None:
 
 def cue_sheet(pts, on, ways, cls, stops) -> list[dict]:
     """A cue at each change of road (ignoring junction blips), with the turn, the new road's surface,
-    and the km to the next cue. Stops are added in order."""
+    and the km to the next cue. `stops`: the rest stops (rest_stops), added in order."""
     keys = [_road_key(ways[w]) if w is not None else "?" for w in on]
     runs = [r for r in _runs(keys) if r[2] != "?"]
     merged: list[list] = []
@@ -446,16 +546,8 @@ def cue_sheet(pts, on, ways, cls, stops) -> list[dict]:
         cues.append({"km": _km(pts[s][3]), "turn": turn.split()[-1].lower() if turn != "Continue" else "straight",
                      "text": text, "surface": main, "for_km": _km(pts[min(e, len(pts) - 1)][3] - pts[s][3]),
                      "lat": round(pts[s][0], 5), "lon": round(pts[s][1], 5)})
-    last = -CUE_STOP_KM
-    mid = _midway(stops, _km(pts[-1][3]))
-    for st in stops:
-        if st["view"] or not (st["food"] or st["shop"] or st["water"]):
-            continue
-        if st["km"] - last < CUE_STOP_KM and not (mid and st["km"] == mid["km"]):
-            continue
-        last = st["km"]
-        what = st["items"][0]["name"]
-        cues.append({"km": st["km"], "turn": "stop", "text": f"{what}{' · ' + st['place'] if st['place'] else ''}",
+    for st in stops:          # the rest stops (rest_stops), not every café in town
+        cues.append({"km": st["km"], "turn": "stop", "text": f"{st['name']}{' · ' + st['place'] if st['place'] else ''}",
                      "surface": None, "for_km": None, "lat": st["lat"], "lon": st["lon"]})
     cues.sort(key=lambda c: (c["km"], c["turn"] == "stop"))
     cues.append({"km": _km(pts[-1][3]), "turn": "finish", "text": "Finish", "surface": None, "for_km": None,
@@ -490,10 +582,10 @@ def verdict(r: dict) -> list[dict]:
                             f"{first['km']} km from km {first['from_km']}{' (' + first['name'] + ')' if first['name'] else ''}."})
     if st < 0.5 and tr < 0.5:
         out.append({"tone": "good", "text": "No singletrack."})
-    if r["midway"]:
-        m = r["midway"]
-        out.append({"tone": "good", "text": f"Halfway stop: {m['name']}{', ' + m['place'] if m['place'] else ''}"
-                    f" at km {m['km']}."})
+    planned = [p for p in r.get("rest", []) if p["rest"] and not p["why"].startswith("last")]
+    if planned:
+        names = "; ".join(f"{p['name']}{', ' + p['place'] if p['place'] else ''} at km {p['km']:.0f}" for p in planned)
+        out.append({"tone": "good", "text": ("Rest stop: " if len(planned) == 1 else "Rest stops: ") + names + "."})
     g = r["longest_gap"]
     if g and g["km"] >= GAP_WARN_KM:
         passes = sorted(g.get("towns") or [], key=lambda t: -t["population"])[:2]

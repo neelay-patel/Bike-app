@@ -139,6 +139,13 @@ FOOD = {"cafe", "restaurant", "fast_food", "pub", "ice_cream", "bar", "food_cour
 SHOP = {"convenience", "bakery", "supermarket", "general", "deli", "farm", "greengrocer", "coffee"}
 
 
+# Chains: fine for a coffee, but a local café or bakery is the better stop.
+CHAINS = {"tim hortons", "starbucks", "mcdonald's", "subway", "a&w", "country style", "coffee time", "second cup",
+          "wendy's", "burger king", "pizza pizza", "dairy queen", "kfc", "popeyes", "pizza hut", "domino's",
+          "papa john's", "baskin-robbins", "booster juice", "osmow's", "harvey's", "mary brown's", "esso",
+          "petro-canada", "shell", "circle k", "mac's", "7-eleven", "pioneer", "ultramar"}
+
+
 def poi_kind(tags: dict) -> str | None:
     """food, shop, water, toilets, bike, view (or None)."""
     am, sh = tags.get("amenity", ""), tags.get("shop", "")

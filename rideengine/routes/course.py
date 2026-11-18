@@ -77,14 +77,15 @@ def _semi(deg: float) -> int:
 def course_points(report: dict) -> list[dict]:
     """Stops and climb tops as course points, in km order: {"km", "lat", "lon", "type", "name"}."""
     out = []
-    mid = report.get("midway") or {}
-    for st in report.get("stops", []):
-        if st.get("view") or not (st["food"] or st["shop"] or st["water"]):
-            continue
-        top = st["items"][0]
-        kind = CP_FOOD if (st["food"] or st["shop"]) else CP_WATER
-        label = top["name"] if st["km"] == mid.get("km") or top["kind"] == "food" else (st.get("place") or top["name"])
-        out.append({"km": st["km"], "lat": top["lat"], "lon": top["lon"], "type": kind, "name": label})
+    # The rest stops (check.rest_stops), not every café in town; older reports without them: every stop.
+    rest = report.get("rest")
+    if rest is None:
+        rest = [{"km": st["km"], "lat": st["items"][0]["lat"], "lon": st["items"][0]["lon"],
+                 "kind": st["items"][0]["kind"], "name": st["items"][0]["name"]}
+                for st in report.get("stops", []) if not st.get("view") and (st["food"] or st["shop"] or st["water"])]
+    for st in rest:
+        kind = CP_WATER if st["kind"] == "water" else CP_FOOD
+        out.append({"km": st["km"], "lat": st["lat"], "lon": st["lon"], "type": kind, "name": st["name"]})
     for c in report.get("climbs", []):
         if c["gain_m"] >= 40:
             out.append({"km": round(c["km"] + c["length_m"] / 1000, 1), "lat": c["top"][0], "lon": c["top"][1],
@@ -99,7 +100,7 @@ def course_points(report: dict) -> list[dict]:
     # Thin out stops in towns: at most one course point per 2 km.
     thin, last = [], -99.0
     for p in out:
-        if p["type"] in (CP_SUMMIT, CP_DANGER) or p["km"] - last >= 2 or p["km"] == mid.get("km"):
+        if p["type"] in (CP_SUMMIT, CP_DANGER) or p["km"] - last >= 2:
             thin.append(p)
             if p["type"] not in (CP_SUMMIT, CP_DANGER):
                 last = p["km"]

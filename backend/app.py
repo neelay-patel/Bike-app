@@ -120,6 +120,25 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
                 raise HTTPException(400, f"Unknown time zone {body['tz']!r}") from exc
             raise
 
+    @app.get("/v1/home")
+    def get_home(uid: int = Depends(user)):
+        """Where home is: the one the rider set ("source": "set"), or where most of the past year's
+        rides start ("rides", with how many). Used for "from home", the home loop and the card's privacy zone."""
+        return be.home(uid)
+
+    @app.put("/v1/home")
+    def put_home(body: dict = Body(...), uid: int = Depends(user)):
+        """{"lat", "lon", "label"}: set home (an address picked in Apple Maps)."""
+        try:
+            return be.set_home(uid, float(body["lat"]), float(body["lon"]), body.get("label"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, "Home needs lat and lon on the map") from exc
+
+    @app.delete("/v1/home")
+    def delete_home(uid: int = Depends(user)):
+        """Forget the home the rider set: work it out from their rides again."""
+        return be.set_home(uid, None, None)
+
     @app.get("/v1/avatar/options")
     def avatar_options():
         """Every avatar part and its choices, with colours for the swatches (no login needed)."""
@@ -256,6 +275,17 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             return be.add_course(uid, body, name=name)
         except Exception as e:
             raise HTTPException(400, f"Couldn't read a route from that file: {e}"[:200])
+
+    @app.post("/v1/courses/plan")
+    def plan_routes(body: dict = Body(...), uid: int = Depends(user)):
+        """Routes from a description: a loop ("60-70 km gravel loop near Uxbridge, café halfway"), one way ("from
+        Uxbridge to Port Perry") or there and back ("40 km out and back from Goodwood"). Answers what it can;
+        when something's missing returns "questions" (send back "ask" with "answers"); otherwise makes up to
+        three routes, each saved as a course and checked like any route ("courses")."""
+        try:
+            return be.plan_routes(uid, body)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
     @app.get("/v1/courses")
     def courses(uid: int = Depends(user)):

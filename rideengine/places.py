@@ -77,6 +77,34 @@ def load(bbox, path: str = DEFAULT) -> list[dict]:
     return out
 
 
+def find(text: str, path: str = DEFAULT, country: str = "CA", admin1: str | None = "08") -> list[dict]:
+    """Places whose name appears in `text` as whole words (case ignored), biggest first; by default in
+    Ontario (GeoNames admin1 08), where our own map is. Longer names win over names inside them
+    ("Port Perry" over "Perry")."""
+    import re
+    low = " " + re.sub(r"[^a-z0-9' -]", " ", text.lower()) + " "
+    found: dict[str, dict] = {}
+    for zpath, member in _files(path):
+        with zipfile.ZipFile(zpath) as zf, zf.open(member) as raw:
+            for line in io.TextIOWrapper(raw, encoding="utf-8"):
+                col = line.split("\t", 15)
+                if col[6] != "P" or col[8] != country or (admin1 and col[10] != admin1):
+                    continue
+                name = col[1]
+                key = name.lower()
+                if len(key) < 3 or f" {key} " not in low:
+                    continue
+                pop = int(col[14] or 0)
+                if key not in found or pop > found[key]["population"]:
+                    found[key] = {"name": name, "lat": float(col[4]), "lon": float(col[5]), "population": pop}
+    out = sorted(found.values(), key=lambda p: (-len(p["name"]), -p["population"]))
+    keep = []
+    for p in out:
+        if not any(p["name"].lower() in q["name"].lower() for q in keep):
+            keep.append(p)
+    return sorted(keep, key=lambda p: -p["population"])
+
+
 def places_on_route(ride: Ride, path: str = DEFAULT, limit: int = 2, places: list | None = None) -> list[dict]:
     """Up to `limit` places the route goes through, most notable first, spread along the ride.
 

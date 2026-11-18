@@ -257,10 +257,22 @@ def discover_routes(feats: list[dict], assigned: set[str]) -> list[tuple[dict, l
     return out
 
 
+HOME_RECENT_S = 365 * 86400   # home is where rides started this past year (a move shows within months)
+HOME_MIN_RECENT = 5
+
+
 def home_point(feats: list[dict]) -> tuple[float, float] | None:
-    """Where most rides start."""
+    """Where most rides start: of the past year's rides (counted back from the latest ride) when there
+    are at least HOME_MIN_RECENT, else of all of them. A home the rider set wins over this
+    (backend: Backend.home_point)."""
+    outdoor = _outdoor(feats)
+    if outdoor:
+        latest = max(f["start"] for f in outdoor)
+        recent = [f for f in outdoor if f["start"] >= latest - HOME_RECENT_S]
+        if len(recent) >= HOME_MIN_RECENT:
+            outdoor = recent
     count: dict = {}
-    for f in _outdoor(feats):
+    for f in outdoor:
         count.setdefault(cell(*f["first"]), []).append(f)
     if not count:
         return None
@@ -268,10 +280,11 @@ def home_point(feats: list[dict]) -> tuple[float, float] | None:
     return tuple(best[0]["first"])
 
 
-def update_home(feats: list[dict], routes: list[dict], laps: list[dict]) -> tuple[float, float] | None:
+def update_home(feats: list[dict], routes: list[dict], laps: list[dict],
+                home: tuple[float, float] | None = None) -> tuple[float, float] | None:
     """Mark which routes start and finish at home, and which one is the home loop (the most ridden
-    of those). Returns the home point."""
-    home = home_point(feats)
+    of those). `home`: the one the rider set, else where most rides start. Returns the home point."""
+    home = home or home_point(feats)
     by_id = {f["ride_id"]: f for f in feats}
     count = {r["id"]: 0 for r in routes}
     at_home = {r["id"]: 0 for r in routes}

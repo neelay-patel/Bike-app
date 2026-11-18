@@ -11,9 +11,8 @@ singletrack. So the job isn't drawing a line: it's **cutting the research** and 
    in one page, send it to the Edge.
 2. **Tuning** (built 17 Nov 2026): move the start, add a coffee stop, shorten or lengthen by N km while keeping
    the gravel share. See "Tuning" below.
-3. **Generating loops** from a description ("60–70 km gravel loop near Uxbridge, café halfway"): a routing engine
-   with surface preferences (GraphHopper custom models, or Valhalla) makes 20–30 candidates, the route check scores
-   them, the best three are shown.
+3. **Generating loops** from a description (built 18 Nov 2026): "60–70 km gravel loop near Uxbridge, café halfway"
+   → three checked loops. Our own router on our own map, no outside routing engine. See "Loops from a description".
 4. **The chat** on top: Claude understands the request, asks the qualifying questions and explains the options;
    the engine draws and checks routes (the AI explains, the engine calculates, as in coaching).
 5. **Planned rides other people can join**: distance, an honest pace band from real rides, date, start. This is
@@ -110,3 +109,62 @@ Under it:
 - **"Boring"** is only long straights and stretches ridden twice so far. Scenery (water, forest, viewpoints along
   the way) comes next.
 - **Opening in the app from Ride with GPS** (share → RideApp) needs document types in the app's Info.plist.
+
+
+## Routes from a description (built 18 Nov 2026)
+
+In the app's **Describe a ride** box on Routes (`POST /v1/courses/plan`):
+- `request.py` reads the words, rule-based (engine first; Claude can take the free-form leftovers later, as in
+  `docs/coaching.md` section 7):
+  - distance ("60-70 km", "about 80k", miles);
+  - surface: gravel (50–70% off pavement by default, his mix), mixed, road, or "40-60% gravel";
+  - the start: an Ontario place name from GeoNames, or "from home" (his usual start, from his rides). Words that are
+    also place names ("Halfway", "Gravel Hill") are skipped;
+  - café halfway / a coffee stop, flat / hilly, singletrack wanted;
+  - the shape, from the places' roles (the word before each: from/near/in = start, to = destination,
+    via/through = a place to pass): **loop** ("loop", "via Goodwood", "to Port Perry and back a different way"),
+    **one way** ("from Uxbridge to Port Perry"), **there and back** ("out and back to Port Perry", "40 km there and
+    back", "to Port Perry and back").
+  It shows what it understood as tags (LOOP · 60–70 KM · GRAVEL 50–70% · FROM UXBRIDGE · CAFÉ HALFWAY) and asks
+  only for what's missing: start, where to (one way), distance (a loop with no place to pass, or a there-and-back
+  with no destination), surface. "One way" / "point to point" say the shape on their own.
+- **Addresses and places we don't know** (18 Nov 2026): a street address ("to 48 Sample Cres in Markham",
+  "from 4321 Concession Rd 7, Uxbridge"), a business in a town ("the Port Perry bakery") or other words after "to"
+  aren't in GeoNames or our map, so the request keeps them as a `guess` and asks "Where to?" pre-filled with them.
+  The app looks them up in Apple Maps as you type (suggestions, biased to southern Ontario) and sends back the
+  coordinates; typed words with no suggestion are looked up in Apple Maps, then our own place list.
+- **Not much gravel near the start** (18 Nov 2026): a gravel or mixed loop from home in the city can't be one
+  (within 20 km of Leaside under 5% of roads are unpaved; the best loop found was 8%). `gravelmap.py` keeps a
+  coarse grid of road km by surface per map tile (built from our map in ~5 s, cached in
+  `data/osm/gravel_grid.json`). Loops come out at about 3x the area's share (Leaside 1.5% -> 8%; Uxbridge 25% ->
+  60-83%), so below a quarter of the share wanted it asks first: "Not much gravel near home", with up to three
+  starts that have plenty (towns of 500+ or places he has ridden from, which count as 15 km closer; not across
+  the lake), or "From home anyway".
+- In the app the description stays editable (changing it drops what was understood; Find routes again), Start over
+  clears it, Cancel stops a search, and the keyboard has Done (or drag the list down).
+- `generate.py` makes the loops:
+  - Each candidate: start → one side → a far point → the other side → back, routed with surface costs for the request
+    (gravel cheap for a gravel ride; singletrack very dear unless asked for).
+  - The far point is a café when one is wanted (local cafés over chains), else twelve directions. The side points sit
+    on an ellipse sized to the distance, then nudged once by the length the router actually found. Points are moved
+    onto the main road network (rural roads can be 2 km apart).
+  - Scored on: the distance, the off-pavement share, busy roads, singletrack, trails the map doesn't describe,
+    riding the same road twice, where the café falls; flat or hilly re-ranks the best dozen by climbing.
+  - The best three that don't overlap each other much are kept.
+  - **One way:** the best route, plus ones that bend out to one side to make up a longer distance (side points on an
+    ellipse with the start and end as its foci), plus, for a café, one café per town about halfway.
+  - **There and back:** to the destination and back the same way (the repeat isn't counted against it), a café to turn
+    round at if asked, a variant out by other roads, and one "back a different way" option (a loop through it). With
+    only a distance it picks the turn: a café or town at about half the distance, else twelve directions.
+- Each loop is saved as a course (source "generated", with what was asked and why), checked like any route, and can
+  be tuned and sent to the Edge. The best is at the top. About 10 s for three, including the checks.
+- **Where to stop** (18 Nov 2026): the check used to list every café within reach (43 on a 60 km city loop) and
+  put one in the cue sheet every 4 km and on the Edge every 2 km. Now `check.rest_stops` picks: by riding time
+  none under 1:30 (but a good local café about halfway if there is one), one about halfway to 4:30, two to 7 h,
+  then one every 3 h; the best place near each (local café or bakery, then chain café, takeaway, restaurant or
+  pub, shop, water); the rider's own stops (the café asked for, stops added in tuning) always; the last food
+  before a 35 km+ stretch with none; elsewhere only where nothing else is listed for 25 km (the countryside).
+  These go in the verdict, cue sheet, Edge course points and map; the full list is one tap away in the app.
+  `python -m backend recheck-courses --user 1` checks saved routes again after a change like this.
+- Known limits: starts and ends at a town's centre (move the start with Tune → Start elsewhere); Ontario only (our
+  map); scenery isn't scored yet; getting home from a one-way is up to the rider.

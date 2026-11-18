@@ -53,6 +53,8 @@ class Backend:
         self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
         self.graph_source = None  # roads to route on when tuning; None: our own map (tests swap it)
         self.heights = None       # ground heights for tuned routes; None: elevation tiles (tests swap it)
+        self.area_source = None   # (bbox, prefs) -> (Graph, stops, places) for generating loops (tests swap it)
+        self.gravel_grid = None   # where the gravel is (rideengine/routes/gravelmap.py); None: from our map
 
     def connector(self, provider: str):
         if provider not in self.registry:
@@ -635,7 +637,7 @@ class Backend:
         vfeats = [f for f in feats if f["ride_id"] in visible]
         es = records.entries_from_features(vfeats, tz)
         today = datetime.now(tz).astimezone(tz).date()
-        local = col.local_times(vfeats, tz, repeats.home_point(vfeats))
+        local = col.local_times(vfeats, tz, self.home_point(user_id, vfeats))
         badges = col.badges(es, found, tz, local)
         names = {l["ride_id"]: r["name"] for r in found["routes"] for l in r["laps"]}
         shapes = {f["ride_id"]: f.get("shape") or [] for f in vfeats}
@@ -785,23 +787,25 @@ class Backend:
                 name = f"{on[0]['name']} {'loop' if loop else 'ride'}"
         if headline is None:
             headline = records.headline(self.notes(user_id, ride_id))
-        home = repeats.home_point([f for f in feats if f["ride_id"] in visible]) if privacy else None
+        home = self.home_point(user_id, [f for f in feats if f["ride_id"] in visible]) if privacy else None
         from rideengine.analysis.collection import is_holo
         return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,
                          hide_near=[home] if home else None, background=background,
                          avatar=self.me(user_id)["avatar"], holo=is_holo(self.notes(user_id, ride_id)))
 
     # --- planned routes ("courses": the route check and export, rideengine/routes/) ---------------
-    def add_course(self, user_id: int, gpx: bytes, name: Optional[str] = None) -> dict:
+    def add_course(self, user_id: int, gpx: bytes, name: Optional[str] = None, source: Optional[str] = None,
+                   plan: Optional[dict] = None) -> dict:
         """Keep the rider's GPX (Ride with GPS, Komoot...), then check it: on a worker thread in the
         server (the map lookup can take a minute), before returning otherwise."""
         from rideengine.routes.route import read_route
         route = read_route(gpx, name=name)       # ValueError for files without a route
         with self.lock:
             cur = self.db.execute(
-                "INSERT INTO courses (user_id, name, source, link, created_at, status, file) "
-                "VALUES (?, ?, ?, ?, ?, 'checking', '')",
-                (user_id, route.name[:80], route.source, route.link, db.now()))
+                "INSERT INTO courses (user_id, name, source, link, created_at, status, file, plan) "
+                "VALUES (?, ?, ?, ?, ?, 'checking', '', ?)",
+                (user_id, route.name[:80], source or route.source, route.link, db.now(),
+                 json.dumps(plan) if plan else None))
             cid = cur.lastrowid
             folder = os.path.join(self.settings.raw_dir, str(user_id), "courses")
             os.makedirs(folder, exist_ok=True)
@@ -833,7 +837,19 @@ class Backend:
             return self.map_source(route)
         return osm.corridor(route, pad_m=pad_m or osm.VIEW_M)
 
-    def _course_report(self, user_id: int, route) -> dict:
+    def _chosen_stops(self, row) -> list:
+        """Stops the rider picked for this course: the café asked for, and stops added in tuning."""
+        out = []
+        plan = json.loads(row["plan"]) if row["plan"] else {}
+        if (plan.get("stop") or {}).get("lat") is not None:
+            out.append((plan["stop"]["lat"], plan["stop"]["lon"]))
+        for v in self._versions(row["course_id"]):
+            op = json.loads(v["op"])
+            if op.get("op") == "stop":
+                out.append((op["lat"], op["lon"]))
+        return out
+
+    def _course_report(self, user_id: int, route, chosen=()) -> dict:
         from rideengine import places
         from rideengine.analysis import features as feat_mod
         from rideengine.analysis.repeats import bbox as box
@@ -846,14 +862,14 @@ class Backend:
         known = {tuple(c) for f in vfeats if not f["indoor"] for c in f.get("cells") or []}
         pace = check.Pace.of(vfeats)
         names = places.load(box([(p[0], p[1]) for p in route.points[::20]]))
-        return check.check(route, data, pace=pace, known_cells=known, places=names)
+        return check.check(route, data, pace=pace, known_cells=known, places=names, chosen=list(chosen))
 
     def check_course(self, user_id: int, course_id: int) -> None:
         row = self._course_row(user_id, course_id)
         if row is None:
             return
         try:
-            report = self._course_report(user_id, self._course_route(row))
+            report = self._course_report(user_id, self._course_route(row), chosen=self._chosen_stops(row))
             with self.lock:
                 self.db.execute("UPDATE courses SET status = 'ready', error = NULL, report = ? WHERE course_id = ?",
                                 (json.dumps(report), course_id))
@@ -870,6 +886,7 @@ class Backend:
                 "km": r.get("km"), "ascent_m": r.get("ascent_m"), "gravel_share": r.get("gravel_share"),
                 "time_s": r.get("time_s"), "loop": r.get("loop"),
                 "singletrack_km": round(sum(x["km"] for x in r.get("singletrack", [])), 1) if r else None,
+                "plan": json.loads(row["plan"]) if row["plan"] else None,
                 "verdict": r.get("verdict", [])[:3],
                 "shape": _shape([s for st in r.get("stretches", []) for s in st["points"]]) if r else []}
 
@@ -887,6 +904,193 @@ class Backend:
         out["report"] = json.loads(row["report"]) if row["report"] else None
         out["changes"] = [{"n": v["n"], "change": v["change"]} for v in self._versions(course_id) if v["n"] > 0]
         return out
+
+    # --- loops from a description (rideengine/routes/request.py, generate.py) --------------------------
+    # --- home: the one the rider set, else where most of the past year's rides start ------------
+    def home_set(self, user_id: int) -> Optional[tuple]:
+        with self.lock:
+            row = self.db.execute("SELECT home FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None or not row["home"]:
+            return None
+        h = json.loads(row["home"])
+        return (h["lat"], h["lon"])
+
+    def home_point(self, user_id: int, vfeats: Optional[list] = None) -> Optional[tuple]:
+        """Used for "from home", the home loop, local times and the ride card's privacy zone."""
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import repeats
+        h = self.home_set(user_id)
+        if h:
+            return h
+        if vfeats is None:
+            with self.lock:
+                feats = self.insights._features(user_id)
+            visible = feat_mod.visible_ids(feats)
+            vfeats = [f for f in feats if f["ride_id"] in visible]
+        return repeats.home_point(vfeats)
+
+    def home(self, user_id: int) -> dict:
+        """{"lat", "lon", "label", "source": "set" | "rides" | None, "rides": starts near it (from rides)}."""
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis import repeats
+        with self.lock:
+            row = self.db.execute("SELECT home FROM users WHERE id = ?", (user_id,)).fetchone()
+            feats = self.insights._features(user_id)
+        visible = feat_mod.visible_ids(feats)
+        vfeats = [f for f in feats if f["ride_id"] in visible]
+        if row and row["home"]:
+            h = json.loads(row["home"])
+            return {"lat": h["lat"], "lon": h["lon"], "label": h.get("label"), "source": "set", "rides": None}
+        p = repeats.home_point(vfeats)
+        if not p:
+            return {"lat": None, "lon": None, "label": None, "source": None, "rides": 0}
+        n = sum(1 for f in vfeats if not f["indoor"] and f.get("first")
+                and repeats.haversine(*p, *f["first"]) <= repeats.HOME_M)
+        from rideengine import places
+        near = places.load((p[0] - 0.05, p[1] - 0.07, p[0] + 0.05, p[1] + 0.07))
+        label = None
+        if near:
+            best = min(near, key=lambda x: repeats.haversine(*p, x["lat"], x["lon"]))
+            label = "near " + best["name"]
+        return {"lat": p[0], "lon": p[1], "label": label, "source": "rides", "rides": n}
+
+    def set_home(self, user_id: int, lat: Optional[float], lon: Optional[float], label: Optional[str] = None) -> dict:
+        """Set home (lat/lon, e.g. an address from Apple Maps), or None to go back to working it out from
+        rides. The home loop and the notes that mention it are worked out again."""
+        if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError("That isn't a place on the map.")
+        value = json.dumps({"lat": round(lat, 6), "lon": round(lon, 6), "label": (label or "")[:120]}) \
+            if lat is not None else None
+        with self.lock:
+            self.db.execute("UPDATE users SET home = ? WHERE id = ?", (value, user_id))
+            self.insights._mark_dirty(user_id, 0)
+        self.insights.schedule(user_id)
+        return self.home(user_id)
+
+    def _home(self, user_id: int) -> Optional[dict]:
+        h = self.home_point(user_id)
+        return {"name": "home", "lat": h[0], "lon": h[1]} if h else None
+
+    def plan_routes(self, user_id: int, body: dict) -> dict:
+        """body: {"text": "60-70 km gravel loop near Uxbridge, café halfway"} and/or {"ask": {...}} (what we
+        understood last time) with {"answers": {"start": "Goodwood", "end": "Port Perry", "km": [60, 70],
+        "surface": "gravel", "stop": "midway", "shape": "loop" | "oneway" | "out_back"}}. Returns what was
+        understood ("ask", with "tags" and "missing") and either the questions still to answer, or the routes
+        made (loops, one way, or there and back): each saved as a course and checked like any route."""
+        from rideengine import places
+        from rideengine.routes import generate as gen
+        from rideengine.routes import request as req
+        from rideengine.routes.course import gpx_course
+        from rideengine.routes.elevation import Heights
+        home = self._home(user_id)
+        if body.get("ask"):
+            ask = req.Ask.from_dict(body["ask"])
+        else:
+            ask = req.read(str(body.get("text") or ""), home=home)
+        def place(v, label):
+            if isinstance(v, dict) and "lat" in v:
+                return {"name": str(v.get("name") or label), "lat": float(v["lat"]), "lon": float(v["lon"])}
+            if str(v).strip().lower() in ("home", "back home") and home:
+                return dict(home)
+            found = [p for p in places.find(str(v)) if p["name"].lower() not in req.NOT_PLACES]
+            if not found:
+                raise ValueError(f"Couldn't find {v} in Ontario.")
+            return {"name": found[0]["name"], "lat": found[0]["lat"], "lon": found[0]["lon"]}
+
+        for k, v in (body.get("answers") or {}).items():
+            if k in ("start", "end", "via"):
+                ask.guess.pop(k, None)          # answered: no longer a guess
+            if k == "start":
+                ask.start = place(v, "the start")
+            elif k == "end":
+                ask.end = place(v, "the end")
+            elif k == "via":
+                ask.via = place(v, "the way")
+            elif k == "shape" and v in ("loop", "oneway", "out_back"):
+                ask.shape = v
+            elif k == "km":
+                lo, hi = (float(v[0]), float(v[1])) if isinstance(v, (list, tuple)) else (float(v) * 0.92, float(v) * 1.08)
+                ask.km = (round(lo), round(hi))
+            elif k == "surface" and v in req.SURFACES:
+                ask.surface, ask.gravel = v, req.SURFACES[v]
+            elif k == "stop":
+                ask.stop = v if v in ("midway", "any") else None
+            elif k == "hills":
+                ask.hills = v if v in ("flat", "hilly") else None
+            elif k == "gravel_start":       # little gravel around the start: somewhere else, or stay
+                if v == "stay":
+                    ask.stay = True
+                else:
+                    ask.start = place(v, "the start")
+        ask.refresh()
+        out = {"ask": ask.to_dict()}
+        if ask.missing:
+            out["questions"] = [{"key": k, **req.QUESTIONS[k], **({"guess": ask.guess[k]} if ask.guess.get(k) else {})}
+                                for k in ask.missing]
+            out["home"] = bool(home)
+            return out
+        q = self._gravel_question(user_id, ask, home)
+        if q:
+            out["questions"] = [q]
+            return out
+        box = gen.bbox_for(ask)
+        prefs = gen.prefs_for(ask)
+        if self.area_source:
+            g, stops, names = self.area_source(box, prefs)
+        else:
+            from rideengine.routes.router import Graph
+            g, stops, names = Graph.around(box, prefs=prefs), gen.pois_in(box), places.load(box)
+        if not g.edges:
+            raise ValueError("Planning works where we have our own map (Ontario) for now.")
+        heights = self.heights or Heights()
+        opts = gen.routes(ask, g, stops, names, heights=heights)
+        if not opts:
+            raise ValueError("Couldn't make a route from there; try another start or distance.")
+        made = []
+        batch = f"{int(db.now())}"
+        from rideengine.routes.route import Route
+        # Saved worst first, so the best is the newest and sits at the top of the list.
+        for o in reversed(opts):
+            pts = [(la, lo, round(heights.height(la, lo), 1)) for la, lo, _ in o.route.points]
+            route = Route(name=o.route.name, points=pts, source="generated")
+            plan = {"text": ask.text, "tags": ask.tags, "why": o.why, "stop": o.stop, "via": o.via, "batch": batch}
+            c = self.add_course(user_id, gpx_course(route, {}), name=o.route.name, source="generated", plan=plan)
+            made.append(self.course(user_id, c["id"]))
+        out["courses"] = made[::-1]
+        return out
+
+    def _gravel_question(self, user_id: int, ask, home) -> Optional[dict]:
+        """A gravel (or mixed) loop from somewhere with hardly any gravel within reach (the city): say so
+        before making mostly paved routes, and offer starts where the gravel is."""
+        from rideengine import places
+        from rideengine.routes import gravelmap as gm
+        if ask.stay or not ask.gravel or ask.gravel[0] < 0.2 or not ask.start:
+            return None
+        if ask.shape == "oneway" or (ask.shape == "out_back" and ask.end) or ask.via:
+            return None                 # the rider chose where it goes
+        grid = self.gravel_grid if self.gravel_grid is not None else gm.load()
+        if not grid:
+            return None
+        r = gm.radius_km(ask.km)
+        here = gm.share(grid, ask.start["lat"], ask.start["lon"], r)
+        if not gm.poor(here, ask.gravel[0]):
+            return None
+        s = ask.start
+        ridden = [tuple(f["first"]) for f in self.insights._features(user_id) if f.get("first") and not f.get("indoor")]
+        near = places.load((s["lat"] - 0.9, s["lon"] - 1.2, s["lat"] + 0.9, s["lon"] + 1.2))
+        alts = gm.starts(grid, near, (s["lat"], s["lon"]), ask.km, ask.gravel[0], ridden=ridden)
+        where = "home" if home and s["lat"] == home["lat"] and s["lon"] == home["lon"] else s["name"]
+        words = "gravel" if ask.surface == "gravel" else "unpaved roads"
+        hint = (f"Within {r:.0f} km of {where} only about {max(1, round(here * 100))}% of roads are unpaved, so a "
+                f"{ask.surface} loop from there comes out mostly paved.")
+        if alts:
+            hint += " These starts have plenty of " + words + " within reach" + (
+                "; you've ridden from " + " and ".join(a["name"] for a in alts if a["ridden"]) + " before."
+                if any(a["ridden"] for a in alts) else ".")
+        choices = [{"label": f"{a['name']} · {a['km_away']} km {a['direction']}",
+                    "value": {"name": a["name"], "lat": a["lat"], "lon": a["lon"]}} for a in alts]
+        choices.append({"label": f"From {where} anyway", "value": "stay"})
+        return {"key": "gravel_start", "q": f"Not much {words} near {where}", "hint": hint, "choices": choices}
 
     # --- tuning (rideengine/routes/tune.py): each change is a version, and can be undone ------------
     def _versions(self, course_id: int) -> list:
@@ -931,7 +1135,11 @@ class Backend:
             if isinstance(e, tune.TuneError):
                 raise
             raise tune.TuneError(f"That change needs more detail ({e}).")
-        new_report = self._course_report(user_id, t.route)
+        chosen = keep + ([(float(op["lat"]), float(op["lon"]))] if kind == "stop" else [])
+        plan = json.loads(row["plan"]) if row["plan"] else {}
+        if (plan.get("stop") or {}).get("lat") is not None:
+            chosen.append((plan["stop"]["lat"], plan["stop"]["lon"]))
+        new_report = self._course_report(user_id, t.route, chosen=chosen)
         folder = os.path.dirname(row["file"])
         with self.lock:
             if not versions:   # keep the route as it came in as version 0

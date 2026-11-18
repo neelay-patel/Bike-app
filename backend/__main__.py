@@ -9,6 +9,7 @@
   python -m backend rides --user 1
   python -m backend rebuild --user 1                  # re-merge stored rides after an engine change
   python -m backend rebuild-insights --user 1         # work out routes, climbs and notes again
+  python -m backend recheck-courses --user 1          # check every saved route again
   python -m backend you --user 1                      # tallies, streaks, personal bests
   python -m backend card --user 1 <ride_id> [--name "Durham Forest"] [--headline "..."] [--place "Uxbridge,44.10,-79.12"]
                                                       # towns are found automatically unless --place / --no-places
@@ -70,6 +71,8 @@ def main(argv=None) -> int:
     cd.add_argument("--out")
     bm = sub.add_parser("build-map", help="our own map for the route check, from an OpenStreetMap extract (.osm.pbf)")
     bm.add_argument("pbf", help="e.g. data/osm/ontario-latest.osm.pbf from download.geofabrik.de")
+    rc = sub.add_parser("recheck-courses", help="check every saved route again (after a change to the route check)")
+    rc.add_argument("--user", type=int, required=True)
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
@@ -144,6 +147,11 @@ def main(argv=None) -> int:
             be.insights.rebuild(a.user)
             y = be.you(a.user)
             print(f"{len(y['routes'])} routes, {len(y['climbs'])} climbs")
+        elif a.cmd == "recheck-courses":
+            for c in be.courses(a.user):
+                be.check_course(a.user, c["id"])
+                after = be.course(a.user, c["id"])
+                print(f"{c['id']:>4}  {after['status']:<7} {c['name']}")
         elif a.cmd == "set-tz":
             be.insights.set_tz(a.user, a.tz)
             print(f"time zone {a.tz}")

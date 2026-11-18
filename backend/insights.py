@@ -201,7 +201,7 @@ class Insights:
             attempts += at
             dirty = min([dirty] + [a["start"] for a in at])
         # Home first: a new route that starts at home is named "Home loop via ...".
-        repeats.update_home(vfeats, routes, laps)
+        repeats.update_home(vfeats, routes, laps, home=self.be.home_set(user_id))
         for r in routes:
             if r["id"] in before and before[r["id"]] != (r["home"], r["from_home"]):  # "home loop" in notes
                 dirty = min([dirty] + [l["start"] for l in laps if l["route_id"] == r["id"]])

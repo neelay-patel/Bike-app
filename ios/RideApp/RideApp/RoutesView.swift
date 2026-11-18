@@ -47,6 +47,11 @@ struct RoutesView: View {
                     }
                     .padding(.horizontal, 4).padding(.top, 8)
 
+                    PlanBox { made in
+                        Task { await load() }
+                        _ = made
+                    }
+
                     Button { importing = true } label: {
                         HStack(spacing: 10) {
                             Image(systemName: uploading || inbox.busy ? "hourglass" : "square.and.arrow.down")
@@ -91,6 +96,7 @@ struct RoutesView: View {
                 .padding(16)
             }
             .background(Theme.ground.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)  // drag down to put the keyboard away
             .refreshable { await load() }
             .task { await load() }
             .task(id: inbox.added) { await load() }
@@ -205,6 +211,11 @@ struct CourseRow: View {
                         .font(Theme.text(13)).foregroundStyle(Theme.heart)
                 default:
                     Text(facts).font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
+                    if let plan = course.plan, !plan.why.isEmpty {
+                        Text(plan.why.joined(separator: " · "))
+                            .font(Theme.text(13)).foregroundStyle(Theme.cobalt)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     ForEach(course.verdict.prefix(2), id: \.self) { v in VerdictLine(verdict: v, compact: true) }
                 }
             }
@@ -277,6 +288,7 @@ struct CourseDetailView: View {
     @State private var error: String?
     @State private var shareURL: URL?
     @State private var allCues = false
+    @State private var allStops = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var tuning = false
@@ -532,25 +544,70 @@ struct CourseDetailView: View {
         .surfaceCard()
     }
 
+    /// Where to stop: a few sensible places (by riding time, local cafés first, the last food before a long
+    /// gap), not every café in town; everything near the route is a tap away.
     private func stops(_ r: CourseReport) -> some View {
-        section("Stops along the way") {
+        let all = r.stops.filter { !$0.view }
+        return section(r.rest == nil ? "Stops along the way" : "Where to stop") {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(r.stops.filter { !$0.view }) { s in
-                    HStack(alignment: .top, spacing: 12) {
-                        Text("KM \(Format.number(s.km, decimals: 1))").font(Theme.mono(11)).foregroundStyle(Theme.label)
-                            .frame(width: 64, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(s.items.first?.name ?? "Stop").font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
-                            Text(stopLine(s)).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
-                            if let h = s.items.first?.hours, !h.isEmpty {
-                                Text(h).font(Theme.mono(11)).foregroundStyle(Theme.label)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        if r.midway?.km == s.km { MonoLabel("Halfway", color: Theme.cobalt) }
+                if let rest = r.rest {
+                    if rest.isEmpty {
+                        Text(r.timeS < 5400 ? "A short ride: no stop needed." : "No good place to stop on the map near this route.")
+                            .font(Theme.text(14)).foregroundStyle(Theme.inkMuted).padding(.vertical, 6)
                     }
-                    .padding(.vertical, 9)
-                    if s.id != r.stops.filter({ !$0.view }).last?.id { Divider().overlay(Theme.line) }
+                    ForEach(rest) { p in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("KM \(Format.number(p.km, decimals: 0))").font(Theme.mono(11))
+                                .foregroundStyle(p.rest ? Theme.cobalt : Theme.label)
+                                .frame(width: 54, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(p.name).font(Theme.text(15, p.rest ? .semibold : .medium)).foregroundStyle(Theme.ink)
+                                Text([p.place, p.why.prefix(1).uppercased() + p.why.dropFirst()].compactMap { $0 }.joined(separator: " · "))
+                                    .font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if !p.also.isEmpty {
+                                    Text("Also here: " + p.also.joined(separator: ", ")).font(Theme.text(12)).foregroundStyle(Theme.label)
+                                }
+                                if !p.hours.isEmpty { Text(p.hours).font(Theme.mono(11)).foregroundStyle(Theme.label) }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 9)
+                        Divider().overlay(Theme.line)
+                    }
+                    if !all.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { allStops.toggle() }
+                        } label: {
+                            HStack {
+                                Text(allStops ? "Hide the full list" : "All \(all.count) places near the route")
+                                    .font(Theme.text(14, .medium))
+                                Spacer()
+                                Image(systemName: allStops ? "chevron.up" : "chevron.down").font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(Theme.cobalt).padding(.vertical, 10).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                if r.rest == nil || allStops {
+                    ForEach(all) { s in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("KM \(Format.number(s.km, decimals: 1))").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                                .frame(width: 64, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(s.items.first?.name ?? "Stop").font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
+                                Text(stopLine(s)).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                                if let h = s.items.first?.hours, !h.isEmpty {
+                                    Text(h).font(Theme.mono(11)).foregroundStyle(Theme.label)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            if r.rest == nil, r.midway?.km == s.km { MonoLabel("Halfway", color: Theme.cobalt) }
+                        }
+                        .padding(.vertical, 9)
+                        if s.id != all.last?.id { Divider().overlay(Theme.line) }
+                    }
                 }
             }
         }
@@ -753,13 +810,25 @@ struct RouteMap: View {
                     .stroke(SurfaceColor.light(s.class), style: StrokeStyle(lineWidth: s.class == "paved" ? 3.5 : 4.5,
                                                                           lineCap: .round, lineJoin: .round))
             }
-            ForEach(report.stops.filter { !$0.view && ($0.food || $0.shop || $0.water) }) { s in
-                Annotation("", coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon)) {
-                    Image(systemName: s.food || s.shop ? "cup.and.saucer.fill" : "drop.fill")
-                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 20, height: 20)
-                        .background(report.midway?.km == s.km ? Theme.cobalt : Theme.inkSoft, in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+            if let rest = report.rest {        // where to stop, not every café in town
+                ForEach(rest) { p in
+                    Annotation("", coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)) {
+                        Image(systemName: p.kind == "water" ? "drop.fill" : "cup.and.saucer.fill")
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(p.rest ? Theme.cobalt : Theme.inkSoft, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                    }
+                }
+            } else {
+                ForEach(report.stops.filter { !$0.view && ($0.food || $0.shop || $0.water) }) { s in
+                    Annotation("", coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon)) {
+                        Image(systemName: s.food || s.shop ? "cup.and.saucer.fill" : "drop.fill")
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(report.midway?.km == s.km ? Theme.cobalt : Theme.inkSoft, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                    }
                 }
             }
             if let start = coord(report.start) {
@@ -902,5 +971,300 @@ struct SurfaceBar: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .surfaceCard()
+    }
+}
+
+
+// MARK: - Plan a ride from a description
+
+/// Looks places up in Apple Maps as the rider types (addresses, cafés, towns), biased to southern Ontario.
+@MainActor
+final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    @Published var results: [MKLocalSearchCompletion] = []
+    private let completer = MKLocalSearchCompleter()
+    static let region = MKCoordinateRegion(center: .init(latitude: 44.0, longitude: -79.3),
+                                           span: .init(latitudeDelta: 3, longitudeDelta: 4))
+
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.address, .pointOfInterest]
+        completer.region = Self.region
+    }
+
+    func update(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.count < 3 { results = []; completer.cancel(); return }
+        completer.queryFragment = t
+    }
+
+    nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        let r = Array(completer.results.prefix(4))
+        Task { @MainActor in self.results = r }
+    }
+
+    nonisolated func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {}
+
+    /// A suggestion, or typed words, to a place: ["name", "lat", "lon"].
+    static func place(_ completion: MKLocalSearchCompletion) async -> [String: Any]? {
+        await run(MKLocalSearch.Request(completion: completion), name: completion.title)
+    }
+
+    static func place(_ text: String) async -> [String: Any]? {
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = text
+        req.region = region
+        return await run(req, name: nil)
+    }
+
+    private static func run(_ req: MKLocalSearch.Request, name: String?) async -> [String: Any]? {
+        guard let item = try? await MKLocalSearch(request: req).start().mapItems.first else { return nil }
+        let c = item.placemark.coordinate
+        let label = name ?? item.name ?? item.placemark.title ?? "there"
+        return ["name": label, "lat": c.latitude, "lon": c.longitude]
+    }
+}
+
+/// "60–70 km gravel loop near Uxbridge, café halfway": what we understood as tags, a question for anything
+/// missing, then three routes (saved as routes, checked like any other). POST /v1/courses/plan.
+/// The description stays editable: change it and Find routes again; Start over clears it all.
+struct PlanBox: View {
+    var onMade: ([Course]) -> Void
+    @State private var text = ""
+    @State private var asked = ""            // the words the current result came from
+    @State private var result: PlanResult?
+    @State private var busy = false
+    @State private var lookingUp = false     // asking Apple Maps where a place is
+    @State private var error: String?
+    @State private var placeText = ""
+    @State private var made: [Course] = []
+    @State private var work: Task<Void, Never>?
+    @StateObject private var search = PlaceSearch()
+    @FocusState private var focus: Field?
+
+    enum Field { case words, place }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                MonoLabel("Describe a ride")
+                Spacer()
+                if !text.isEmpty || result != nil || !made.isEmpty {
+                    Button("Start over") { startOver() }
+                        .font(Theme.text(13, .medium)).foregroundStyle(Theme.cobalt)
+                        .buttonStyle(.plain)
+                }
+            }
+            Text("A loop, one way (from Uxbridge to Port Perry, or to an address) or there and back (40 km out and back from Goodwood).")
+                .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("60–70 km gravel loop near Uxbridge, café halfway", text: $text, axis: .vertical)
+                .font(Theme.text(16))
+                .lineLimit(1...4)
+                .submitLabel(.go)
+                .focused($focus, equals: .words)
+                .onChange(of: text) { _, new in
+                    if new.contains("\n") {             // Return in a multi-line field: go
+                        text = new.replacingOccurrences(of: "\n", with: " ")
+                        go()
+                    } else if result != nil, new.trimmingCharacters(in: .whitespacesAndNewlines) != asked {
+                        result = nil                     // edited: what we understood no longer holds
+                    }
+                }
+                .padding(12)
+                .background(Theme.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let result, !result.tags.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(result.tags, id: \.self) { t in
+                        Text(t).font(Theme.mono(11)).foregroundStyle(Theme.cobalt)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Theme.cobaltSoft.opacity(0.45), in: Capsule())
+                    }
+                }
+                ForEach(result.notes, id: \.self) { n in
+                    Text(n).font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+                }
+            }
+            if busy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(lookingUp ? "Looking that up…" : "Finding routes on the map and checking each one…")
+                        .font(Theme.text(14)).foregroundStyle(Theme.inkMuted)
+                    Spacer()
+                    Button("Cancel") { cancel() }
+                        .font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt).buttonStyle(.plain)
+                }
+            } else if let q = result?.questions.first {
+                question(q)
+            } else {
+                Button { go() } label: {
+                    Text("Find routes").font(Theme.text(16, .semibold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Theme.cobalt.opacity(trimmed.isEmpty ? 0.4 : 1),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(trimmed.isEmpty)
+            }
+            if !made.isEmpty {
+                Text("\(made.count) route\(made.count == 1 ? "" : "s") made: at the top of your routes, best first, each checked. Open one to tune it or send it to your Edge.")
+                    .font(Theme.text(13)).foregroundStyle(Theme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let error {
+                Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
+            }
+        }
+        .padding(16)
+        .surfaceCard(radius: 18)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focus = nil }
+            }
+        }
+    }
+
+    @ViewBuilder private func question(_ q: PlanResult.Question) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(q.text).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
+            if q.key == "start" || q.key == "end" || q.key == "via" {
+                HStack(spacing: 8) {
+                    TextField(q.hint ?? "A town", text: $placeText)
+                        .font(Theme.text(15)).submitLabel(.go)
+                        .focused($focus, equals: .place)
+                        .autocorrectionDisabled()
+                        .onSubmit { answerPlace(q.key, typed: placeText) }
+                        .onChange(of: placeText) { _, t in search.update(t) }
+                        .padding(10)
+                        .background(Theme.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    if result?.home == true, q.key != "via" {
+                        chip(q.key == "start" ? "From home" : "Home") { answer([q.key: "home"]) }
+                    }
+                }
+                .onAppear {
+                    placeText = q.guess ?? ""
+                    search.update(placeText)
+                }
+                .id(q.key + (q.guess ?? ""))
+                ForEach(search.results, id: \.self) { c in
+                    Button { answerPlace(q.key, completion: c) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "mappin").foregroundStyle(Theme.cobalt)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(c.title).font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
+                                if !c.subtitle.isEmpty {
+                                    Text(c.subtitle).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                if let hint = q.hint {
+                    Text(hint).font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                FlowLayout(spacing: 8) {
+                    ForEach(Array(zip(q.choices, q.raw.indices)), id: \.0) { label, i in
+                        chip(label.contains(" ") ? label : label.capitalized) { answer([q.key: q.raw[i]]) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func chip(_ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .overlay(Capsule().stroke(Theme.cobalt, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+    }
+
+    private func go() {
+        guard !trimmed.isEmpty else { return }
+        focus = nil
+        asked = trimmed
+        run(text: trimmed, ask: nil, answers: [:])
+    }
+
+    private func answer(_ answers: [String: Any]) {
+        focus = nil
+        run(text: nil, ask: result?.ask, answers: answers)
+    }
+
+    /// A place the rider picked from Apple Maps' suggestions, or typed (looked up in Apple Maps first; our
+    /// own list of Ontario places if Apple Maps doesn't know it).
+    private func answerPlace(_ key: String, completion: MKLocalSearchCompletion? = nil, typed: String = "") {
+        let words = typed.trimmingCharacters(in: .whitespaces)
+        guard completion != nil || !words.isEmpty else { return }
+        focus = nil
+        busy = true
+        lookingUp = true
+        error = nil
+        work = Task {
+            let found: [String: Any]?
+            if let completion { found = await PlaceSearch.place(completion) } else { found = await PlaceSearch.place(words) }
+            if Task.isCancelled { return }
+            busy = false
+            lookingUp = false
+            if let found {
+                placeText = ""
+                answer([key: found])
+            } else if !words.isEmpty {
+                answer([key: words])
+            } else {
+                error = "Apple Maps couldn't find that; try typing it."
+            }
+        }
+    }
+
+    private func run(text: String?, ask: [String: Any]?, answers: [String: Any]) {
+        busy = true
+        error = nil
+        made = []
+        work?.cancel()
+        work = Task {
+            do {
+                let r = try await APIClient().planRoutes(text: text, ask: ask, answers: answers)
+                if Task.isCancelled { return }
+                result = r
+                if !r.courses.isEmpty {
+                    made = r.courses
+                    onMade(r.courses)
+                }
+            } catch {
+                if Task.isCancelled { return }
+                self.error = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func cancel() {
+        work?.cancel()
+        work = nil
+        busy = false
+        lookingUp = false
+    }
+
+    private func startOver() {
+        cancel()
+        text = ""
+        asked = ""
+        result = nil
+        made = []
+        error = nil
+        placeText = ""
+        focus = nil
     }
 }

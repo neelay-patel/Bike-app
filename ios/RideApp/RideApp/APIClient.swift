@@ -722,9 +722,48 @@ struct Course: Decodable, Identifiable {
     let report: CourseReport?
     /// What tuning has done, oldest first (empty: the route as it came in).
     let changes: [Change]?
+    /// For a loop made from a description: what was asked, and why this one.
+    let plan: Plan?
+
+    struct Plan: Decodable, Hashable {
+        let text: String?
+        let tags: [String]
+        let why: [String]
+        let via: String?
+    }
 
     struct Verdict: Decodable, Hashable { let tone: String; let text: String }
     struct Change: Decodable, Hashable { let n: Int; let change: String }
+}
+
+/// What POST /v1/courses/plan understood, and the questions left or the loops it made.
+/// Where home is: the one the rider set ("set"), or where most of the past year's rides start ("rides").
+struct HomeInfo: Decodable {
+    let lat: Double?
+    let lon: Double?
+    let label: String?
+    let source: String?
+    let rides: Int?
+}
+
+struct PlanResult {
+    let ask: [String: Any]
+    let tags: [String]
+    let notes: [String]
+    let questions: [Question]
+    let home: Bool
+    let courses: [Course]
+
+    struct Question: Identifiable {
+        var id: String { key }
+        let key: String
+        let text: String
+        let hint: String?
+        /// Words from the description we couldn't place ourselves (a street address): pre-filled to look up.
+        let guess: String?
+        let choices: [String]
+        let raw: [Any]
+    }
 }
 
 /// Tuning choices: stops near the route but off it, and places to start from.
@@ -763,6 +802,8 @@ struct CourseReport: Decodable {
     let twiceKm: Double
     let climbs: [Climb]
     let stops: [Stop]
+    /// A few sensible places to stop (rideengine/routes/check.py rest_stops); nil in reports made before.
+    let rest: [Rest]?
     let longestGap: Gap?
     let midway: Midway?
     let timeS: Double
@@ -788,6 +829,12 @@ struct CourseReport: Decodable {
         let items: [Item]
         var id: String { "\(km)-\(lat)" }
         struct Item: Decodable, Hashable { let name: String; let kind: String; let what: String; let hours: String; let offM: Double }
+    }
+    struct Rest: Decodable, Identifiable {
+        let km: Double; let name: String; let what: String; let kind: String; let hours: String
+        let place: String?; let lat: Double; let lon: Double; let offM: Double
+        let why: String; let rest: Bool; let also: [String]
+        var id: String { "\(km)-\(name)" }
     }
     struct MapStretch: Decodable { let `class`: String; let fromKm: Double; let toKm: Double; let points: [[Double]] }
     struct ProfilePoint: Decodable {
@@ -971,6 +1018,36 @@ struct APIClient {
 
     func courseOptions(_ id: Int) async throws -> CourseOptions { try await get("v1/courses/\(id)/options") }
 
+    /// Loops from a description. Send the words first; then the "ask" that came back with answers to its
+    /// questions. Returns what was understood and either the questions left, or the loops made.
+    func planRoutes(text: String?, ask: [String: Any]?, answers: [String: Any] = [:]) async throws -> PlanResult {
+        var body: [String: Any] = ["answers": answers]
+        if let text { body["text"] = text }
+        if let ask { body["ask"] = ask }
+        var req = try request("POST", "v1/courses/plan", body: JSONSerialization.data(withJSONObject: body))
+        req.timeoutInterval = 180
+        let data = try await send(req)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        let ask = obj["ask"] as? [String: Any] ?? [:]
+        let questions = (obj["questions"] as? [[String: Any]] ?? []).map { q in
+            PlanResult.Question(key: q["key"] as? String ?? "", text: q["q"] as? String ?? "",
+                                hint: q["hint"] as? String, guess: q["guess"] as? String,
+                                choices: (q["choices"] as? [Any] ?? []).map { c in
+                                    if let pair = c as? [Any], pair.count == 2 { return "\(pair[0])–\(pair[1]) km" }
+                                    if let d = c as? [String: Any], let label = d["label"] as? String { return label }
+                                    return "\(c)"
+                                },
+                                // {"label", "value"} choices answer with the value (a place, or "stay").
+                                raw: (q["choices"] as? [Any] ?? []).map { c in (c as? [String: Any])?["value"] ?? c })
+        }
+        var courses: [Course] = []
+        if let list = obj["courses"] {
+            courses = try Self.decoder.decode([Course].self, from: JSONSerialization.data(withJSONObject: list))
+        }
+        return PlanResult(ask: ask, tags: ask["tags"] as? [String] ?? [], notes: ask["notes"] as? [String] ?? [],
+                          questions: questions, home: obj["home"] as? Bool ?? false, courses: courses)
+    }
+
     /// One change: ["op": "length", "km": -10], ["op": "stop", "lat":, "lon":, "name":] or ["op": "start", ...].
     func tuneCourse(_ id: Int, _ op: [String: Any]) async throws -> Course {
         let body = try JSONSerialization.data(withJSONObject: op)
@@ -981,6 +1058,20 @@ struct APIClient {
 
     func undoCourse(_ id: Int) async throws -> Course {
         try Self.decoder.decode(Course.self, from: await send(request("POST", "v1/courses/\(id)/undo")))
+    }
+
+    // MARK: Home (GET/PUT/DELETE /v1/home)
+
+    func home() async throws -> HomeInfo { try await get("v1/home") }
+
+    func setHome(lat: Double, lon: Double, label: String) async throws -> HomeInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["lat": lat, "lon": lon, "label": label])
+        return try Self.decoder.decode(HomeInfo.self, from: await send(request("PUT", "v1/home", body: body)))
+    }
+
+    /// Back to working home out from rides.
+    func clearHome() async throws -> HomeInfo {
+        try Self.decoder.decode(HomeInfo.self, from: await send(request("DELETE", "v1/home")))
     }
 
     func recheckCourse(_ id: Int) async throws {
