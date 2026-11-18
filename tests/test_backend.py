@@ -449,3 +449,26 @@ def test_home_set_by_the_rider_or_from_rides(env):
     assert client.put("/v1/home", json={"lat": 123, "lon": 0}).status_code == 400
     back = client.delete("/v1/home").json()
     assert back["source"] != "set" and be.home_set(uid) is None
+
+
+def test_new_garmin_rides_arrive_without_tapping_sync(env):
+    """The app asks when it opens (/v1/refresh), and the server polls: Garmin is pulled, not pushed."""
+    be, uid, client, garmin = env
+    client.put("/v1/connections/garmin_personal?since=2026-01-01", json={"api_key": API_KEY})
+    assert len(client.get("/v1/rides").json()) == 2
+    garmin.rides[333] = write_fit(line_ride(40, start=T0 + 2 * 86400).samples, {"distance_m": 15000, "elapsed_s": 2400})
+    assert client.post("/v1/refresh").json() == {"synced": {}}          # synced moments ago: not yet
+    be.db.execute("UPDATE connections SET last_sync_at = last_sync_at - 600")
+    assert client.post("/v1/refresh").json() == {"synced": {"garmin_personal": 1}}
+    assert len(client.get("/v1/rides").json()) == 3
+    # The server's poller does the same for every rider.
+    be.db.execute("UPDATE connections SET last_sync_at = last_sync_at - 3600")
+    garmin.rides[444] = write_fit(line_ride(20, start=T0 + 3 * 86400).samples, {"distance_m": 8000, "elapsed_s": 1200})
+    be.start_polling(interval_s=0.05)
+    import time
+    for _ in range(100):
+        if 444 in garmin.downloads:
+            break
+        time.sleep(0.05)
+    be._stop.set()
+    assert 444 in garmin.downloads

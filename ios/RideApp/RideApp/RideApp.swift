@@ -16,9 +16,9 @@ struct RideApp: App {
         #endif
         // HealthKit only wakes the app for new rides while an observer is registered, and that
         // has to happen at every launch, including the background launches HealthKit triggers.
+        // (New rides are sent when the app opens: AppModel.catchUp.)
         Task { @MainActor in
             await HealthSync.shared.startBackgroundDelivery()
-            await HealthSync.shared.syncNew()
         }
     }
 
@@ -48,6 +48,21 @@ final class AppModel: ObservableObject {
     @Published var isLoading = false
 
     private let api = APIClient()
+
+    private var lastCatchUp: Date?
+
+    /// When the app opens (launch, or back from the background): show what the server has now, then send
+    /// new Watch rides from Apple Health and have the server check Garmin, and show those too. At most
+    /// once a minute; pull to refresh still works any time.
+    func catchUp() async {
+        guard ServerConfig.isConfigured else { return await refresh() }
+        if let last = lastCatchUp, Date().timeIntervalSince(last) < 60 { return }
+        lastCatchUp = Date()
+        await refresh()
+        let fromWatch = await HealthSync.shared.syncNew()
+        let fromGarmin = (try? await api.refreshSources()) ?? 0
+        if fromWatch + fromGarmin > 0 { await refresh() }
+    }
 
     func refresh() async {
         guard ServerConfig.isConfigured else {
@@ -93,6 +108,7 @@ final class AppModel: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tab = 0
 
     var body: some View {
@@ -110,7 +126,10 @@ struct ContentView: View {
         .font(Theme.text())
         .foregroundStyle(Theme.ink)
         .preferredColorScheme(.light)  // the D look is light-only for now; a dark variant comes later
-        .task { await model.refresh() }
+        .task { await model.catchUp() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.catchUp() } }   // back from the background: new rides
+        }
         .onOpenURL { url in
             // A GPX shared from Ride with GPS, Komoot or Files: check it in Routes.
             guard url.pathExtension.lowercased() == "gpx" else { return }

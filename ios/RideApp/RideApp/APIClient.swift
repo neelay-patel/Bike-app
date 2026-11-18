@@ -1141,6 +1141,15 @@ struct APIClient {
         _ = try await send(request("PUT", "v1/connections/\(provider)", query: Self.sinceQuery(since), body: body))
     }
 
+    /// The app opened: the server fetches new rides from Garmin (and other pulled sources) if it hasn't
+    /// in the last 5 minutes. Returns how many new rides came in.
+    func refreshSources() async throws -> Int {
+        var req = try request("POST", "v1/refresh")
+        req.timeoutInterval = 60
+        let obj = try JSONSerialization.jsonObject(with: await send(req)) as? [String: Any]
+        return (obj?["synced"] as? [String: Any] ?? [:]).values.compactMap { $0 as? Int }.reduce(0, +)
+    }
+
     func sync(_ provider: String) async throws -> SyncResult {
         try Self.decoder.decode(SyncResult.self, from: await send(request("POST", "v1/connections/\(provider)/sync")))
     }

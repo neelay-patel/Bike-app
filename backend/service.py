@@ -49,6 +49,7 @@ class Backend:
         self.vault = Vault(load_key(settings.secret_key_file))
         self.registry = registry if registry is not None else REGISTRY
         self.lock = threading.RLock()
+        self._stop = threading.Event()
         self.insights = Insights(self, background=background)
         self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
         self.graph_source = None  # roads to route on when tuning; None: our own map (tests swap it)
@@ -206,6 +207,44 @@ class Backend:
         if status == "error":
             raise ConnectorError(detail)
         return {"provider": provider, "since": since, "new": new, "skipped": skipped}
+
+    # --- keeping pulled sources fresh -------------------------------------------------------------
+    # Garmin (and later Wahoo, Whoop...) are pulled, not pushed: without this a ride only arrived when the
+    # rider tapped Sync now. The server checks every POLL_S; the app asks when it opens (sync_due).
+    POLL_S = 15 * 60
+
+    def sync_due(self, user_id: int, max_age_s: float = 5 * 60) -> dict:
+        """Sync each connected pull source (not Apple Health, which the phone pushes) last synced more
+        than max_age_s ago. Errors are kept on the connection, as for Sync now. {provider: new rides}."""
+        with self.lock:
+            rows = self.db.execute("SELECT provider, last_sync_at FROM connections WHERE user_id = ?",
+                                   (user_id,)).fetchall()
+        out = {}
+        for r in rows:
+            c = self.registry.get(r["provider"])
+            if c is None or c.info.auth == "device" or (r["last_sync_at"] or 0) > db.now() - max_age_s:
+                continue
+            try:
+                out[r["provider"]] = self.sync(user_id, r["provider"])["new"]
+            except ConnectorError:
+                out[r["provider"]] = None
+        return out
+
+    def start_polling(self, interval_s: Optional[float] = None) -> None:
+        """Server only: sync every rider's pull sources every interval_s, on a daemon thread."""
+        interval = interval_s or self.POLL_S
+
+        def loop():
+            while not self._stop.wait(interval):
+                with self.lock:
+                    users = [r["user_id"] for r in self.db.execute("SELECT DISTINCT user_id FROM connections")]
+                for uid in users:
+                    try:
+                        self.sync_due(uid, max_age_s=interval * 0.8)
+                    except Exception:   # one rider's trouble never stops the others' syncs
+                        pass
+
+        threading.Thread(target=loop, name="poll-sources", daemon=True).start()
 
     # --- upload (device connectors) ------------------------------------------------------------
     def upload(self, user_id: int, provider: str, payload: bytes) -> Recording:

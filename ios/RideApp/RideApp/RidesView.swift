@@ -70,6 +70,7 @@ struct RidesView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 await health.syncNew()
+                _ = try? await APIClient().refreshSources()
                 await model.refresh()
             }
             .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },

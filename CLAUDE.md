@@ -123,6 +123,9 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   the Edge (FIT course), tune it (shorter/longer, add a stop, start elsewhere, undo), and **describe a ride** (loops,
   one way, there and back; addresses via Apple Maps; "not much gravel near home" offers better starts).
 - **Home:** set in Settings, else where most of the past year's rides start.
+- **New rides arrive on their own** (18 Nov): the server pulls Garmin every 15 min (`Backend.start_polling`), and the
+  app, each time it opens, sends new Watch rides and asks the server to check Garmin (`POST /v1/refresh`). Needs the
+  Mac's server running and the phone on the home Wi-Fi until the backend is hosted.
 
 ## Next steps
 1. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays

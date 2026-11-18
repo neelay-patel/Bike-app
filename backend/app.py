@@ -21,7 +21,11 @@ log = logging.getLogger("uvicorn.error")
 
 
 def create_app(backend: Optional[Backend] = None) -> FastAPI:
-    be = backend or Backend(Settings.from_env(), background=True)
+    if backend is None:
+        be = Backend(Settings.from_env(), background=True)
+        be.start_polling()      # Garmin every 15 minutes, so rides arrive without tapping Sync now
+    else:
+        be = backend
     app = FastAPI(title="Ride data backend", version="0.1")
     app.state.backend = be
 
@@ -60,6 +64,12 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         be.connect(uid, provider, credentials)
         tasks.add_task(sync_quietly, uid, provider, since)
         return {"provider": provider, "state": "connected", "sync": "started"}
+
+    @app.post("/v1/refresh")
+    def refresh(uid: int = Depends(user)):
+        """The app opened: fetch new rides from pulled sources (Garmin) not synced in the last 5 minutes.
+        Apple Health rides come from the phone itself. {provider: new rides, or null on an error}."""
+        return {"synced": be.sync_due(uid)}
 
     @app.post("/v1/connections/{provider}/sync")
     def sync(provider: str, since: Optional[str] = None, uid: int = Depends(user)):
