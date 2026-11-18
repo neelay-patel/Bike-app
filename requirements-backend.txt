@@ -3,5 +3,6 @@ fastapi>=0.115
 uvicorn>=0.30
 httpx>=0.27
 cryptography>=43
+osmium>=4.0             # building our own map for the route check (python -m backend build-map)
 # tests
 pytest>=8

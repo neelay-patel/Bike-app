@@ -657,6 +657,84 @@ struct UploadResult: Decodable {
     let rideId: String?
 }
 
+// MARK: - Planned routes (rideengine/routes/: the route check and export)
+
+struct Course: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let source: String?
+    let link: String?
+    let createdAt: Double
+    let status: String              // checking, ready, failed
+    let error: String?
+    let km: Double?
+    let ascentM: Double?
+    let gravelShare: Double?
+    let timeS: Double?
+    let loop: Bool?
+    let singletrackKm: Double?
+    let verdict: [Verdict]
+    let shape: [[Double]]
+    let report: CourseReport?
+
+    struct Verdict: Decodable, Hashable { let tone: String; let text: String }
+}
+
+struct CourseReport: Decodable {
+    let km: Double
+    let loop: Bool
+    let ascentM: Double?
+    let surfaces: [Surface]
+    let gravelShare: Double?
+    let unknownKm: Double
+    let assumedKm: Double
+    let singletrack: [Stretch]
+    let trails: [Stretch]?
+    let busy: [Stretch]
+    let straights: [Stretch]
+    let twiceKm: Double
+    let climbs: [Climb]
+    let stops: [Stop]
+    let longestGap: Gap?
+    let midway: Midway?
+    let timeS: Double
+    let knownShare: Double?
+    let stretches: [MapStretch]
+    let profile: [ProfilePoint]
+    let cues: [Cue]
+    let start: [Double]
+    let bbox: [Double]
+    let credit: String
+    let osmDate: String?
+    let verdict: [Course.Verdict]
+
+    struct Surface: Decodable, Identifiable { let `class`: String; let label: String; let km: Double; let share: Double
+        var id: String { `class` } }
+    struct Stretch: Decodable, Hashable { let fromKm: Double; let toKm: Double; let km: Double; let name: String }
+    struct Climb: Decodable, Hashable { let km: Double; let lengthM: Double; let gainM: Double; let grade: Double }
+    struct Gap: Decodable { let fromKm: Double; let toKm: Double; let km: Double }
+    struct Midway: Decodable { let km: Double; let place: String?; let name: String }
+    struct Stop: Decodable, Identifiable {
+        let km: Double; let lat: Double; let lon: Double; let place: String?
+        let food: Bool; let shop: Bool; let water: Bool; let toilets: Bool; let view: Bool
+        let items: [Item]
+        var id: String { "\(km)-\(lat)" }
+        struct Item: Decodable, Hashable { let name: String; let kind: String; let what: String; let hours: String; let offM: Double }
+    }
+    struct MapStretch: Decodable { let `class`: String; let fromKm: Double; let toKm: Double; let points: [[Double]] }
+    struct ProfilePoint: Decodable {
+        let km: Double; let ele: Double; let surface: String
+        init(from decoder: Decoder) throws {
+            var c = try decoder.unkeyedContainer()
+            km = try c.decode(Double.self); ele = try c.decode(Double.self); surface = try c.decode(String.self)
+        }
+    }
+    struct Cue: Decodable, Identifiable, Hashable {
+        let km: Double; let turn: String; let text: String; let surface: String?; let forKm: Double?
+        var id: String { "\(km)-\(text)" }
+    }
+}
+
 // MARK: - Client
 
 struct APIError: LocalizedError {
@@ -799,6 +877,43 @@ struct APIClient {
     }
 
     func recovery() async throws -> RecoverySummary { try await get("v1/recovery") }
+
+    // MARK: Planned routes
+
+    func courses() async throws -> [Course] {
+        struct List: Decodable { let courses: [Course] }
+        let list: List = try await get("v1/courses")
+        return list.courses
+    }
+
+    func course(_ id: Int) async throws -> Course { try await get("v1/courses/\(id)") }
+
+    /// Upload a GPX (Ride with GPS, Komoot...); the server checks it in the background.
+    func addCourse(gpx: Data, name: String?) async throws -> Course {
+        var req = try request("POST", "v1/courses", query: name.map { [URLQueryItem(name: "name", value: $0)] } ?? [])
+        req.httpBody = gpx
+        req.setValue("application/gpx+xml", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 120
+        return try Self.decoder.decode(Course.self, from: await send(req))
+    }
+
+    func recheckCourse(_ id: Int) async throws {
+        _ = try await send(request("POST", "v1/courses/\(id)/check"))
+    }
+
+    func renameCourse(_ id: Int, to name: String) async throws {
+        _ = try await send(request("PATCH", "v1/courses/\(id)", body: JSONEncoder().encode(["name": name])))
+    }
+
+    func deleteCourse(_ id: Int) async throws {
+        _ = try await send(request("DELETE", "v1/courses/\(id)"))
+    }
+
+    /// The course for a bike computer: "fit" (Garmin Edge, Wahoo) or "gpx".
+    func courseFile(_ id: Int, kind: String) async throws -> Data {
+        try await send(request("GET", "v1/courses/\(id)/course.\(kind)"))
+    }
+
 
     struct MetricsResult: Decodable { let received: Int; let new: Int }
 

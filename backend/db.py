@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS ride_notes (
     data          TEXT NOT NULL,        -- what's notable, as of the ride
     PRIMARY KEY (user_id, ride_id)
 );
+CREATE TABLE IF NOT EXISTS courses (
+    course_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    name          TEXT NOT NULL,
+    source        TEXT,                 -- ridewithgps, komoot, gpx, ride
+    link          TEXT,                 -- where the rider found it, when the file says
+    created_at    REAL NOT NULL,
+    status        TEXT NOT NULL,        -- checking, ready, failed
+    error         TEXT,
+    report        TEXT,                 -- the route check (rideengine/routes/check.py), JSON
+    file          TEXT NOT NULL         -- the original GPX, kept on disk
+);
+CREATE INDEX IF NOT EXISTS courses_user ON courses(user_id, created_at);
 CREATE TABLE IF NOT EXISTS insight_state (
     user_id       INTEGER PRIMARY KEY REFERENCES users(id),
     dirty_from    REAL,                 -- notes from this time on need redoing (NULL: all up to date)

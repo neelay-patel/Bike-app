@@ -243,6 +243,69 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(400, "fonts must be google or local; background a #RRGGBB colour or transparent")
         return HTMLResponse(be.rider_card_html(uid, fonts=fonts, background=background))
 
+    # --- planned routes: the route check and export (rideengine/routes/) ------------------------------
+    @app.post("/v1/courses", status_code=202)
+    async def add_course(request: Request, name: Optional[str] = None, uid: int = Depends(user)):
+        """Body: a GPX file (from Ride with GPS, Komoot, Garmin Connect...). The route check runs in the
+        background (status "checking", then "ready" or "failed"); poll GET /v1/courses/{id}."""
+        body = await request.body()
+        if len(body) > 20_000_000:
+            raise HTTPException(413, "That file is too big for a route")
+        try:
+            return be.add_course(uid, body, name=name)
+        except Exception as e:
+            raise HTTPException(400, f"Couldn't read a route from that file: {e}"[:200])
+
+    @app.get("/v1/courses")
+    def courses(uid: int = Depends(user)):
+        return {"courses": be.courses(uid)}
+
+    @app.get("/v1/courses/{course_id}")
+    def course(course_id: int, uid: int = Depends(user)):
+        """The route with its full check: surfaces, stops, warnings, climbs, cue sheet, map stretches."""
+        c = be.course(uid, course_id)
+        if c is None:
+            raise HTTPException(404, "No such route")
+        return c
+
+    @app.patch("/v1/courses/{course_id}")
+    def rename_course(course_id: int, body: dict = Body(...), uid: int = Depends(user)):
+        if not (body.get("name") or "").strip():
+            raise HTTPException(400, "A route needs a name")
+        c = be.rename_course(uid, course_id, body["name"])
+        if c is None:
+            raise HTTPException(404, "No such route")
+        return c
+
+    @app.post("/v1/courses/{course_id}/check", status_code=202)
+    def recheck_course(course_id: int, tasks: BackgroundTasks, uid: int = Depends(user)):
+        """Check again (after a failed map lookup)."""
+        if be.course(uid, course_id) is None:
+            raise HTTPException(404, "No such route")
+        with be.lock:
+            be.db.execute("UPDATE courses SET status = 'checking', error = NULL WHERE course_id = ?", (course_id,))
+        tasks.add_task(be.check_course, uid, course_id)
+        return be.course(uid, course_id)
+
+    @app.delete("/v1/courses/{course_id}")
+    def delete_course(course_id: int, uid: int = Depends(user)):
+        if not be.delete_course(uid, course_id):
+            raise HTTPException(404, "No such route")
+        return {"deleted": course_id}
+
+    @app.get("/v1/courses/{course_id}/course.{kind}")
+    def course_file(course_id: int, kind: str, uid: int = Depends(user)):
+        """The course for a bike computer: .fit (Garmin Edge: stops and climbs show in Up Ahead and
+        ClimbPro) or .gpx (with the stops as waypoints)."""
+        if kind not in ("fit", "gpx"):
+            raise HTTPException(404, "fit or gpx")
+        out = be.course_file(uid, course_id, kind)
+        if out is None:
+            raise HTTPException(404, "No such route, or it hasn't been checked yet")
+        data, filename = out
+        return Response(data, media_type="application/vnd.ant.fit" if kind == "fit" else "application/gpx+xml",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
     @app.patch("/v1/routes/{route_id}")
     def rename_route(route_id: str, body: dict = Body(...), uid: int = Depends(user)):
         """{"name": "Bayview loop"} names a route; {"name": null} goes back to the automatic name."""

@@ -41,6 +41,12 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
 - `rideengine/analysis/goals.py`: the coaching engine's goals: options in the rider's words, seasons, the reveal (solo pace, drafting estimate, what to build), markers read from ordinary riding (rating, home loop speed at the same heart rate, climb, power curve). API `/v1/goals/options|preview|current`. See `docs/coaching.md`.
 - `rideengine/analysis/plan.py`: training plans: zones (FTP and heart-rate reserve), the workout library (intervals with counts, durations, targets), the plan to the goal (phases, easier weeks, rider's days and times, season), did-you-do-it status, calendar feed (.ics) and Zwift (.zwo) export. API `/v1/plan…`, feed `/calendar/<secret>.ics`. App: Plan tab.
 - `rideengine/analysis/collection.py`: the fun bucket's numbers: badges, rider ratings out of 99, season binder, holo rule. `rideengine/card/avatar.py` (avatar drawn in code from parts), `rider_card.py` (you as a trump card). See `docs/fun.md`.
+- `rideengine/routes/`: planned routes (17 Nov 2026, `docs/routes.md`): `route.py` (GPX routes), `osm.py` (OpenStreetMap
+  roads and stops along a route: our own map first, `data/osm/map.sqlite3` built by `python -m backend build-map
+  data/osm/ontario-latest.osm.pbf` (`backend/mapdata.py`, pyosmium; Geofabrik extract), else cached Overpass tiles; surface classes paved/gravel/rough/trail/singletrack/unknown,
+  never guessed), `check.py` (the route check: surfaces, singletrack, stops and refuel gaps, busy roads, straights, climbs,
+  time at the rider's pace, cue sheet, verdict), `course.py` (FIT course with course points for the Edge, GPX). Backend
+  `/v1/courses`; app: Routes tab.
 - `rideengine/card/`: `ride_card.py`, the collectible ride card in the chosen look (D), from a Ride (privacy zone around home, local or Google fonts); `make_card.py` is the older graphite card (prototype). Served at `GET /v1/rides/{id}/card` and shown at the top of each ride in the app, with Share (asks first when a source isn't cleared for sharing). `python -m backend card --user 1 <ride_id>`.
 - `design/tokens.json` + `docs/design.md`: the look (direction D, 13 Nov 2026). The app's `Theme.swift` copies the tokens (test checks they match); fonts bundled in `ios/RideApp/RideApp/Fonts/` with their licences.
 - `rideengine/__main__.py`: CLI (`python -m rideengine import|rides|show|trends|card`).
@@ -84,6 +90,7 @@ python -m backend rebuild --user 1                  # re-merge stored rides afte
 python -m backend you --user 1                      # same, from the backend (GET /v1/you)
 python -m backend rebuild-insights --user 1         # rework routes, climbs, notes (keeps custom names)
 python -m backend set-tz --user 1 America/Toronto
+python -m backend build-map data/osm/ontario-latest.osm.pbf   # our own map for the route check (Geofabrik extract)
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
 ```
 

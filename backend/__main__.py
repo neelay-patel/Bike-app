@@ -68,6 +68,8 @@ def main(argv=None) -> int:
     cd.add_argument("--place", action="append", default=[], help="label,lat,lon (repeatable)")
     cd.add_argument("--no-places", action="store_true", help="don't label towns")
     cd.add_argument("--out")
+    bm = sub.add_parser("build-map", help="our own map for the route check, from an OpenStreetMap extract (.osm.pbf)")
+    bm.add_argument("pbf", help="e.g. data/osm/ontario-latest.osm.pbf from download.geofabrik.de")
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
@@ -77,6 +79,14 @@ def main(argv=None) -> int:
         import uvicorn
         from .app import create_app
         uvicorn.run(create_app(), host=a.host, port=a.port)
+        return 0
+
+    if a.cmd == "build-map":
+        from .mapdata import build
+        print(f"Building the map from {a.pbf} …")
+        info = build(a.pbf)
+        print(f"{int(info['ways']):,} roads and trails, {int(info['pois']):,} stops, map data of {info['osm_date']}, "
+              f"in {info['seconds']} s")
         return 0
 
     be = Backend(Settings.from_env())

@@ -102,6 +102,7 @@ struct ContentView: View {
                 Label { Text("Rides") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
             }.tag(0)
             PlanView().tabItem { Label("Plan", systemImage: "calendar") }.tag(1)
+            RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)
         }
@@ -110,6 +111,12 @@ struct ContentView: View {
         .foregroundStyle(Theme.ink)
         .preferredColorScheme(.light)  // the D look is light-only for now; a dark variant comes later
         .task { await model.refresh() }
+        .onOpenURL { url in
+            // A GPX shared from Ride with GPS, Komoot or Files: check it in Routes.
+            guard url.pathExtension.lowercased() == "gpx" else { return }
+            tab = 3
+            Task { await RouteInbox.shared.add(url) }
+        }
         #if DEBUG
         .onAppear { BikeArtRender.runIfAsked() }
         #endif

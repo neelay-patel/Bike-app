@@ -1,0 +1,673 @@
+import MapKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// GPX files opened in the app (Share → Ride) are uploaded here; the Routes list reloads when one lands.
+@MainActor
+final class RouteInbox: ObservableObject {
+    static let shared = RouteInbox()
+    @Published var added = 0
+    @Published var error: String?
+    @Published var busy = false
+
+    func add(_ url: URL) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            _ = try await APIClient().addCourse(gpx: try Data(contentsOf: url), name: nil)
+            added += 1
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Routes: bring in a route you found (Ride with GPS, Komoot...), see what it's really like (surface,
+/// singletrack, where to stop, busy roads, climbs, your time), then send it to the Edge.
+struct RoutesView: View {
+    @State private var courses: [Course] = []
+    @State private var importing = false
+    @State private var error: String?
+    @State private var uploading = false
+    @State private var deleting: Course?
+    @ObservedObject private var inbox = RouteInbox.shared
+
+    private var checking: Bool { courses.contains { $0.status == "checking" } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        MonoLabel("Plan a ride")
+                        Text("Routes").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                    }
+                    .padding(.horizontal, 4).padding(.top, 8)
+
+                    Button { importing = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: uploading || inbox.busy ? "hourglass" : "square.and.arrow.down")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(uploading || inbox.busy ? "Reading the route…" : "Check a route").font(Theme.text(16, .semibold))
+                                Text("A GPX from Ride with GPS, Komoot or anywhere: surface, singletrack, stops, busy roads, your time.")
+                                    .font(Theme.text(13)).foregroundStyle(.white.opacity(0.8))
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(16)
+                        .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(uploading)
+
+                    if let error {
+                        Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
+                    }
+                    if courses.isEmpty && error == nil {
+                        Text("No routes yet. In Ride with GPS, open a route, choose Export → GPX Track, and share it to Ride (or pick the file here).")
+                            .font(Theme.text(15)).foregroundStyle(Theme.inkMuted).padding(.vertical, 16)
+                    }
+                    LazyVStack(spacing: 8) {
+                        ForEach(courses) { c in
+                            NavigationLink { CourseDetailView(courseId: c.id, onChange: { Task { await load() } }) } label: {
+                                CourseRow(course: c)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(c.status != "ready")
+                            .contextMenu {
+                                if c.status == "failed" {
+                                    Button("Check again", systemImage: "arrow.clockwise") { Task { await recheck(c) } }
+                                }
+                                Button("Delete route", systemImage: "trash", role: .destructive) { deleting = c }
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .background(Theme.ground.ignoresSafeArea())
+            .refreshable { await load() }
+            .task { await load() }
+            .task(id: inbox.added) { await load() }
+            .onChange(of: inbox.error) { _, e in if let e { error = e } }
+            .task(id: checking) {
+                // The check runs on the server (the map lookup can take a minute): look again until it's done.
+                while checking && !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(4))
+                    await load()
+                }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: Self.gpxTypes) { result in
+                Task { await add(result) }
+            }
+            .confirmationDialog("Delete this route?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                titleVisibility: .visible, presenting: deleting) { c in
+                Button("Delete \(c.name)", role: .destructive) { Task { await delete(c) } }
+            } message: { _ in Text("The route and its check are deleted from the server. Your original file isn't touched.") }
+        }
+    }
+
+    static var gpxTypes: [UTType] {
+        [UTType(filenameExtension: "gpx"), .xml].compactMap { $0 }
+    }
+
+    private func load() async {
+        guard ServerConfig.isConfigured else { error = "Add the server address and token in Settings."; return }
+        do {
+            courses = try await APIClient().courses()
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func add(_ result: Result<URL, Error>) async {
+        uploading = true
+        defer { uploading = false }
+        do {
+            let url = try result.get()
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            _ = try await APIClient().addCourse(gpx: data, name: nil)
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func recheck(_ c: Course) async {
+        do { try await APIClient().recheckCourse(c.id) } catch { self.error = error.localizedDescription }
+        await load()
+    }
+
+    private func delete(_ c: Course) async {
+        do { try await APIClient().deleteCourse(c.id) } catch { self.error = error.localizedDescription }
+        await load()
+    }
+}
+
+// MARK: - Surface colours
+
+/// Route surfaces. Gravel is cobalt (what this rider goes looking for); singletrack is the warning red.
+enum SurfaceColor {
+    static func light(_ cls: String) -> Color {
+        switch cls {
+        case "paved": return Theme.inkSoft
+        case "gravel": return Theme.cobalt
+        case "rough": return Color(hex: 0x8C6A2F)
+        case "trail": return Color(hex: 0xB0587A)
+        case "singletrack": return Theme.heart
+        default: return Color(hex: 0xB9B0B3)
+        }
+    }
+
+    /// On the dark panel.
+    static func dark(_ cls: String) -> Color {
+        switch cls {
+        case "paved": return Theme.panelLabel
+        case "gravel": return Color(hex: 0x7F9BEA)
+        case "rough": return Theme.sand
+        case "trail": return Color(hex: 0xE59AB4)
+        case "singletrack": return Color(hex: 0xE0607F)
+        default: return Theme.label
+        }
+    }
+}
+
+// MARK: - List row
+
+struct CourseRow: View {
+    let course: Course
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            RouteShape(points: course.shape)
+                .stroke(Theme.cobalt, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .frame(width: 52, height: 52)
+                .padding(6)
+                .background(Theme.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(course.name).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink).lineLimit(2)
+                switch course.status {
+                case "checking":
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("Checking the map along the route…").font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+                    }
+                case "failed":
+                    Text("Couldn't check it: \(course.error ?? "map lookup failed"). Press and hold to try again.")
+                        .font(Theme.text(13)).foregroundStyle(Theme.heart)
+                default:
+                    Text(facts).font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
+                    ForEach(course.verdict.prefix(2), id: \.self) { v in VerdictLine(verdict: v, compact: true) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .surfaceCard(radius: 18)
+    }
+
+    private var facts: String {
+        var parts: [String] = []
+        if let km = course.km { parts.append("\(Format.number(km, decimals: 1)) km") }
+        if let m = course.ascentM { parts.append("\(Int(m)) m") }
+        if let g = course.gravelShare { parts.append("\(Int((g * 100).rounded()))% off-road") }
+        if let t = course.timeS { parts.append("~" + Format.duration(hours: t / 3600)) }
+        return parts.joined(separator: " · ").uppercased()
+    }
+}
+
+/// A route's outline in a unit square (x east, y south, from the server), scaled to fit. Also the binder's.
+struct RouteShape: Shape {
+    let points: [[Double]]
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let pts = points.filter { $0.count == 2 }.map { CGPoint(x: rect.minX + $0[0] * rect.width, y: rect.minY + $0[1] * rect.height) }
+        guard let first = pts.first else { return p }
+        p.move(to: first)
+        p.addLines(Array(pts.dropFirst()))
+        return p
+    }
+}
+
+struct VerdictLine: View {
+    let verdict: Course.Verdict
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon).font(.system(size: compact ? 11 : 13, weight: .semibold)).foregroundStyle(color)
+            Text(verdict.text).font(Theme.text(compact ? 13 : 15)).foregroundStyle(compact ? Theme.inkSoft : Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var icon: String {
+        switch verdict.tone {
+        case "good": return "checkmark.circle.fill"
+        case "warn": return "exclamationmark.triangle.fill"
+        default: return "circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch verdict.tone {
+        case "good": return Theme.cobalt
+        case "warn": return Theme.heart
+        default: return Theme.label
+        }
+    }
+}
+
+// MARK: - Detail
+
+struct CourseDetailView: View {
+    let courseId: Int
+    var onChange: () -> Void = {}
+    @Environment(\.dismiss) private var dismiss
+    @State private var course: Course?
+    @State private var error: String?
+    @State private var shareURL: URL?
+    @State private var allCues = false
+    @State private var renaming = false
+    @State private var newName = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let c = course, let r = c.report {
+                    header(c, r)
+                    RouteMap(report: r).frame(height: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    RoutePanel(report: r)
+                    SurfaceBar(report: r)
+                    section("What to know") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(r.verdict, id: \.self) { VerdictLine(verdict: $0) }
+                        }
+                    }
+                    exportCard(c)
+                    if !r.stops.filter({ !$0.view }).isEmpty { stops(r) }
+                    if !r.climbs.isEmpty { climbs(r) }
+                    cues(r)
+                    Text("\(r.credit)\(r.osmDate.map { ", as of " + String($0.prefix(10)) } ?? ""). Surfaces are only as good as the map: "
+                         + "\(Format.number(r.unknownKm, decimals: 1)) km has no surface on it and \(Format.number(r.assumedKm, decimals: 1)) km "
+                         + "is judged from the kind of road. Your time is an estimate from your own rides.")
+                        .font(Theme.text(12)).foregroundStyle(Theme.label).padding(.horizontal, 4)
+                } else if let error {
+                    Text(error).font(Theme.text(14)).foregroundStyle(Theme.heart)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(40)
+                }
+            }
+            .padding(16)
+        }
+        .background(Theme.ground.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Rename", systemImage: "pencil") { newName = course?.name ?? ""; renaming = true }
+                    if let link = course?.link, let url = URL(string: link) {
+                        Link(destination: url) { Label("Open original", systemImage: "safari") }
+                    }
+                    Button("Delete route", systemImage: "trash", role: .destructive) { Task { await delete() } }
+                } label: { Image(systemName: "ellipsis.circle") }
+            }
+        }
+        .alert("Rename route", isPresented: $renaming) {
+            TextField("Name", text: $newName)
+            Button("Save") { Task { await rename() } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
+            if let shareURL { ShareSheet(items: [shareURL]).presentationDetents([.medium, .large]) }
+        }
+        .task { await load() }
+    }
+
+    private func header(_ c: Course, _ r: CourseReport) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            MonoLabel([sourceLabel(c.source), r.loop ? "Loop" : "Point to point"].compactMap { $0 }.joined(separator: " · "))
+            Text(c.name).font(Theme.heading(36)).foregroundStyle(Theme.ink).lineLimit(3)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func sourceLabel(_ s: String?) -> String? {
+        switch s {
+        case "ridewithgps": return "From Ride with GPS"
+        case "komoot": return "From Komoot"
+        case "garmin": return "From Garmin"
+        case "ride": return "From your ride"
+        default: return "From a GPX"
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonoLabel(title)
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surfaceCard()
+    }
+
+    private func exportCard(_ c: Course) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MonoLabel("Ride it")
+            HStack(spacing: 8) {
+                Button { Task { await export(c, kind: "fit") } } label: {
+                    Label("Send to Edge", systemImage: "paperplane.fill").font(Theme.text(15, .semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .foregroundStyle(.white).background(Theme.cobalt, in: Capsule())
+                }
+                Button { Task { await export(c, kind: "gpx") } } label: {
+                    Text("GPX").font(Theme.text(15, .semibold)).padding(.vertical, 12).padding(.horizontal, 18)
+                        .foregroundStyle(Theme.cobalt).overlay(Capsule().stroke(Theme.cobalt, lineWidth: 1.5))
+                }
+            }
+            .buttonStyle(.plain)
+            Text("A FIT course with your stops and climbs, which the Edge shows in Up Ahead and ClimbPro. Share it to Garmin "
+                 + "Connect, or save it to Files and import it at connect.garmin.com under Training → Courses.")
+                .font(Theme.text(12)).foregroundStyle(Theme.label)
+        }
+        .padding(16)
+        .surfaceCard()
+    }
+
+    private func stops(_ r: CourseReport) -> some View {
+        section("Stops along the way") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(r.stops.filter { !$0.view }) { s in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("KM \(Format.number(s.km, decimals: 1))").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                            .frame(width: 64, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(s.items.first?.name ?? "Stop").font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
+                            Text(stopLine(s)).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                            if let h = s.items.first?.hours, !h.isEmpty {
+                                Text(h).font(Theme.mono(11)).foregroundStyle(Theme.label)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        if r.midway?.km == s.km { MonoLabel("Halfway", color: Theme.cobalt) }
+                    }
+                    .padding(.vertical, 9)
+                    if s.id != r.stops.filter({ !$0.view }).last?.id { Divider().overlay(Theme.line) }
+                }
+            }
+        }
+    }
+
+    private func stopLine(_ s: CourseReport.Stop) -> String {
+        var parts: [String] = []
+        if let p = s.place { parts.append(p) }
+        let kinds = [(s.food, "food"), (s.shop, "shop"), (s.water, "water"), (s.toilets, "toilets")].filter(\.0).map(\.1)
+        parts.append(kinds.joined(separator: ", "))
+        if let off = s.items.first?.offM, off >= 60 { parts.append("\(Int(off)) m off the route") }
+        if s.items.count > 1 { parts.append("+\(s.items.count - 1) more") }
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func climbs(_ r: CourseReport) -> some View {
+        section("Climbs") {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(r.climbs, id: \.self) { c in
+                    HStack {
+                        Text("KM \(Format.number(c.km, decimals: 1))").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                            .frame(width: 64, alignment: .leading)
+                        Text("\(Int(c.gainM)) m over \(Format.number(c.lengthM / 1000, decimals: 1)) km")
+                            .font(Theme.text(15)).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text("\(Format.number(c.grade, decimals: 1))%").font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+                    }
+                }
+            }
+        }
+    }
+
+    private func cues(_ r: CourseReport) -> some View {
+        let shown = allCues ? r.cues : Array(r.cues.prefix(12))
+        return section("Cue sheet") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(shown) { c in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(Format.number(c.km, decimals: 1)).font(Theme.mono(12)).foregroundStyle(Theme.label)
+                            .frame(width: 44, alignment: .trailing)
+                        Image(systemName: cueIcon(c.turn)).font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(c.turn == "stop" ? Theme.cobalt : Theme.inkSoft).frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.text).font(Theme.text(14, c.turn == "stop" ? .medium : .regular)).foregroundStyle(Theme.ink)
+                            if let s = c.surface, let f = c.forKm {
+                                HStack(spacing: 5) {
+                                    Circle().fill(SurfaceColor.light(s)).frame(width: 7, height: 7)
+                                    Text("\(s.capitalized), \(Format.number(f, decimals: 1)) km").font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                                }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 6)
+                }
+                if r.cues.count > 12 {
+                    Button(allCues ? "Show fewer" : "Show all \(r.cues.count) cues") { allCues.toggle() }
+                        .font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt).padding(.top, 8)
+                }
+            }
+        }
+    }
+
+    private func cueIcon(_ turn: String) -> String {
+        switch turn {
+        case "start": return "flag"
+        case "finish": return "flag.checkered"
+        case "left": return "arrow.turn.up.left"
+        case "right": return "arrow.turn.up.right"
+        case "u-turn": return "arrow.uturn.down"
+        case "stop": return "cup.and.saucer.fill"
+        default: return "arrow.up"
+        }
+    }
+
+    private func load() async {
+        do { course = try await APIClient().course(courseId) } catch { self.error = error.localizedDescription }
+    }
+
+    private func export(_ c: Course, kind: String) async {
+        do {
+            let data = try await APIClient().courseFile(c.id, kind: kind)
+            let safe = c.name.replacingOccurrences(of: "/", with: "-")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe).\(kind)")
+            try data.write(to: url)
+            shareURL = url
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func rename() async {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        do { try await APIClient().renameCourse(courseId, to: name); await load(); onChange() }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func delete() async {
+        do { try await APIClient().deleteCourse(courseId); onChange(); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+// MARK: - Map
+
+struct RouteMap: View {
+    let report: CourseReport
+
+    var body: some View {
+        Map(initialPosition: .rect(rect)) {
+            ForEach(Array(report.stretches.enumerated()), id: \.offset) { _, s in
+                MapPolyline(coordinates: s.points.compactMap(coord))
+                    .stroke(SurfaceColor.light(s.class), style: StrokeStyle(lineWidth: s.class == "paved" ? 3.5 : 4.5,
+                                                                          lineCap: .round, lineJoin: .round))
+            }
+            ForEach(report.stops.filter { !$0.view && ($0.food || $0.shop || $0.water) }) { s in
+                Annotation("", coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon)) {
+                    Image(systemName: s.food || s.shop ? "cup.and.saucer.fill" : "drop.fill")
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(report.midway?.km == s.km ? Theme.cobalt : Theme.inkSoft, in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                }
+            }
+            if let start = coord(report.start) {
+                Annotation("Start", coordinate: start) {
+                    Circle().fill(Theme.ink).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2.5))
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        .accessibilityLabel("Map of the route, coloured by surface")
+    }
+
+    private func coord(_ p: [Double]) -> CLLocationCoordinate2D? {
+        p.count >= 2 ? CLLocationCoordinate2D(latitude: p[0], longitude: p[1]) : nil
+    }
+
+    private var rect: MKMapRect {
+        let b = report.bbox  // south, west, north, east
+        let a = MKMapPoint(CLLocationCoordinate2D(latitude: b[2], longitude: b[1]))
+        let c = MKMapPoint(CLLocationCoordinate2D(latitude: b[0], longitude: b[3]))
+        let r = MKMapRect(x: min(a.x, c.x), y: min(a.y, c.y), width: abs(c.x - a.x), height: abs(c.y - a.y))
+        return r.insetBy(dx: -r.width * 0.12, dy: -r.height * 0.12)
+    }
+}
+
+// MARK: - Panel: profile coloured by surface, and the hero numbers
+
+struct RoutePanel: View {
+    let report: CourseReport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SurfaceProfile(report: report).frame(height: 128)
+            Rectangle().fill(Theme.panelLine).frame(height: 1)
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 12) {
+                HeroStat(label: "Length", value: Format.number(report.km, decimals: 1), unit: "km")
+                HeroStat(label: "Climbing", value: report.ascentM.map { Format.hero($0, decimals: 0) } ?? "–", unit: "m")
+                HeroStat(label: "Off pavement", value: report.gravelShare.map { "\(Int(($0 * 100).rounded()))" } ?? "–", unit: "%")
+                HeroStat(label: "Your time", value: Format.duration(hours: report.timeS / 3600), unit: nil)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+/// Halftone elevation profile (as on rides), with a strip under it coloured by surface.
+struct SurfaceProfile: View {
+    let report: CourseReport
+
+    var body: some View {
+        Canvas { ctx, size in
+            let strip: CGFloat = 6, axis: CGFloat = 16
+            let plotH = size.height - axis - strip - 4
+            let pts = report.profile
+            let total = max(report.km, 0.1)
+            guard pts.count > 1 else {
+                ctx.draw(Text("No elevation in this file").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+                         at: CGPoint(x: size.width / 2, y: plotH / 2))
+                return
+            }
+            let lo = pts.map(\.ele).min()!, hi = max(pts.map(\.ele).max()!, lo + 10)
+            func at(_ km: Double, _ ele: Double) -> CGPoint {
+                CGPoint(x: CGFloat(km / total) * size.width, y: 8 + CGFloat(1 - (ele - lo) / (hi - lo)) * (plotH - 12))
+            }
+            var line = Path()
+            line.addLines(pts.map { at($0.km, $0.ele) })
+            var area = line
+            area.addLine(to: CGPoint(x: size.width, y: plotH))
+            area.addLine(to: CGPoint(x: 0, y: plotH))
+            area.closeSubpath()
+            ctx.drawLayer { layer in
+                layer.clip(to: area)
+                var y: CGFloat = 2.5
+                while y < plotH {
+                    let alpha = 0.9 - 0.75 * Double(y / plotH)
+                    var x: CGFloat = 2.5
+                    while x < size.width {
+                        layer.fill(Path(ellipseIn: CGRect(x: x - 1.1, y: y - 1.1, width: 2.2, height: 2.2)),
+                                   with: .color(.white.opacity(alpha)))
+                        x += 5
+                    }
+                    y += 5
+                }
+            }
+            ctx.stroke(line, with: .color(.white), lineWidth: 1.6)
+            // Surface strip.
+            let sy = plotH + 3
+            for s in report.stretches {
+                let x0 = CGFloat(s.fromKm / total) * size.width, x1 = CGFloat(s.toKm / total) * size.width
+                ctx.fill(Path(CGRect(x: x0, y: sy, width: max(1, x1 - x0), height: strip)), with: .color(SurfaceColor.dark(s.class)))
+            }
+            // Climb tops.
+            for c in report.climbs where c.gainM >= 40 {
+                let km = c.km + c.lengthM / 1000
+                if let near = pts.min(by: { abs($0.km - km) < abs($1.km - km) }) {
+                    let p = at(near.km, near.ele)
+                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white))
+                }
+            }
+            ctx.draw(Text("0").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+                     at: CGPoint(x: 0, y: size.height - 6), anchor: .leading)
+            ctx.draw(Text("\(Format.number(total, decimals: 1)) KM").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+                     at: CGPoint(x: size.width, y: size.height - 6), anchor: .trailing)
+        }
+        .accessibilityLabel("Elevation profile, with the surface along the route underneath")
+    }
+}
+
+/// One bar: how much of the route is on each surface.
+struct SurfaceBar: View {
+    let report: CourseReport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonoLabel("Surface")
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    ForEach(report.surfaces) { s in
+                        Rectangle().fill(SurfaceColor.light(s.class))
+                            .frame(width: max(2, geo.size.width * s.share - 2))
+                    }
+                }
+            }
+            .frame(height: 14)
+            .clipShape(Capsule())
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                      alignment: .leading, spacing: 8) {
+                ForEach(report.surfaces) { s in
+                    HStack(spacing: 6) {
+                        Circle().fill(SurfaceColor.light(s.class)).frame(width: 9, height: 9)
+                        Text(s.label).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink)
+                        Text("\(Format.number(s.km, decimals: 1)) km").font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surfaceCard()
+    }
+}

@@ -49,6 +49,7 @@ class Backend:
         self.registry = registry if registry is not None else REGISTRY
         self.lock = threading.RLock()
         self.insights = Insights(self, background=background)
+        self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
 
     def connector(self, provider: str):
         if provider not in self.registry:
@@ -742,6 +743,123 @@ class Backend:
                          hide_near=[home] if home else None, background=background,
                          avatar=self.me(user_id)["avatar"], holo=is_holo(self.notes(user_id, ride_id)))
 
+    # --- planned routes ("courses": the route check and export, rideengine/routes/) ---------------
+    def add_course(self, user_id: int, gpx: bytes, name: Optional[str] = None) -> dict:
+        """Keep the rider's GPX (Ride with GPS, Komoot...), then check it: on a worker thread in the
+        server (the map lookup can take a minute), before returning otherwise."""
+        from rideengine.routes.route import read_route
+        route = read_route(gpx, name=name)       # ValueError for files without a route
+        with self.lock:
+            cur = self.db.execute(
+                "INSERT INTO courses (user_id, name, source, link, created_at, status, file) "
+                "VALUES (?, ?, ?, ?, ?, 'checking', '')",
+                (user_id, route.name[:80], route.source, route.link, db.now()))
+            cid = cur.lastrowid
+            folder = os.path.join(self.settings.raw_dir, str(user_id), "courses")
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, f"{cid}.gpx")
+            with open(path, "wb") as f:
+                f.write(gpx)
+            self.db.execute("UPDATE courses SET file = ? WHERE course_id = ?", (path, cid))
+        if self.insights.background:
+            threading.Thread(target=self.check_course, args=(user_id, cid), name=f"course-{cid}",
+                             daemon=True).start()
+        else:
+            self.check_course(user_id, cid)
+        return self.course(user_id, cid)
+
+    def _course_row(self, user_id: int, course_id: int):
+        # Checks run on their own threads and share the connection: reads take the lock too.
+        with self.lock:
+            return self.db.execute("SELECT * FROM courses WHERE user_id = ? AND course_id = ?",
+                                   (user_id, course_id)).fetchone()
+
+    def _course_route(self, row):
+        from rideengine.routes.route import read_route
+        with open(row["file"], "rb") as f:
+            return read_route(f.read(), name=row["name"])
+
+    def check_course(self, user_id: int, course_id: int) -> None:
+        from rideengine import places
+        from rideengine.analysis import features as feat_mod
+        from rideengine.analysis.repeats import bbox as box
+        from rideengine.routes import check, osm
+        row = self._course_row(user_id, course_id)
+        if row is None:
+            return
+        try:
+            route = self._course_route(row)
+            data = (self.map_source or osm.corridor)(route)
+            with self.lock:
+                feats = self.insights._features(user_id)
+            visible = feat_mod.visible_ids(feats)
+            vfeats = [f for f in feats if f["ride_id"] in visible]
+            known = {tuple(c) for f in vfeats if not f["indoor"] for c in f.get("cells") or []}
+            pace = check.Pace.of(vfeats)
+            names = places.load(box([(p[0], p[1]) for p in route.points[::20]]))
+            report = check.check(route, data, pace=pace, known_cells=known, places=names)
+            with self.lock:
+                self.db.execute("UPDATE courses SET status = 'ready', error = NULL, report = ? WHERE course_id = ?",
+                                (json.dumps(report), course_id))
+        except Exception as e:   # the map server being down shouldn't lose the rider's route
+            with self.lock:
+                self.db.execute("UPDATE courses SET status = 'failed', error = ? WHERE course_id = ?",
+                                (str(e)[:300], course_id))
+
+    @staticmethod
+    def _course_summary(row) -> dict:
+        r = json.loads(row["report"]) if row["report"] else {}
+        return {"id": row["course_id"], "name": row["name"], "source": row["source"], "link": row["link"] or None,
+                "created_at": row["created_at"], "status": row["status"], "error": row["error"],
+                "km": r.get("km"), "ascent_m": r.get("ascent_m"), "gravel_share": r.get("gravel_share"),
+                "time_s": r.get("time_s"), "loop": r.get("loop"),
+                "singletrack_km": round(sum(x["km"] for x in r.get("singletrack", [])), 1) if r else None,
+                "verdict": r.get("verdict", [])[:3],
+                "shape": _shape([s for st in r.get("stretches", []) for s in st["points"]]) if r else []}
+
+    def courses(self, user_id: int) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM courses WHERE user_id = ? ORDER BY created_at DESC",
+                                   (user_id,)).fetchall()
+        return [self._course_summary(r) for r in rows]
+
+    def course(self, user_id: int, course_id: int) -> Optional[dict]:
+        row = self._course_row(user_id, course_id)
+        if row is None:
+            return None
+        out = self._course_summary(row)
+        out["report"] = json.loads(row["report"]) if row["report"] else None
+        return out
+
+    def rename_course(self, user_id: int, course_id: int, name: str) -> Optional[dict]:
+        with self.lock:
+            self.db.execute("UPDATE courses SET name = ? WHERE user_id = ? AND course_id = ?",
+                            (name.strip()[:80], user_id, course_id))
+        return self.course(user_id, course_id)
+
+    def delete_course(self, user_id: int, course_id: int) -> bool:
+        row = self._course_row(user_id, course_id)
+        if row is None:
+            return False
+        with self.lock:
+            self.db.execute("DELETE FROM courses WHERE course_id = ?", (course_id,))
+        if row["file"] and os.path.exists(row["file"]):
+            os.remove(row["file"])
+        return True
+
+    def course_file(self, user_id: int, course_id: int, kind: str = "fit") -> Optional[tuple[bytes, str]]:
+        """(bytes, file name) of the course for a bike computer: FIT (Garmin, Wahoo, Hammerhead) or GPX."""
+        from rideengine.routes.course import fit_course, gpx_course
+        row = self._course_row(user_id, course_id)
+        if row is None or not row["report"]:
+            return None
+        route = self._course_route(row)
+        report = json.loads(row["report"])
+        safe = _SAFE_ID.sub("_", row["name"]).strip("_")[:40] or "route"
+        if kind == "gpx":
+            return gpx_course(route, report), f"{safe}.gpx"
+        return fit_course(route, report), f"{safe}.fit"
+
     def ride(self, user_id: int, ride_id: str) -> Optional[Ride]:
         with self.lock:
             row = self.db.execute("SELECT data FROM rides WHERE user_id = ? AND ride_id = ?",
@@ -756,6 +874,20 @@ class Backend:
                 "AND end_t >= ? AND start_t <= ? ORDER BY o DESC LIMIT 1",
                 (end, start, user_id, start, end)).fetchone()
         return row["ride_id"] if row else None
+
+
+def _shape(points: list, n: int = 64) -> list[list[float]]:
+    """A route's outline for thumbnails, in a unit square (x east, y south), like features.shape."""
+    import math
+    if len(points) < 2:
+        return []
+    picks = [points[int(i * (len(points) - 1) / n)] for i in range(n + 1)]
+    k = math.cos(math.radians(sum(p[0] for p in picks) / len(picks)))
+    xy = [(p[1] * k, -p[0]) for p in picks]
+    xs, ys = [p[0] for p in xy], [p[1] for p in xy]
+    span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1e-9
+    ox, oy = (span - (max(xs) - min(xs))) / 2, (span - (max(ys) - min(ys))) / 2
+    return [[round((x - min(xs) + ox) / span, 3), round((y - min(ys) + oy) / span, 3)] for x, y in xy]
 
 
 def describe(ride_id: str, ride: Ride) -> dict:

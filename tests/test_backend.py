@@ -296,3 +296,37 @@ def test_you_power_from_a_trainer_ride(env):
     assert stored["targets"]["sustained"] == {"baseline": 162, "target": 178, "unit": "W"}
     hl = {m["id"]: m for m in client.get("/v1/you").json()["headline"]["metrics"]}
     assert hl["sustained"]["target"] == 178 and hl["sustained"]["focus"] and hl["sustained"]["progress"] == 0
+
+
+def test_course_upload_check_and_export(env, tmp_path):
+    """A GPX from Ride with GPS: checked against a (fake) map, listed, exported for the Edge, deleted."""
+    from rideengine.importers.fit import decode
+    from rideengine.routes.course import gpx_course
+    from test_routes import synthetic
+    be, uid, client, _ = env
+    route, data = synthetic()
+    be.map_source = lambda r: data
+    gpx = gpx_course(route, {"stops": []})
+    r = client.post("/v1/courses", content=gpx)
+    assert r.status_code == 202, r.text
+    c = r.json()
+    assert c["status"] == "ready" and c["name"] == "Test loop" and 19 <= c["km"] <= 21
+    assert c["report"]["midway"]["name"] == "Corner Café" and c["singletrack_km"] >= 1.5
+    assert c["shape"] and c["verdict"]
+    listed = client.get("/v1/courses").json()["courses"]
+    assert [x["id"] for x in listed] == [c["id"]] and "report" not in listed[0]
+    fit = client.get(f"/v1/courses/{c['id']}/course.fit")
+    assert fit.status_code == 200 and 'filename="Test_loop.fit"' in fit.headers["content-disposition"]
+    assert any(m == 32 for m, _ in decode(fit.content))
+    assert client.get(f"/v1/courses/{c['id']}/course.gpx").content.startswith(b"<?xml")
+    assert client.patch(f"/v1/courses/{c['id']}", json={"name": "Goodwood gravel"}).json()["name"] == "Goodwood gravel"
+    # The map being down keeps the route, marked failed, to check again later.
+    be.map_source = lambda r: (_ for _ in ()).throw(RuntimeError("OpenStreetMap lookup failed: timed out"))
+    bad = client.post("/v1/courses", content=gpx).json()
+    assert bad["status"] == "failed" and "timed out" in bad["error"]
+    be.map_source = lambda r: data
+    assert client.post(f"/v1/courses/{bad['id']}/check").status_code == 202
+    assert client.get(f"/v1/courses/{bad['id']}").json()["status"] == "ready"
+    assert client.post("/v1/courses", content=b"<gpx></gpx>").status_code == 400
+    assert client.delete(f"/v1/courses/{c['id']}").json() == {"deleted": c["id"]}
+    assert client.get(f"/v1/courses/{c['id']}").status_code == 404

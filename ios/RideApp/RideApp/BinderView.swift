@@ -270,20 +270,6 @@ private struct MiniCard: View {
     }
 }
 
-/// The route's outline from the binder's shape (unit square, x east, y south).
-private struct RouteShape: Shape {
-    let points: [[Double]]
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let pts = points.filter { $0.count == 2 }.map { CGPoint(x: rect.minX + $0[0] * rect.width, y: rect.minY + $0[1] * rect.height) }
-        guard let first = pts.first else { return p }
-        p.move(to: first)
-        p.addLines(Array(pts.dropFirst()))
-        return p
-    }
-}
-
 /// A week with no ride: an empty slot in the binder, the same shape as a card.
 private struct GapSlot: View {
     let week: String
