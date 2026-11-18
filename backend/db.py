@@ -162,6 +162,16 @@ CREATE TABLE IF NOT EXISTS courses (
     file          TEXT NOT NULL         -- the original GPX, kept on disk
 );
 CREATE INDEX IF NOT EXISTS courses_user ON courses(user_id, created_at);
+CREATE TABLE IF NOT EXISTS course_versions (
+    course_id     INTEGER NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,
+    n             INTEGER NOT NULL,     -- 0 is the route as it came in; each tuning adds one
+    file          TEXT NOT NULL,        -- this version's GPX
+    change        TEXT NOT NULL,        -- what it did, in words ("10.2 km shorter: ...")
+    op            TEXT NOT NULL,        -- the operation, JSON ({"op": "length", "km": -10})
+    report        TEXT,                 -- its route check
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (course_id, n)
+);
 CREATE TABLE IF NOT EXISTS insight_state (
     user_id       INTEGER PRIMARY KEY REFERENCES users(id),
     dirty_from    REAL,                 -- notes from this time on need redoing (NULL: all up to date)

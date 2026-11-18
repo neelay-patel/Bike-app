@@ -9,7 +9,8 @@ singletrack. So the job isn't drawing a line: it's **cutting the research** and 
 
 1. **Route check** (built 17 Nov 2026). Bring in a GPX (Ride with GPS, Komoot, Garmin Connect), get the research
    in one page, send it to the Edge.
-2. **Tuning**: move the start, add a coffee stop, shorten or lengthen by N km while keeping the gravel share.
+2. **Tuning** (built 17 Nov 2026): move the start, add a coffee stop, shorten or lengthen by N km while keeping
+   the gravel share. See "Tuning" below.
 3. **Generating loops** from a description ("60–70 km gravel loop near Uxbridge, café halfway"): a routing engine
    with surface preferences (GraphHopper custom models, or Valhalla) makes 20–30 candidates, the route check scores
    them, the best three are shown.
@@ -64,6 +65,37 @@ singletrack. So the job isn't drawing a line: it's **cutting the research** and 
 Backend: `courses` table and `/v1/courses` (upload a GPX, check in the background, list, detail, rename, recheck,
 delete, `course.fit` / `course.gpx`). App: the **Routes** tab (import a GPX, the route page with the map coloured
 by surface, the profile with a surface strip, what to know, stops, climbs, cue sheet, Send to Edge).
+
+## Tuning (built 17 Nov 2026)
+
+On any checked route, in the app's **Tune it** card:
+- **Shorter or longer** (−20 … +20 km):
+  - Shorter takes a shortcut between two points on the route; longer takes a way round, out to the side.
+  - Candidates are scored on hitting the asked-for length first, then the roads this rider likes, then not
+    riding the same road twice.
+  - Stops the rider added stay on the route.
+- **Add a stop**: cafés, shops and water within 3 km of the route. The ones that fill the longest stretch with no
+  food come first. The detour that adds least leaves and rejoins the route within 4 km either side.
+- **Start elsewhere**: a café or town on the route, or any point tapped on the map.
+  - A loop just begins there, or rides there and back to join it.
+  - A point-to-point route joins at the nearest place.
+
+Each change is a version (`course_versions`), checked straight away, listed in words ("10.6 km shorter: a
+shortcut from km 63.4 to km 86.6 (88% off pavement)") and undoable one at a time. Version 0 is the file as it
+came in.
+
+Under it:
+- `rideengine/routes/router.py`: our own bike router on the local map (A*, stdlib).
+  - A road's cost is its length × the rider's preference (`Prefs`): gravel 0.8, paved 1.0, singletrack 5,
+    busy ×3. A road rider (under 25% gravel) prefers tarmac.
+  - Motorways, private roads, steps and sidewalks are left out, and one-way streets are respected.
+- `rideengine/routes/elevation.py`: ground heights from the public Terrarium elevation tiles (AWS Open Data,
+  ~27 m at zoom 12).
+  - PNGs are decoded in stdlib and cached in `data/dem/`.
+  - Tuned routes take all their heights from the tiles, for consistency. On Durham Forest the tiles are within
+    ~5 m of the Garmin's barometric heights.
+- `rideengine/routes/tune.py`: the operations (`move_start`, `add_stop`, `change_length`).
+- API: `GET /v1/courses/{id}/options`, `POST /v1/courses/{id}/tune`, `POST /v1/courses/{id}/undo`.
 
 ## Known limits and next
 

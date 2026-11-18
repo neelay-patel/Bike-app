@@ -287,6 +287,34 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         tasks.add_task(be.check_course, uid, course_id)
         return be.course(uid, course_id)
 
+    @app.get("/v1/courses/{course_id}/options")
+    def course_options(course_id: int, uid: int = Depends(user)):
+        """Tuning choices: stops near the route but off it, and places to start from."""
+        o = be.course_options(uid, course_id)
+        if o is None:
+            raise HTTPException(404, "No such route, or it hasn't been checked yet")
+        return o
+
+    @app.post("/v1/courses/{course_id}/tune")
+    def tune_course(course_id: int, op: dict = Body(...), uid: int = Depends(user)):
+        """One change, checked straight away: {"op": "start", "lat", "lon", "label"},
+        {"op": "stop", "lat", "lon", "name"} or {"op": "length", "km": -10}. Undo with /undo."""
+        from rideengine.routes.tune import TuneError
+        try:
+            c = be.tune_course(uid, course_id, op)
+        except TuneError as e:
+            raise HTTPException(422, str(e))
+        if c is None:
+            raise HTTPException(404, "No such route")
+        return c
+
+    @app.post("/v1/courses/{course_id}/undo")
+    def undo_course(course_id: int, uid: int = Depends(user)):
+        c = be.undo_course(uid, course_id)
+        if c is None:
+            raise HTTPException(404, "No such route")
+        return c
+
     @app.delete("/v1/courses/{course_id}")
     def delete_course(course_id: int, uid: int = Depends(user)):
         if not be.delete_course(uid, course_id):

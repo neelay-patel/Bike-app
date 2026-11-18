@@ -20,7 +20,9 @@ from array import array
 from rideengine.routes import osm
 
 ROAD_TAGS = {"highway", "surface", "tracktype", "smoothness", "mtb:scale", "width", "sac_scale", "name", "ref",
-             "official_name", "maxspeed", "footway", "path", "bicycle", "railway", "lanes", "access"}
+             "official_name", "maxspeed", "footway", "path", "bicycle", "railway", "lanes", "access",
+             # for routing (rideengine/routes/router.py)
+             "oneway", "oneway:bicycle", "cycleway", "service", "junction", "foot"}
 POI_TAGS = {"amenity", "shop", "tourism", "name", "brand", "opening_hours", "drinking_water"}
 SKIP = set(osm.HIGHWAY_SKIP.split("|"))
 

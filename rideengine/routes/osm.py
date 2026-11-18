@@ -289,12 +289,12 @@ def _local_covers(db: sqlite3.Connection, want: list[tuple[int, int]]) -> bool:
                for i, j in want)
 
 
-def local(route: Route, path: str = LOCAL_DB) -> dict | None:
-    """Roads and stops around the route from our own copy of the map, or None if it isn't there or
-    doesn't cover the route."""
+def local(route: Route, path: str = LOCAL_DB, pad_m: float = VIEW_M) -> dict | None:
+    """Roads and stops around the route (and up to pad_m from it) from our own copy of the map, or None
+    if it isn't there or doesn't cover the route."""
     if not os.path.exists(path):
         return None
-    want = tiles(route)
+    want = tiles(route, pad_m)
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         if not _local_covers(db, want):
@@ -326,14 +326,14 @@ def local(route: Route, path: str = LOCAL_DB) -> dict | None:
 
 
 def corridor(route: Route, cache_dir: str = CACHE_DIR, refresh: bool = False, progress=None,
-             local_db: str | None = LOCAL_DB) -> dict:
+             local_db: str | None = LOCAL_DB, pad_m: float = VIEW_M) -> dict:
     """Roads and stops around the route: from our own map if it covers the route, else Overpass tiles
     (cached, the rest fetched in batches)."""
     if local_db and not refresh:
-        found = local(route, local_db)
+        found = local(route, local_db, pad_m)
         if found is not None:
             return found
-    want = tiles(route)
+    want = tiles(route, pad_m)
     missing = [t for t in want if refresh or not os.path.exists(_tile_path(cache_dir, t))]
     os.makedirs(os.path.join(cache_dir, "tiles"), exist_ok=True)
     stamp = None

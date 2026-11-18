@@ -330,3 +330,47 @@ def test_course_upload_check_and_export(env, tmp_path):
     assert client.post("/v1/courses", content=b"<gpx></gpx>").status_code == 400
     assert client.delete(f"/v1/courses/{c['id']}").json() == {"deleted": c["id"]}
     assert client.get(f"/v1/courses/{c['id']}").status_code == 404
+
+
+def test_course_tuning_versions_and_undo(env):
+    """Tune a checked route (start, stop, shorter), see each change, undo back to the original."""
+    from rideengine.routes.course import gpx_course
+    from rideengine.routes.router import Graph
+    from test_tune import Flat, grid, node, ring
+    be, uid, client, _ = env
+    ways = grid(n=11, gravel_rows=(5,))
+    cafe = node(5, 10)
+    data = {"ways": ways, "fetched": None,
+            "pois": [{"id": "n1", "lat": cafe[0], "lon": cafe[1], "kind": "food", "name": "Canter Coffee",
+                      "what": "cafe", "hours": ""}]}
+    be.map_source = lambda r: data
+    be.graph_source = lambda r, prefs: Graph(ways, prefs)
+    be.heights = Flat()
+    route = ring(1, 1, 9, 9)
+    c = client.post("/v1/courses", content=gpx_course(route, {})).json()
+    assert c["status"] == "ready" and c["changes"] == []
+    opts = client.get(f"/v1/courses/{c['id']}/options").json()
+    assert [s["name"] for s in opts["stops"]] == ["Canter Coffee"] and opts["stops"][0]["off_m"] > 900
+    assert "fills_gap" in opts["stops"][0] and "gap" in opts
+    r = client.post(f"/v1/courses/{c['id']}/tune", json={"op": "stop", "lat": cafe[0], "lon": cafe[1],
+                                                         "name": "Canter Coffee"})
+    assert r.status_code == 200, r.text
+    t1 = r.json()
+    assert t1["km"] > c["km"] + 1.5 and "Canter Coffee" in t1["changes"][0]["change"]
+    assert t1["report"]["stops"][0]["items"][0]["name"] == "Canter Coffee"
+    t2 = client.post(f"/v1/courses/{c['id']}/tune", json={"op": "length", "km": -10}).json()
+    assert t1["km"] - 13 < t2["km"] < t1["km"] - 7 and len(t2["changes"]) == 2
+    assert t2["report"]["stops"], "the added stop survives the shortcut"
+    assert client.get(f"/v1/courses/{c['id']}/course.fit").status_code == 200
+    bad = client.post(f"/v1/courses/{c['id']}/tune", json={"op": "length", "km": 0.2})
+    assert bad.status_code == 422 and "at least 1 km" in bad.json()["detail"]
+    assert client.post(f"/v1/courses/{c['id']}/tune", json={"op": "fly"}).status_code == 422
+    u1 = client.post(f"/v1/courses/{c['id']}/undo").json()
+    assert u1["km"] == t1["km"] and len(u1["changes"]) == 1
+    u0 = client.post(f"/v1/courses/{c['id']}/undo").json()
+    assert u0["km"] == c["km"] and u0["changes"] == []
+    assert client.post(f"/v1/courses/{c['id']}/undo").json()["km"] == c["km"]   # nothing left to undo
+    client.post(f"/v1/courses/{c['id']}/tune", json={"op": "length", "km": 5})
+    assert client.delete(f"/v1/courses/{c['id']}").status_code == 200
+    import os
+    assert not [f for f in os.listdir(os.path.join(be.settings.raw_dir, str(uid), "courses"))]

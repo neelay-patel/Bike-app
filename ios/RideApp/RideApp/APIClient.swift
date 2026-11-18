@@ -676,8 +676,32 @@ struct Course: Decodable, Identifiable {
     let verdict: [Verdict]
     let shape: [[Double]]
     let report: CourseReport?
+    /// What tuning has done, oldest first (empty: the route as it came in).
+    let changes: [Change]?
 
     struct Verdict: Decodable, Hashable { let tone: String; let text: String }
+    struct Change: Decodable, Hashable { let n: Int; let change: String }
+}
+
+/// Tuning choices: stops near the route but off it, and places to start from.
+struct CourseOptions: Decodable {
+    let stops: [Stop]
+    let starts: [Start]
+    /// The longest stretch with no food or water on the map (25 km or more), if any.
+    let gap: Gap?
+
+    struct Gap: Decodable, Hashable { let fromKm: Double; let toKm: Double; let km: Double }
+
+    struct Stop: Decodable, Identifiable, Hashable {
+        let name: String; let kind: String; let what: String; let hours: String
+        let lat: Double; let lon: Double; let km: Double; let offM: Double
+        let fillsGap: Bool?
+        var id: String { "\(name)-\(lat)" }
+    }
+    struct Start: Decodable, Identifiable, Hashable {
+        let name: String; let lat: Double; let lon: Double; let km: Double; let kind: String
+        var id: String { "\(name)-\(lat)" }
+    }
 }
 
 struct CourseReport: Decodable {
@@ -895,6 +919,20 @@ struct APIClient {
         req.setValue("application/gpx+xml", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 120
         return try Self.decoder.decode(Course.self, from: await send(req))
+    }
+
+    func courseOptions(_ id: Int) async throws -> CourseOptions { try await get("v1/courses/\(id)/options") }
+
+    /// One change: ["op": "length", "km": -10], ["op": "stop", "lat":, "lon":, "name":] or ["op": "start", ...].
+    func tuneCourse(_ id: Int, _ op: [String: Any]) async throws -> Course {
+        let body = try JSONSerialization.data(withJSONObject: op)
+        var req = try request("POST", "v1/courses/\(id)/tune", body: body)
+        req.timeoutInterval = 120
+        return try Self.decoder.decode(Course.self, from: await send(req))
+    }
+
+    func undoCourse(_ id: Int) async throws -> Course {
+        try Self.decoder.decode(Course.self, from: await send(request("POST", "v1/courses/\(id)/undo")))
     }
 
     func recheckCourse(_ id: Int) async throws {

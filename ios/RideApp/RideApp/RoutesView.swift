@@ -279,14 +279,29 @@ struct CourseDetailView: View {
     @State private var allCues = false
     @State private var renaming = false
     @State private var newName = ""
+    @State private var tuning = false
+    @State private var tuneError: String?
+    @State private var options: CourseOptions?
+    @State private var choosing: TuneChoice?
+    @State private var pickingStart = false
+    @State private var picked: CLLocationCoordinate2D?
+
+    enum TuneSheet: String { case stop, start }
+    /// The sheet carries its options, so it never shows a stale (empty) copy.
+    struct TuneChoice: Identifiable { let which: TuneSheet; let options: CourseOptions; var id: String { which.rawValue } }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let c = course, let r = c.report {
                     header(c, r)
-                    RouteMap(report: r).frame(height: 300)
+                    if pickingStart { pickBanner }
+                    RouteMap(report: r, onPick: pickingStart ? { picked = $0 } : nil, picked: picked)
+                        .id("\(c.changes?.count ?? 0)-\(c.km ?? 0)")
+                        .frame(height: 300)
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(pickingStart ? Theme.cobalt : .clear, lineWidth: 3))
                     RoutePanel(report: r)
                     SurfaceBar(report: r)
                     section("What to know") {
@@ -294,6 +309,7 @@ struct CourseDetailView: View {
                             ForEach(r.verdict, id: \.self) { VerdictLine(verdict: $0) }
                         }
                     }
+                    tuneCard(c)
                     exportCard(c)
                     if !r.stops.filter({ !$0.view }).isEmpty { stops(r) }
                     if !r.climbs.isEmpty { climbs(r) }
@@ -331,7 +347,138 @@ struct CourseDetailView: View {
         .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
             if let shareURL { ShareSheet(items: [shareURL]).presentationDetents([.medium, .large]) }
         }
+        .sheet(item: $choosing) { choice in
+            TuneChoices(which: choice.which, options: choice.options, onStop: { s in
+                choosing = nil
+                Task { await tune(["op": "stop", "lat": s.lat, "lon": s.lon, "name": s.name]) }
+            }, onStart: { s in
+                choosing = nil
+                Task { await tune(["op": "start", "lat": s.lat, "lon": s.lon, "label": s.name]) }
+            }, onPickOnMap: {
+                choosing = nil
+                picked = nil
+                pickingStart = true
+            })
+            .presentationDetents([.medium, .large])
+        }
+        .overlay {
+            if tuning {
+                VStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    Text("Finding roads…").font(Theme.text(14, .medium)).foregroundStyle(.white)
+                }
+                .padding(22)
+                .background(Theme.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
         .task { await load() }
+    }
+
+    // MARK: Tuning
+
+    private var pickBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "hand.tap.fill").foregroundStyle(Theme.cobalt)
+            Text(picked == nil ? "Tap the map where you want to start." : "Start at the flag?")
+                .font(Theme.text(14, .medium)).foregroundStyle(Theme.ink)
+            Spacer()
+            if let p = picked {
+                Button("Start here") {
+                    pickingStart = false
+                    Task { await tune(["op": "start", "lat": p.latitude, "lon": p.longitude, "label": "the point you picked"]) }
+                    picked = nil
+                }
+                .font(Theme.text(14, .semibold)).foregroundStyle(Theme.cobalt)
+            }
+            Button("Cancel") { pickingStart = false; picked = nil }
+                .font(Theme.text(14)).foregroundStyle(Theme.inkMuted)
+        }
+        .padding(12)
+        .surfaceCard(radius: 14)
+    }
+
+    private func tuneCard(_ c: Course) -> some View {
+        section("Tune it") {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Shorter or longer, keeping the roads you like").font(Theme.text(14)).foregroundStyle(Theme.inkMuted)
+                    HStack(spacing: 6) {
+                        ForEach([-20, -10, -5, 5, 10, 20], id: \.self) { km in
+                            Button { Task { await tune(["op": "length", "km": km]) } } label: {
+                                Text(km > 0 ? "+\(km)" : "−\(-km)")
+                                    .font(Theme.text(14, .semibold)).frame(maxWidth: .infinity).padding(.vertical, 9)
+                                    .foregroundStyle(Theme.cobalt)
+                                    .background(Theme.cobaltSoft.opacity(0.45), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Text("KM").font(Theme.mono(10)).foregroundStyle(Theme.label)
+                }
+                HStack(spacing: 8) {
+                    tuneButton("Add a stop", icon: "cup.and.saucer") { Task { await openChoices(.stop) } }
+                    tuneButton("Start elsewhere", icon: "flag") { Task { await openChoices(.start) } }
+                }
+                if let tuneError {
+                    Text(tuneError).font(Theme.text(13)).foregroundStyle(Theme.heart)
+                }
+                if let changes = c.changes, !changes.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        MonoLabel("Changes")
+                        ForEach(changes, id: \.self) { ch in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("\(ch.n)").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                                Text(ch.change).font(Theme.text(14)).foregroundStyle(Theme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Button { Task { await undo() } } label: {
+                            Label("Undo the last change", systemImage: "arrow.uturn.backward")
+                                .font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                    }
+                }
+            }
+        }
+        .disabled(tuning)
+    }
+
+    private func tuneButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon).font(Theme.text(14, .semibold))
+                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                .foregroundStyle(Theme.cobalt).overlay(Capsule().stroke(Theme.cobalt, lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openChoices(_ which: TuneSheet) async {
+        if options == nil {
+            do { options = try await APIClient().courseOptions(courseId) } catch { tuneError = error.localizedDescription; return }
+        }
+        if let options { choosing = TuneChoice(which: which, options: options) }
+    }
+
+    private func tune(_ op: [String: Any]) async {
+        tuning = true
+        defer { tuning = false }
+        do {
+            course = try await APIClient().tuneCourse(courseId, op)
+            tuneError = nil
+            options = nil          // the stops near the route have moved with it
+            onChange()
+        } catch {
+            tuneError = error.localizedDescription
+        }
+    }
+
+    private func undo() async {
+        tuning = true
+        defer { tuning = false }
+        do { course = try await APIClient().undoCourse(courseId); options = nil; onChange() }
+        catch { tuneError = error.localizedDescription }
     }
 
     private func header(_ c: Course, _ r: CourseReport) -> some View {
@@ -508,13 +655,99 @@ struct CourseDetailView: View {
     }
 }
 
+// MARK: - Tuning choices
+
+struct TuneChoices: View {
+    let which: CourseDetailView.TuneSheet
+    let options: CourseOptions?
+    var onStop: (CourseOptions.Stop) -> Void
+    var onStart: (CourseOptions.Start) -> Void
+    var onPickOnMap: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if which == .stop {
+                    let stops = options?.stops ?? []
+                    let fill = stops.filter { $0.fillsGap == true }
+                    if stops.isEmpty {
+                        Text("No cafés, shops or water on the map within 3 km of the route.").font(Theme.text(14))
+                    }
+                    if let g = options?.gap, !fill.isEmpty {
+                        Section("Fills the gap, km \(Int(g.fromKm))–\(Int(g.toKm))") {
+                            ForEach(fill) { stopRow($0) }
+                        }
+                    }
+                    Section(fill.isEmpty ? "" : "Elsewhere") {
+                        ForEach(stops.filter { $0.fillsGap != true }) { stopRow($0) }
+                    }
+                } else {
+                    Button(action: onPickOnMap) {
+                        Label("Pick a point on the map", systemImage: "hand.tap").font(Theme.text(16, .medium))
+                            .foregroundStyle(Theme.cobalt)
+                    }
+                    let starts = options?.starts ?? []
+                    if !starts.isEmpty {
+                        Section("On the route") {
+                            ForEach(starts) { s in
+                                Button { onStart(s) } label: {
+                                    HStack {
+                                        Image(systemName: s.kind == "cafe" ? "cup.and.saucer" : "house")
+                                            .foregroundStyle(Theme.inkMuted).frame(width: 22)
+                                        Text(s.name).font(Theme.text(15)).foregroundStyle(Theme.ink)
+                                        Spacer()
+                                        Text("km \(Format.number(s.km, decimals: 1))").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(which == .stop ? "Add a stop" : "Start elsewhere")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func stopRow(_ s: CourseOptions.Stop) -> some View {
+        Button { onStop(s) } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(s.name).font(Theme.text(16, .medium)).foregroundStyle(Theme.ink)
+                Text("Near km \(Format.number(s.km, decimals: 1)) · \(Format.number(s.offM / 1000, decimals: 1)) km off the route · "
+                     + s.what.replacingOccurrences(of: "_", with: " "))
+                    .font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+                if !s.hours.isEmpty { Text(s.hours).font(Theme.mono(11)).foregroundStyle(Theme.label) }
+            }
+        }
+    }
+}
+
 // MARK: - Map
 
 struct RouteMap: View {
     let report: CourseReport
+    /// When set, a tap on the map picks a point (choosing a new start).
+    var onPick: ((CLLocationCoordinate2D) -> Void)? = nil
+    var picked: CLLocationCoordinate2D? = nil
 
     var body: some View {
+        MapReader { proxy in
+            map
+                .onTapGesture { pt in
+                    if let onPick, let c = proxy.convert(pt, from: .local) { onPick(c) }
+                }
+        }
+    }
+
+    private var map: some View {
         Map(initialPosition: .rect(rect)) {
+            if let picked {
+                Annotation("New start", coordinate: picked) {
+                    Image(systemName: "flag.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 26, height: 26).background(Theme.cobalt, in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                }
+            }
             ForEach(Array(report.stretches.enumerated()), id: \.offset) { _, s in
                 MapPolyline(coordinates: s.points.compactMap(coord))
                     .stroke(SurfaceColor.light(s.class), style: StrokeStyle(lineWidth: s.class == "paved" ? 3.5 : 4.5,

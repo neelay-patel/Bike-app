@@ -50,6 +50,8 @@ class Backend:
         self.lock = threading.RLock()
         self.insights = Insights(self, background=background)
         self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
+        self.graph_source = None  # roads to route on when tuning; None: our own map (tests swap it)
+        self.heights = None       # ground heights for tuned routes; None: elevation tiles (tests swap it)
 
     def connector(self, provider: str):
         if provider not in self.registry:
@@ -779,25 +781,33 @@ class Backend:
         with open(row["file"], "rb") as f:
             return read_route(f.read(), name=row["name"])
 
-    def check_course(self, user_id: int, course_id: int) -> None:
+    def _map(self, route, pad_m: Optional[float] = None) -> dict:
+        from rideengine.routes import osm
+        if self.map_source:
+            return self.map_source(route)
+        return osm.corridor(route, pad_m=pad_m or osm.VIEW_M)
+
+    def _course_report(self, user_id: int, route) -> dict:
         from rideengine import places
         from rideengine.analysis import features as feat_mod
         from rideengine.analysis.repeats import bbox as box
-        from rideengine.routes import check, osm
+        from rideengine.routes import check
+        data = self._map(route)
+        with self.lock:
+            feats = self.insights._features(user_id)
+        visible = feat_mod.visible_ids(feats)
+        vfeats = [f for f in feats if f["ride_id"] in visible]
+        known = {tuple(c) for f in vfeats if not f["indoor"] for c in f.get("cells") or []}
+        pace = check.Pace.of(vfeats)
+        names = places.load(box([(p[0], p[1]) for p in route.points[::20]]))
+        return check.check(route, data, pace=pace, known_cells=known, places=names)
+
+    def check_course(self, user_id: int, course_id: int) -> None:
         row = self._course_row(user_id, course_id)
         if row is None:
             return
         try:
-            route = self._course_route(row)
-            data = (self.map_source or osm.corridor)(route)
-            with self.lock:
-                feats = self.insights._features(user_id)
-            visible = feat_mod.visible_ids(feats)
-            vfeats = [f for f in feats if f["ride_id"] in visible]
-            known = {tuple(c) for f in vfeats if not f["indoor"] for c in f.get("cells") or []}
-            pace = check.Pace.of(vfeats)
-            names = places.load(box([(p[0], p[1]) for p in route.points[::20]]))
-            report = check.check(route, data, pace=pace, known_cells=known, places=names)
+            report = self._course_report(user_id, self._course_route(row))
             with self.lock:
                 self.db.execute("UPDATE courses SET status = 'ready', error = NULL, report = ? WHERE course_id = ?",
                                 (json.dumps(report), course_id))
@@ -829,7 +839,145 @@ class Backend:
             return None
         out = self._course_summary(row)
         out["report"] = json.loads(row["report"]) if row["report"] else None
+        out["changes"] = [{"n": v["n"], "change": v["change"]} for v in self._versions(course_id) if v["n"] > 0]
         return out
+
+    # --- tuning (rideengine/routes/tune.py): each change is a version, and can be undone ------------
+    def _versions(self, course_id: int) -> list:
+        with self.lock:
+            return self.db.execute("SELECT * FROM course_versions WHERE course_id = ? ORDER BY n",
+                                   (course_id,)).fetchall()
+
+    def tune_course(self, user_id: int, course_id: int, op: dict) -> Optional[dict]:
+        """op: {"op": "start", "lat", "lon", "label"} | {"op": "stop", "lat", "lon", "name"} |
+        {"op": "length", "km": -10}. Raises TuneError (a message for the rider) when it can't."""
+        from rideengine.routes import tune
+        from rideengine.routes.course import gpx_course
+        from rideengine.routes.router import Prefs
+        row = self._course_row(user_id, course_id)
+        if row is None:
+            return None
+        if row["status"] != "ready":
+            raise tune.TuneError("The route needs checking first.")
+        route = self._course_route(row)
+        report = json.loads(row["report"])
+        prefs = Prefs.for_mix(report.get("gravel_share"))
+        g = self.graph_source(route, prefs) if self.graph_source else tune.graph_for(route, prefs=prefs)
+        if not g.edges:
+            raise tune.TuneError("Tuning works where we have our own map (Ontario) for now.")
+        versions = self._versions(course_id)
+        # Stops the rider added stay on the route through later changes.
+        keep = [(json.loads(v["op"])["lat"], json.loads(v["op"])["lon"]) for v in versions
+                if json.loads(v["op"]).get("op") == "stop"]
+        kind = op.get("op")
+        try:
+            if kind == "start":
+                t = tune.move_start(route, g, float(op["lat"]), float(op["lon"]), label=op.get("label"),
+                                    heights=self.heights)
+            elif kind == "stop":
+                t = tune.add_stop(route, g, float(op["lat"]), float(op["lon"]), name=op.get("name") or "the stop",
+                                  heights=self.heights)
+            elif kind == "length":
+                t = tune.change_length(route, g, float(op["km"]), heights=self.heights, keep=keep)
+            else:
+                raise tune.TuneError("Unknown change: start, stop or length.")
+        except (KeyError, TypeError, ValueError) as e:
+            if isinstance(e, tune.TuneError):
+                raise
+            raise tune.TuneError(f"That change needs more detail ({e}).")
+        new_report = self._course_report(user_id, t.route)
+        folder = os.path.dirname(row["file"])
+        with self.lock:
+            if not versions:   # keep the route as it came in as version 0
+                self.db.execute("INSERT INTO course_versions VALUES (?, 0, ?, 'As it came in', '{}', ?, ?)",
+                                (course_id, row["file"], row["report"], row["created_at"]))
+                n = 1
+            else:
+                n = versions[-1]["n"] + 1
+            path = os.path.join(folder, f"{course_id}.v{n}.gpx")
+            with open(path, "wb") as f:
+                f.write(gpx_course(t.route, {}))
+            self.db.execute("INSERT INTO course_versions VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (course_id, n, path, t.change, json.dumps(op), json.dumps(new_report), db.now()))
+            self.db.execute("UPDATE courses SET file = ?, report = ? WHERE course_id = ?",
+                            (path, json.dumps(new_report), course_id))
+        return self.course(user_id, course_id)
+
+    def undo_course(self, user_id: int, course_id: int) -> Optional[dict]:
+        """Back to the version before the last change."""
+        row = self._course_row(user_id, course_id)
+        if row is None:
+            return None
+        versions = self._versions(course_id)
+        if len(versions) < 2:
+            return self.course(user_id, course_id)
+        last, prev = versions[-1], versions[-2]
+        with self.lock:
+            self.db.execute("DELETE FROM course_versions WHERE course_id = ? AND n = ?", (course_id, last["n"]))
+            self.db.execute("UPDATE courses SET file = ?, report = ? WHERE course_id = ?",
+                            (prev["file"], prev["report"], course_id))
+            if prev["n"] == 0:
+                self.db.execute("DELETE FROM course_versions WHERE course_id = ?", (course_id,))
+        if last["file"] != prev["file"] and os.path.exists(last["file"]):
+            os.remove(last["file"])
+        return self.course(user_id, course_id)
+
+    def course_options(self, user_id: int, course_id: int) -> Optional[dict]:
+        """What the rider can tune towards: stops near the route but off it (for "add a stop"), and
+        places to start from (cafés on the route, towns it passes)."""
+        from rideengine.model import haversine
+        row = self._course_row(user_id, course_id)
+        if row is None or not row["report"]:
+            return None
+        route = self._course_route(row)
+        report = json.loads(row["report"])
+        data = self._map(route, pad_m=3000)
+        pts = route.resample(100)
+        grid: dict = {}
+        for p in pts:
+            grid.setdefault((int(p[0] // 0.01), int(p[1] // 0.014)), []).append(p)
+        stops = []
+        for poi in data["pois"]:
+            if poi["kind"] not in ("food", "shop", "water"):
+                continue
+            ci, cj = int(poi["lat"] // 0.01), int(poi["lon"] // 0.014)
+            near = [q for di in (-1, 0, 1) for dj in (-1, 0, 1) for q in grid.get((ci + di, cj + dj), ())]
+            if not near:
+                continue
+            q = min(near, key=lambda q: haversine(poi["lat"], poi["lon"], q[0], q[1]))
+            off = haversine(poi["lat"], poi["lon"], q[0], q[1])
+            if 60 < off <= 3000 and poi["name"]:
+                stops.append({"name": poi["name"], "kind": poi["kind"], "what": poi["what"], "hours": poi["hours"],
+                              "lat": round(poi["lat"], 6), "lon": round(poi["lon"], 6),
+                              "km": round(q[3] / 1000, 1), "off_m": round(off)})
+        coffee = {"cafe": 0, "bakery": 0, "coffee": 0, "ice_cream": 1}
+        stops.sort(key=lambda x: (coffee.get(x["what"], 2), x["off_m"]))
+        seen, picked = set(), []
+        gap0 = report.get("longest_gap") or {}
+        stops.sort(key=lambda x: (not (gap0.get("from_km", 1e9) + 5 <= x["km"] <= gap0.get("to_km", -1) - 5),
+                                  coffee.get(x["what"], 2), x["off_m"]))
+        for st in stops:
+            if (st["name"], round(st["km"])) not in seen:
+                seen.add((st["name"], round(st["km"])))
+                picked.append(st)
+        starts = [{"name": st["items"][0]["name"] + (f", {st['place']}" if st.get("place") else ""),
+                   "lat": st["items"][0].get("lat", st["lat"]), "lon": st["items"][0].get("lon", st["lon"]),
+                   "km": st["km"], "kind": "cafe"}
+                  for st in report.get("stops", []) if st.get("food")]
+        starts += [{"name": t["name"], "lat": None, "lon": None, "km": t["km"], "kind": "town"}
+                   for t in report.get("towns", [])]
+        for t in starts:   # towns: the route's point nearest the town's km
+            if t["lat"] is None:
+                q = min(pts, key=lambda q: abs(q[3] / 1000 - t["km"]))
+                t["lat"], t["lon"] = round(q[0], 6), round(q[1], 6)
+        # Stops that would fill the longest stretch with no food or water come first in the app.
+        gap = report.get("longest_gap")
+        if gap and gap["km"] < 25:
+            gap = None
+        for st in picked:
+            st["fills_gap"] = bool(gap) and gap["from_km"] + 5 <= st["km"] <= gap["to_km"] - 5
+        return {"stops": sorted(picked[:40], key=lambda x: x["km"]), "starts": sorted(starts, key=lambda x: x["km"]),
+                "gap": gap and {"from_km": gap["from_km"], "to_km": gap["to_km"], "km": gap["km"]}}
 
     def rename_course(self, user_id: int, course_id: int, name: str) -> Optional[dict]:
         with self.lock:
@@ -841,10 +989,13 @@ class Backend:
         row = self._course_row(user_id, course_id)
         if row is None:
             return False
+        files = {row["file"]} | {v["file"] for v in self._versions(course_id)}
         with self.lock:
+            self.db.execute("DELETE FROM course_versions WHERE course_id = ?", (course_id,))
             self.db.execute("DELETE FROM courses WHERE course_id = ?", (course_id,))
-        if row["file"] and os.path.exists(row["file"]):
-            os.remove(row["file"])
+        for f in files:
+            if f and os.path.exists(f):
+                os.remove(f)
         return True
 
     def course_file(self, user_id: int, course_id: int, kind: str = "fit") -> Optional[tuple[bytes, str]]:

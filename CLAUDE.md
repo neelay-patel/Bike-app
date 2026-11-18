@@ -45,8 +45,10 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
   roads and stops along a route: our own map first, `data/osm/map.sqlite3` built by `python -m backend build-map
   data/osm/ontario-latest.osm.pbf` (`backend/mapdata.py`, pyosmium; Geofabrik extract), else cached Overpass tiles; surface classes paved/gravel/rough/trail/singletrack/unknown,
   never guessed), `check.py` (the route check: surfaces, singletrack, stops and refuel gaps, busy roads, straights, climbs,
-  time at the rider's pace, cue sheet, verdict), `course.py` (FIT course with course points for the Edge, GPX). Backend
-  `/v1/courses`; app: Routes tab.
+  time at the rider's pace, cue sheet, verdict), `course.py` (FIT course with course points for the Edge, GPX), and tuning: `router.py` (our own bike router
+  on the local map, gravel-aware costs), `elevation.py` (Terrarium elevation tiles, cached in data/dem/), `tune.py`
+  (new start, add a stop, shorter/longer; each change a version you can undo). Backend `/v1/courses` (+ `/tune`,
+  `/undo`, `/options`); app: Routes tab with a Tune it card.
 - `rideengine/card/`: `ride_card.py`, the collectible ride card in the chosen look (D), from a Ride (privacy zone around home, local or Google fonts); `make_card.py` is the older graphite card (prototype). Served at `GET /v1/rides/{id}/card` and shown at the top of each ride in the app, with Share (asks first when a source isn't cleared for sharing). `python -m backend card --user 1 <ride_id>`.
 - `design/tokens.json` + `docs/design.md`: the look (direction D, 13 Nov 2026). The app's `Theme.swift` copies the tokens (test checks they match); fonts bundled in `ios/RideApp/RideApp/Fonts/` with their licences.
 - `rideengine/__main__.py`: CLI (`python -m rideengine import|rides|show|trends|card`).
