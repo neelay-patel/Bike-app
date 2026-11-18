@@ -91,7 +91,8 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
 
     @app.get("/v1/rides")
     def rides(include_hidden: bool = False, uid: int = Depends(user)):
-        """Newest first. include_hidden=true adds false starts and empty recordings, marked "hidden"."""
+        """Newest first. include_hidden=true adds false starts and empty recordings, marked "hidden". Each ride
+        names its "effort": the id of the main ride of the session it's part of (false starts fold in)."""
         return be.rides(uid, include_hidden)
 
     @app.get("/v1/you")
@@ -368,6 +369,16 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         if html is None:
             raise HTTPException(404, "No such ride")
         return HTMLResponse(html)
+
+    @app.get("/v1/efforts/{ride_id}")
+    def effort(ride_id: str, uid: int = Depends(user)):
+        """The effort (session) a ride belongs to, by the id of any of its rides: its parts, the false starts
+        folded in, and each part's phases (warm-up, structured workout, own riding, pushes, pauses,
+        cool-down) with a power/heart-rate series every 15 s and rule-based lines."""
+        e = be.effort(uid, ride_id)
+        if e is None:
+            raise HTTPException(404, "No such ride")
+        return e
 
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):

@@ -87,8 +87,17 @@ def decode(buf: bytes) -> list[tuple[int, dict]]:
     return out
 
 
+# FIT manufacturer ids for apps that hand their files to Garmin Connect (file_id field 1).
+APP_MAKERS = {260: "Zwift"}
+
+
 def read_fit(path: str, source: str = "garmin", device: str = "Garmin (FIT)") -> Recording:
     msgs = decode(open(path, "rb").read())
+    # A file another app made (Zwift's, synced to Garmin Connect): say so. Its source stays the
+    # provider it came through, whose terms govern it.
+    maker = next((APP_MAKERS.get(v.get(1)) for g, v in msgs if g == 0), None)
+    if maker:
+        device = f"{maker} (via {device.split(' ')[0]})"
     samples: list[Sample] = []
     for g, v in msgs:
         if g != 20 or v.get(253) is None:

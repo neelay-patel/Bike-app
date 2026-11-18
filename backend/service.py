@@ -16,7 +16,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from rideengine.analysis.basics import summary
-from rideengine.clean import hidden_reasons
+from rideengine.analysis import effort as effort_mod
+from rideengine.clean import SESSION_GAP_S, hidden_reasons
 from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
 from rideengine.merge import build_rides
 from rideengine.model import Recording, Ride
@@ -328,6 +329,8 @@ class Backend:
                                    (user_id,)).fetchall()
         rides = [Ride.from_json(r["data"]) for r in rows]
         hide = hidden_reasons(rides)
+        efforts = effort_mod.group(rides)
+        effort_of = {k: rows[e["main"]]["ride_id"] for e in efforts for k in e["parts"] + e["folded"]}
         notes = self.insights.notes(user_id)
         out = []
         for i, (row, ride) in enumerate(zip(rows, rides)):
@@ -336,8 +339,51 @@ class Backend:
             d = describe(row["ride_id"], ride)
             d["hidden"] = hide.get(i)
             d["notes"] = notes.get(row["ride_id"], [])
+            d["effort"] = effort_of.get(i, row["ride_id"])   # the effort (outing) this ride is part of
             out.append(d)
         return out
+
+    def effort(self, user_id: int, ride_id: str) -> Optional[dict]:
+        """The effort a ride belongs to: its parts, the false starts folded into it, and for each part the
+        phases (warm-up, structured workout, own riding, pushes, pauses, cool-down) with rule-based lines.
+        See rideengine/analysis/effort.py."""
+        with self.lock:
+            rows = self.db.execute("SELECT ride_id, start_t, end_t FROM rides WHERE user_id = ? ORDER BY start_t",
+                                   (user_id,)).fetchall()
+            hit = next((r for r in rows if r["ride_id"] == ride_id), None)
+            if hit is None:
+                return None
+            gap = SESSION_GAP_S
+            near = [r["ride_id"] for r in rows if r["end_t"] >= hit["start_t"] - 3 * gap and r["start_t"] <= hit["end_t"] + 3 * gap]
+            data = {r["ride_id"]: r["data"] for r in self.db.execute(
+                f"SELECT ride_id, data FROM rides WHERE user_id = ? AND ride_id IN ({','.join('?' * len(near))})",
+                (user_id, *near))}
+        ids = [i for i in near if i in data]
+        rides = [Ride.from_json(data[i]) for i in ids]
+        e = next(x for x in effort_mod.group(rides) if ids.index(ride_id) in x["parts"] + x["folded"])
+        parts = []
+        for k in e["parts"]:
+            d = describe(ids[k], rides[k])
+            d["phases"] = effort_mod.phases(rides[k])
+            parts.append(d)
+        folded = [{"ride_id": ids[k], "reason": e["reasons"].get(k), "start": rides[k].start,
+                   "minutes": round((rides[k].end - rides[k].start) / 60, 1)} for k in e["folded"]]
+        lines = []
+        starts = [f for f in folded if f["reason"] == "false_start"]
+        if starts:
+            mins = sorted(round(f["minutes"]) for f in starts)
+            each = f"{mins[0]} min each" if len(set(mins)) == 1 else f"{', '.join(str(m) for m in mins)} min"
+            lines.append(f"{len(starts)} false starts ({each}) left out of this effort." if len(starts) > 1
+                         else f"A false start ({mins[0]} min) left out of this effort.")
+        for n, part in enumerate(parts):
+            if len(parts) > 1:
+                at = datetime.fromtimestamp(part["summary"]["start"], self.insights.tz(user_id)).strftime("%H:%M")
+                lines.append(f"Part {n + 1}, from {at}:")
+            lines += part["phases"]["lines"]
+        return {"effort_id": ids[e["main"]], "parts": parts, "folded": folded, "lines": lines,
+                "use": parts[0]["use"] if len(parts) == 1 else {
+                    u: {"allowed": all(p["use"][u]["allowed"] for p in parts),
+                        "blocked_by": sorted({b for p in parts for b in p["use"][u]["blocked_by"]})} for u in ("ai", "share")}}
 
     def visible_rides(self, user_id: int) -> list[Ride]:
         with self.lock:

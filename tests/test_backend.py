@@ -222,6 +222,13 @@ def test_rides_hide_false_starts_unless_asked(env):
     assert len(client.get("/v1/rides").json()) == 1
     every = client.get("/v1/rides?include_hidden=true").json()
     assert sorted(str(d["hidden"]) for d in every) == ["None", "false_start"]
+    # Both belong to one effort, named after the real ride; the false start is folded into it.
+    main = next(d["ride_id"] for d in every if d["hidden"] is None)
+    assert {d["effort"] for d in every} == {main}
+    e = client.get(f"/v1/efforts/{every[-1]['ride_id']}").json()
+    assert e["effort_id"] == main and [f["reason"] for f in e["folded"]] == ["false_start"]
+    assert e["lines"][0].startswith("A false start") and "phases" in e["parts"][0]
+    assert client.get("/v1/efforts/123").status_code == 404
 
 
 def test_you_and_ride_notes(env):

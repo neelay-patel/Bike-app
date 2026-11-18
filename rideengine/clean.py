@@ -144,6 +144,11 @@ EMPTY_MOVING_S = 60
 TINY_KM = 3.0
 TINY_MOVING_S = 15 * 60
 SESSION_GAP_S = 90 * 60   # rides this close together are one outing
+# Indoors there's no distance to judge by: a trainer session under INDOOR_TINY_S (e.g. the Watch started,
+# then the Zwift ride changed, twice, before the real one) is a false start next to a longer session;
+# under INDOOR_EMPTY_S on its own, it's empty.
+INDOOR_TINY_S = 5 * 60
+INDOOR_EMPTY_S = 60
 
 
 def _size(ride) -> tuple[float, float]:
@@ -169,7 +174,9 @@ def hidden_reasons(rides: list) -> dict[int, str]:
     reasons: dict[int, str] = {}
     for i in order:
         if rides[i].indoor:
-            continue  # trainer sessions have no distance to judge by
+            if rides[i].end - rides[i].start < INDOOR_EMPTY_S:
+                reasons[i] = "empty"
+            continue  # trainer sessions have no distance to judge by: length in time instead
         km, moving = size[i]
         if km < EMPTY_KM or moving < EMPTY_MOVING_S:
             reasons[i] = "empty"
@@ -184,14 +191,18 @@ def hidden_reasons(rides: list) -> dict[int, str]:
         outings.append(outing)
 
     def tiny(i):
+        if rides[i].indoor:
+            return rides[i].end - rides[i].start < INDOOR_TINY_S
         km, moving = size[i]
         return km < TINY_KM and moving < TINY_MOVING_S
 
     for o in outings:
-        if any(not tiny(i) and i not in reasons for i in o):
-            for i in o:
-                if tiny(i) and i not in reasons and not rides[i].indoor:
-                    reasons[i] = "false_start"
+        for i in o:
+            if not tiny(i) or i in reasons:
+                continue
+            # Folded into a real session of the same kind (indoor with indoor, outdoor with outdoor).
+            if any(not tiny(j) and j not in reasons and rides[j].indoor == rides[i].indoor for j in o):
+                reasons[i] = "false_start"
     return reasons
 
 

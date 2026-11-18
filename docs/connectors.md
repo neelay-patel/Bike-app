@@ -17,7 +17,11 @@ The coach (`docs/coaching.md`) is only as good as the data, so: **every source, 
   to it, so Coros, Polar, Suunto, Peloton... riders often arrive this way) and **Garmin Connect** (Zwift and
   many training apps sync to it).
 - **Zwift: link it to Garmin Connect** (Zwift → Settings → Connections). Every Zwift ride then reaches us
-  through the Garmin connector with power, cadence and virtual distance. Nothing to build.
+  through the Garmin connector with power, cadence, virtual distance and virtual elevation. Nothing to build.
+  Neelay linked his on 18 Nov 2026 (new rides only, it seems: the Garmin sync that day found nothing from
+  before). The file is labelled "Zwift (via Garmin)" (FIT manufacturer 260), stays under Garmin's terms in
+  `SOURCE_POLICY`, and its virtual climbing shows on the ride but never counts in tallies. Still to check
+  on the first one: that the Garmin search (activityType=cycling) returns virtual rides.
 - **Being good at sources** also means: history on day one (check what Garmin's business tier allows; it
   pushes new rides only); sync health per source (last synced, flag when quiet); gap spotting (a Watch
   ride with no Garmin copy); merging, never duplicating.

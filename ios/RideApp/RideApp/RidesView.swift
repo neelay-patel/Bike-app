@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Merged rides from the backend, newest first, in the D look (docs/design.md).
+/// Efforts, newest first, in the D look (docs/design.md): each one the real ride of a session, with its false
+/// starts (and any other part of the same outing) folded in.
 struct RidesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
@@ -8,8 +9,16 @@ struct RidesView: View {
     @AppStorage("rides.showHidden") private var showHidden = false
 
     private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
-    private var shown: [RideSummary] { showHidden ? model.rides : visible }
+    /// One row per effort: its main ride. Showing hidden ones lists every recording.
+    private var shown: [RideSummary] {
+        showHidden ? model.rides : visible.filter { $0.effort == nil || $0.effort == $0.rideId }
+    }
     private var hiddenCount: Int { model.rides.count - visible.count }
+
+    private func folded(_ ride: RideSummary) -> (falseStarts: Int, parts: Int) {
+        let mine = model.rides.filter { $0.effort == ride.rideId && $0.rideId != ride.rideId }
+        return (mine.filter { $0.hidden != nil }.count, mine.filter { $0.hidden == nil }.count)
+    }
 
     var body: some View {
         NavigationStack {
@@ -17,7 +26,7 @@ struct RidesView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         if let month = MonthTotal(rides: visible) { MonoLabel(month.title) }
-                        Text("Rides").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+                        Text("Efforts").font(Theme.heading(44)).foregroundStyle(Theme.ink)
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
@@ -35,7 +44,9 @@ struct RidesView: View {
                     }
                     LazyVStack(spacing: 8) {
                         ForEach(shown) { ride in
-                            NavigationLink { RideDetailView(ride: ride) } label: { RideRow(ride: ride) }
+                            NavigationLink { RideDetailView(ride: ride) } label: {
+                                RideRow(ride: ride, folded: showHidden ? (0, 0) : folded(ride))
+                            }
                                 .buttonStyle(.plain)
                                 .contextMenu {
                                     Button("Delete ride", systemImage: "trash", role: .destructive) { deleting = ride }
@@ -88,11 +99,13 @@ struct MonthTotal {
     init?(rides all: [RideSummary]) {
         guard let latest = all.map(\.date).max() else { return nil }
         let cal = Calendar.current
+        // One per effort: other parts of the same session count with their main ride.
         let month = all.filter { cal.isDate($0.date, equalTo: latest, toGranularity: .month) }
+        let efforts = month.filter { $0.effort == nil || $0.effort == $0.rideId }.count
         title = latest.formatted(.dateTime.month(.wide).year())
         km = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.km) }  // trainer km aren't road km
-        rides = month.count
-        climbed = month.reduce(0) { $0 + ($1.summary.ascentM ?? 0) }
+        rides = efforts
+        climbed = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.ascentM ?? 0) }  // nor its virtual climbing
         longest = month.map { $0.noDistance ? 0 : $0.summary.km }.max() ?? 0
         hours = month.reduce(0) { $0 + $1.summary.movingH }
     }
@@ -110,14 +123,14 @@ struct MonthHero: View {
                     Text(Format.duration(hours: month.hours)).font(Theme.hero(64))
                     Text("hours").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
                 }
-                Text("\(month.rides) ride\(month.rides == 1 ? "" : "s"), all indoors")
+                Text("\(month.rides) effort\(month.rides == 1 ? "" : "s"), all indoors")
                     .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Format.hero(month.km, decimals: 0)).font(Theme.hero(64))
                     Text("km").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
                 }
-                Text("\(month.rides) ride\(month.rides == 1 ? "" : "s") · \(Format.number(month.climbed, decimals: 0)) m climbed · longest \(Format.number(month.longest, decimals: 1)) km")
+                Text("\(month.rides) effort\(month.rides == 1 ? "" : "s") · \(Format.number(month.climbed, decimals: 0)) m climbed · longest \(Format.number(month.longest, decimals: 1)) km")
                     .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
             }
         }
@@ -131,6 +144,8 @@ struct MonthHero: View {
 
 struct RideRow: View {
     let ride: RideSummary
+    /// False starts and other parts of the same session, folded into this effort.
+    var folded: (falseStarts: Int, parts: Int) = (0, 0)
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -167,6 +182,12 @@ struct RideRow: View {
                 }
                 if let hidden = ride.hidden {
                     MonoLabel(hidden == "empty" ? "Empty recording" : "False start")
+                }
+                if folded.parts > 0 || folded.falseStarts > 0 {
+                    Text([folded.parts > 0 ? "+ \(folded.parts) more part\(folded.parts == 1 ? "" : "s")" : nil,
+                          folded.falseStarts > 0 ? "\(folded.falseStarts) false start\(folded.falseStarts == 1 ? "" : "s") folded in" : nil]
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(Theme.mono(11)).foregroundStyle(Theme.label)
                 }
             }
             Spacer(minLength: 0)
@@ -213,6 +234,9 @@ struct RideDetailView: View {
 
                 // The collectible card first: it's the ride's story, and what gets shared.
                 RideCard(renderer: card, rideId: ride.rideId)
+
+                // What you did: the session's phases, read from the samples.
+                EffortPanel(rideId: ride.rideId)
 
                 if let notes = ride.notes, !notes.isEmpty {
                     NoteList(notes: notes)
@@ -593,5 +617,145 @@ enum DeleteRide {
         let from = Format.sourceList(ride.sources)
         return "\(day), \(km) km. Its recordings (\(from)) are deleted from the server and won't come back on the next "
             + "sync. They stay in \(from) itself. This can't be undone."
+    }
+}
+
+
+// MARK: - Effort: what you did
+
+/// The session's phases (warm-up, structured workout, own riding, pauses, cool-down) as a strip under the
+/// power (or heart-rate) trace, then the story in words. From GET /v1/efforts/{id}.
+struct EffortPanel: View {
+    let rideId: String
+    @State private var effort: Effort?
+    @State private var failed = false
+
+    private var part: Effort.Part? {
+        effort.flatMap { e in e.parts.first { $0.rideId == rideId } ?? e.parts.first }
+    }
+
+    var body: some View {
+        Group {
+            if let effort, let part {
+                VStack(alignment: .leading, spacing: 12) {
+                    MonoLabel("What you did")
+                    if !part.phases.phases.isEmpty {
+                        EffortChart(phases: part.phases).frame(height: 132)
+                        PhaseLegend(phases: part.phases.phases)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(effort.lines.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(Theme.inkMuted)
+                                    .frame(width: 12)
+                                Text(line).font(Theme.text(15)).foregroundStyle(Theme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16).surfaceCard()
+            } else if !failed {
+                ProgressView().frame(maxWidth: .infinity).padding(16)
+            }
+        }
+        .task(id: rideId) {
+            do { effort = try await APIClient().effort(rideId) } catch { failed = true }
+        }
+    }
+}
+
+enum PhaseStyle {
+    static func color(_ kind: String) -> Color {
+        switch kind {
+        case "warm_up": return Theme.sand
+        case "structured": return Theme.cobalt
+        case "riding": return Theme.strip
+        case "cool_down": return Theme.cobaltSoft
+        default: return Theme.line            // pause
+        }
+    }
+
+    static func name(_ kind: String) -> String {
+        switch kind {
+        case "warm_up": return "Warm-up"
+        case "structured": return "Workout"
+        case "riding": return "Own riding"
+        case "cool_down": return "Cool-down"
+        default: return "Pause"
+        }
+    }
+}
+
+struct EffortChart: View {
+    let phases: Effort.Phases
+
+    var body: some View {
+        Canvas { ctx, size in
+            let strip: CGFloat = 12, gap: CGFloat = 6, axis: CGFloat = 14
+            let plotH = size.height - strip - gap - axis
+            let total = max(phases.phases.map(\.endS).max() ?? 1, 1)
+            func x(_ t: Double) -> CGFloat { CGFloat(t / total) * size.width }
+            let watts = phases.basis == "power"
+            let pts: [(Double, Double)] = phases.series.compactMap { row in
+                guard let t = row.first ?? nil else { return nil }
+                let v = watts ? (row.count > 1 ? row[1] : nil) : (row.count > 2 ? row[2] : nil)
+                return v.map { (t, $0) }
+            }
+            // Phase bands behind the trace, and the strip under it.
+            for p in phases.phases where p.kind != "pause" {
+                let r = CGRect(x: x(p.startS), y: 0, width: max(1, x(p.endS) - x(p.startS)), height: plotH)
+                ctx.fill(Path(r), with: .color(PhaseStyle.color(p.kind).opacity(0.10)))
+            }
+            for p in phases.phases {
+                let r = CGRect(x: x(p.startS), y: plotH + gap, width: max(1, x(p.endS) - x(p.startS)), height: strip)
+                ctx.fill(Path(roundedRect: r, cornerRadius: 2), with: .color(PhaseStyle.color(p.kind)))
+            }
+            // Pushes (or heavier stretches): ticks above the strip.
+            for p in phases.pushes {
+                let r = CGRect(x: x(p.startS), y: plotH - 3, width: max(2, x(p.endS) - x(p.startS)), height: 3)
+                ctx.fill(Path(r), with: .color(Theme.heart))
+            }
+            guard pts.count > 1 else { return }
+            let lo = min(pts.map(\.1).min()!, watts ? 0 : 60), hi = max(pts.map(\.1).max()!, lo + 20)
+            func y(_ v: Double) -> CGFloat { 4 + CGFloat(1 - (v - lo) / (hi - lo)) * (plotH - 8) }
+            var line = Path()
+            line.addLines(pts.map { CGPoint(x: x($0.0), y: y($0.1)) })
+            ctx.stroke(line, with: .color(watts ? Theme.ink : Theme.heart), lineWidth: 1.4)
+            let unit = watts ? "W" : "BPM"
+            ctx.draw(Text("\(Int(hi)) \(unit)").font(Theme.mono(10)).foregroundColor(Theme.label),
+                     at: CGPoint(x: 0, y: 6), anchor: .leading)
+            ctx.draw(Text("0").font(Theme.mono(10)).foregroundColor(Theme.label),
+                     at: CGPoint(x: 0, y: size.height - 5), anchor: .leading)
+            ctx.draw(Text(Format.clock(total)).font(Theme.mono(10)).foregroundColor(Theme.label),
+                     at: CGPoint(x: size.width, y: size.height - 5), anchor: .trailing)
+        }
+        .accessibilityLabel("Phases: " + phases.phases.filter { $0.kind != "pause" }
+            .map { "\(PhaseStyle.name($0.kind)) \(Int($0.minutes.rounded())) minutes" }.joined(separator: ", "))
+    }
+}
+
+struct PhaseLegend: View {
+    let phases: [Effort.Phase]
+
+    private var kinds: [(String, Double)] {
+        var order: [String] = [], mins: [String: Double] = [:]
+        for p in phases where p.kind != "pause" {
+            if mins[p.kind] == nil { order.append(p.kind) }
+            mins[p.kind, default: 0] += p.minutes
+        }
+        return order.map { ($0, mins[$0]!) }
+    }
+
+    var body: some View {
+        FlowLayout(spacing: 10) {
+            ForEach(kinds, id: \.0) { kind, minutes in
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 2).fill(PhaseStyle.color(kind)).frame(width: 10, height: 10)
+                    Text("\(PhaseStyle.name(kind)) \(Int(minutes.rounded())) min").font(Theme.mono(11)).foregroundStyle(Theme.inkMuted)
+                }
+            }
+        }
     }
 }

@@ -97,9 +97,9 @@ struct ContentView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            // Your own bike: in its colours when you're on Rides, an outline otherwise.
+            // Your own bike: in its colours when you're on Efforts, an outline otherwise.
             RidesView().tabItem {
-                Label { Text("Rides") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
+                Label { Text("Efforts") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
             }.tag(0)
             PlanView().tabItem { Label("Plan", systemImage: "calendar") }.tag(1)
             RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)

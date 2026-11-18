@@ -34,6 +34,12 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
 - `rideengine/clean.py`: leaves out stretches that weren't riding (bike computer left on in a car: sustained >65 km/h, cut between the surrounding long stops). Merge then redoes the affected totals and lists the cut in `Ride.excluded`. `hidden_reasons()`/`visible()` mark false starts and empty recordings (kept, but left out of lists and trends).
 - `rideengine/store.py`: JSON file store under `data/store/` (keeps all recordings, rebuilds rides). Placeholder for a real DB.
 - `rideengine/analysis/`: `basics` (moving time, stops, summary), `climbs` (detect + match across rides), `fitness` (efficiency, TRIMP, fitness/fatigue), `records` (tallies, streaks, personal bests, and each ride's rule-based notes such as "your longest ride yet", worked out as of the ride's date), `features` (what each ride contributes, extracted once: totals, grid cells, detected climbs), `repeats` (repeated routes incl. the home loop, and repeated climbs timed between fixed start/finish points like segments, named from GeoNames; works incrementally on stored features), `wellness` (heart-rate recovery after rides; HRV, resting HR and VO2 max against the rider's own usual range; see `docs/recovery.md`), `simpower` (SIMULATED power, prototyping only).
+- `rideengine/analysis/effort.py` (18 Nov 2026): Rides became **Efforts** in the app. An effort is a session: the real
+  ride with its false starts folded in (indoor too: a trainer session under 5 min next to a longer one), other rides of
+  the same kind in the same outing as parts, and phases read from the samples: warm-up, structured workout (steady
+  blocks held within a few watts = trainer in ERG), own riding with harder pushes (power, or torque at held power =
+  indoor climbs), pauses, cool-down, heart rate at matched power early vs late, climbs. Rule-based lines; an AI may
+  retell them later, only from these numbers. API `GET /v1/efforts/{any ride id}`; `/v1/rides` items carry `effort`.
 - `rideengine/analysis/headline.py`: the four headline numbers on top of You (17 Nov 2026): sustained power (FTP),
   punch (best minute), efficiency (W/beat on steady trainer stretches, else m/beat on flat steady outdoor minutes) and
   durability (late vs early efficiency on 2 h+ rides). Targets come from the goal and are kept with it (fixed baseline);
@@ -66,7 +72,8 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
 - **Strava is not a data source.** Its API terms bar AI use and showing a user's data to others.
 - Prefer device totals (barometric climbing, moving time, wearable calories) over values derived from GPS. Record where every value came from.
 - **Simulated power must always be labelled** (SIM) and never feed real totals (calories, load).
-- A trainer's km aren't road km: indoor rides count 0 km in tallies, bests and month totals (17 Nov 2026), and show
+- A trainer's km aren't road km, nor its climbing (Zwift's virtual metres, 18 Nov 2026): indoor rides count 0 km and
+  0 m in tallies, bests and month totals (17 Nov 2026), and show
   time, power and heart rate instead. Average power is over pedalling time (zeros left out), as Zwift shows it.
 - Calories: the wearable wins (Neelay's call), then energy from measured power, then the head unit.
 - Python 3.11+, standard library only for the engine (keeps it portable to a backend). pytest for tests.

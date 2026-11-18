@@ -69,6 +69,48 @@ struct Connection: Decodable, Identifiable {
     let recordings: Int
 }
 
+/// What the rider did in a session: the real ride(s), the false starts folded in, and the phases worked out
+/// from the samples (GET /v1/efforts/{id}; rideengine/analysis/effort.py).
+struct Effort: Decodable {
+    let effortId: String
+    let parts: [Part]
+    let folded: [Folded]
+    /// Rule-based words, in order: what happened.
+    let lines: [String]
+
+    struct Part: Decodable {
+        let rideId: String
+        let phases: Phases
+    }
+
+    struct Folded: Decodable {
+        let rideId: String
+        let reason: String?
+        let minutes: Double
+    }
+
+    struct Phases: Decodable {
+        /// "power" or "heart_rate": what the phases were read from.
+        let basis: String
+        let phases: [Phase]
+        let pushes: [Phase]
+        /// Every 15 s: [seconds from start, watts or nil, bpm or nil].
+        let series: [[Double?]]
+    }
+
+    struct Phase: Decodable {
+        /// warm_up | structured | riding | pause | cool_down | push
+        let kind: String
+        let startS: Double
+        let endS: Double
+        let minutes: Double
+        let power: Double?
+        let cadence: Double?
+        let hr: Double?
+        let hrMax: Double?
+    }
+}
+
 struct RideSummary: Decodable, Identifiable {
     var id: String { rideId }
     let rideId: String
@@ -81,6 +123,8 @@ struct RideSummary: Decodable, Identifiable {
     let excluded: [Excluded]?
     /// What's notable about this ride, best first (rule-based, as of the ride's date).
     let notes: [RideNote]?
+    /// The effort (session) this ride is part of: the id of its main ride. False starts point at the real one.
+    let effort: String?
 
     /// A stretch left out because it wasn't riding (e.g. the bike computer left on in a car).
     struct Excluded: Decodable {
@@ -808,6 +852,10 @@ struct APIClient {
     func connections() async throws -> [Connection] { try await get("v1/connections") }
 
     /// Every ride, false starts included (marked `hidden`), so the app can show or hide them.
+    func effort(_ rideId: String) async throws -> Effort {
+        try await get("v1/efforts/\(rideId)")
+    }
+
     func rides() async throws -> [RideSummary] {
         try await get("v1/rides", query: [URLQueryItem(name: "include_hidden", value: "true")])
     }
