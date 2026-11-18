@@ -138,8 +138,9 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 4. **Routes, next:** Garmin Courses API for one-tap sending (with the Starter tier); scenery scoring; starts at a café
    or car park rather than a town centre; move a one-way's destination in tuning; people to ride with
    (`docs/routes.md`).
-5. **Other riders:** Garmin Starter tier (OAuth + push webhook); host the backend; slim the store first (every
-   ride's per-second samples are stored twice as JSON: 170 MB for 97 rides).
+5. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
+   (every ride's per-second samples are stored twice as JSON), delete account, Sign in with Apple, host the backend
+   (also ends the home Wi-Fi limit), Garmin Starter tier (OAuth + push webhook, apply early), privacy policy, TestFlight.
 6. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's
    terms in full and fill in `SOURCE_POLICY`.
 
