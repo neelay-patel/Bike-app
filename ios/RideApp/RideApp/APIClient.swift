@@ -854,6 +854,8 @@ struct CourseReport: Decodable {
 
 struct APIError: LocalizedError {
     let message: String
+    /// The HTTP status, when the server answered (401: token not accepted).
+    var status: Int? = nil
     var errorDescription: String? { message }
 }
 
@@ -887,7 +889,7 @@ struct APIClient {
         guard (200..<300).contains(status) else {
             struct ErrorBody: Decodable { let error: String?; let detail: String? }
             let body = try? Self.decoder.decode(ErrorBody.self, from: data)
-            throw APIError(message: body?.error ?? body?.detail ?? "Server error \(status)")
+            throw APIError(message: body?.error ?? body?.detail ?? "Server error \(status)", status: status)
         }
         return data
     }

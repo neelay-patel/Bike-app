@@ -1,58 +1,55 @@
 import SwiftUI
 import WebKit
 
-/// The fun bucket, at the bottom of You: your rider card, your bike, the badges you've earned (and how
-/// close the rest are), and the season binder: every ride's card in order, shiny holo cards for
-/// personal bests, empty slots for the weeks you didn't ride. From GET /v1/collection.
-struct BinderSection: View {
+/// The top of You: your rider card (top trumps: five ratings out of 99 from your last 12 months, the
+/// overall and your rider type), with Share, your avatar and your bike. Numbers from GET /v1/collection,
+/// the card drawn by the server (GET /v1/rider-card).
+struct RiderCardSection: View {
     @EnvironmentObject var model: AppModel
-    @State private var collection: CollectionSummary?
-    @State private var error: String?
-    @State private var year: Int?
     @State private var builder: BuilderMode?
+    @State private var showBike = false
+    @State private var editAfterBike = false
+    @State private var shareImage: UIImage?
     @StateObject private var riderCard = CardRenderer()
 
+    private var hasAvatar: Bool { model.collection?.rider.avatar != nil }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                SectionTitle("Binder").padding(.horizontal, -4)
-                if let c = collection {
-                    MonoLabel("\(c.rider.badgesEarned) of \(c.rider.badgesTotal) badges · \(c.binder.first?.cards.count ?? 0) cards this season")
-                }
-            }
-            .padding(.horizontal, 4)
-
-            if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
-
-            if let c = collection, c.rider.avatar == nil {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.collection != nil, !hasAvatar {
                 MakeAvatarPrompt { builder = .quick }
             }
             CardFrame(renderer: riderCard)
-            HStack {
-                Button(collection?.rider.avatar == nil ? "Make your avatar" : "Edit avatar") {
-                    builder = collection?.rider.avatar == nil ? .quick : .full
+            HStack(spacing: 8) {
+                Button { Task { shareImage = await riderCard.image() } } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(SecondaryButton())
-                Spacer()
-                if let c = collection {
-                    Text("\(c.rider.type) · \(c.rider.overall) overall")
-                        .font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
-                }
+                .disabled(!riderCard.isLoaded)
+                Button(hasAvatar ? "Edit avatar" : "Make avatar") { builder = hasAvatar ? .full : .quick }
+                Button { showBike = true } label: { Label("Your bike", systemImage: "bicycle") }
             }
-
-            YourBike(spec: model.bike) { builder = .full }
-
-            if let c = collection {
-                BadgeGrid(badges: c.badges, rides: model.rides)
-                if !c.binder.isEmpty {
-                    BinderPages(pages: c.binder, year: $year, rides: model.rides)
-                }
-            }
+            .buttonStyle(SecondaryButton())
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
         }
-        // Reload when rides arrive (pull to refresh on You updates them).
-        .task(id: model.you?.all.rides) { await load(force: collection != nil) }
-        .sheet(item: $builder, onDismiss: { Task { await load(force: true) } }) { mode in
+        // Redraw when new rides change the ratings.
+        .task(id: model.collection?.rider.rides) { await load(force: riderCard.isLoaded) }
+        .sheet(item: $builder, onDismiss: { Task { await model.refresh(); await load(force: true) } }) { mode in
             AvatarBuilder(quick: mode == .quick).environmentObject(model)
+        }
+        .sheet(isPresented: $showBike, onDismiss: {
+            if editAfterBike { editAfterBike = false; builder = .full }
+        }) {
+            VStack(spacing: 14) {
+                YourBike(spec: model.bike) { editAfterBike = true; showBike = false }
+                Button("Change your bike") { editAfterBike = true; showBike = false }.buttonStyle(PrimaryButton())
+            }
+                .padding(16)
+                .presentationDetents([.medium])
+                .presentationBackground(Theme.ground)
+        }
+        .sheet(isPresented: Binding(get: { shareImage != nil }, set: { if !$0 { shareImage = nil } })) {
+            if let shareImage { ShareSheet(items: [shareImage]).presentationDetents([.medium, .large]) }
         }
     }
 
@@ -62,19 +59,13 @@ struct BinderSection: View {
     }
 
     private func load(force: Bool) async {
-        do {
-            collection = try await APIClient().collection()
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
         await riderCard.load(force: force) { try await APIClient().riderCardHTML() }
     }
 }
 
 // MARK: - Badges
 
-private struct BadgeGrid: View {
+struct BadgeGrid: View {
     let badges: [CollectionSummary.Badge]
     let rides: [RideSummary]
     @State private var showAll = false
@@ -83,9 +74,9 @@ private struct BadgeGrid: View {
         let earned = badges.filter(\.earned).sorted { ($0.date ?? "") > ($1.date ?? "") }
         let next = badges.filter { !$0.earned }.sorted { $0.progress.value / $0.progress.target > $1.progress.value / $1.progress.target }
         VStack(alignment: .leading, spacing: 8) {
-            MonoLabel("Badges").padding(.horizontal, 4).padding(.top, 6)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
-                ForEach(showAll ? earned + next : earned + next.prefix(3)) { badge in
+                // The latest three earned and the three closest; the rest behind "Show all".
+                ForEach(showAll ? earned + next : Array(earned.prefix(3)) + Array(next.prefix(3))) { badge in
                     if let rid = badge.rideId, let ride = rides.first(where: { $0.rideId == rid }) {
                         NavigationLink { RideDetailView(ride: ride) } label: { BadgeTile(badge: badge) }.buttonStyle(.plain)
                     } else {
@@ -93,7 +84,7 @@ private struct BadgeGrid: View {
                     }
                 }
             }
-            if next.count > 3 {
+            if earned.count > 3 || next.count > 3 {
                 Button(showAll ? "Show fewer" : "Show all \(badges.count) badges") { showAll.toggle() }
                     .font(Theme.text(14, .medium)).tint(Theme.cobalt).padding(.horizontal, 4)
             }
@@ -101,7 +92,7 @@ private struct BadgeGrid: View {
     }
 }
 
-private struct BadgeTile: View {
+struct BadgeTile: View {
     let badge: CollectionSummary.Badge
 
     var body: some View {
@@ -150,68 +141,10 @@ private struct BadgeTile: View {
     }
 }
 
-// MARK: - Binder
-
-private struct BinderPages: View {
-    let pages: [CollectionSummary.BinderPage]
-    @Binding var year: Int?
-    let rides: [RideSummary]
-
-    var body: some View {
-        let page = pages.first { $0.year == year } ?? pages[0]
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                MonoLabel("Season binder")
-                Spacer()
-                if pages.count > 1 {
-                    Picker("Year", selection: Binding(get: { page.year }, set: { year = $0 })) {
-                        ForEach(pages) { Text(String($0.year)).tag($0.year) }
-                    }
-                    .pickerStyle(.segmented).frame(maxWidth: 180)
-                }
-            }
-            .padding(.horizontal, 4).padding(.top, 6)
-            Text("\(page.cards.count) rides · \(page.holo) holo · \(page.gaps.count) week\(page.gaps.count == 1 ? "" : "s") missed")
-                .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).padding(.horizontal, 4)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(slots(page)) { slot in
-                    switch slot.kind {
-                    case .card(let card):
-                        if let ride = rides.first(where: { $0.rideId == card.rideId }) {
-                            NavigationLink { RideDetailView(ride: ride) } label: { MiniCard(card: card) }.buttonStyle(.plain)
-                        } else {
-                            MiniCard(card: card)
-                        }
-                    case .gap(let week):
-                        GapSlot(week: week)
-                    }
-                }
-            }
-        }
-    }
-
-    struct Slot: Identifiable {
-        enum Kind { case card(CollectionSummary.BinderCard), gap(String) }
-        let id: String
-        let kind: Kind
-    }
-
-    /// Cards and empty weeks together, in week order.
-    private func slots(_ page: CollectionSummary.BinderPage) -> [Slot] {
-        let cards = page.cards.map { Slot(id: $0.rideId, kind: .card($0)) }
-        let gaps = page.gaps.map { Slot(id: "gap-\($0)", kind: .gap($0)) }
-        func key(_ s: Slot) -> String {
-            switch s.kind {
-            case .card(let c): return c.week + "-" + String(format: "%012.0f", c.start)
-            case .gap(let w): return w
-            }
-        }
-        return (cards + gaps).sorted { key($0) < key($1) }
-    }
-}
+// MARK: - Cards in miniature (Efforts: your collection)
 
 /// A ride's card in miniature: number, the route's outline, distance. Holo cards shimmer.
-private struct MiniCard: View {
+struct MiniCard: View {
     let card: CollectionSummary.BinderCard
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
@@ -219,7 +152,7 @@ private struct MiniCard: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("No. \(card.number)").font(Theme.mono(9)).tracking(0.8)
+                Text(card.number > 0 ? "No. \(card.number)" : "NEW").font(Theme.mono(9)).tracking(0.8)
                 Spacer()
                 if card.holo { Text("★ PB").font(Theme.mono(9)) }
             }
@@ -270,8 +203,8 @@ private struct MiniCard: View {
     }
 }
 
-/// A week with no ride: an empty slot in the binder, the same shape as a card.
-private struct GapSlot: View {
+/// A week with no ride: an empty slot in the collection, the same shape as a card.
+struct GapSlot: View {
     let week: String
 
     var body: some View {
@@ -515,8 +448,8 @@ struct AvatarBuilder: View {
     }
 }
 
-/// Your bike, under the rider card. Tap to change it.
-private struct YourBike: View {
+/// Your bike (from You, under the rider card). Tap to change it.
+struct YourBike: View {
     let spec: BikeSpec
     let edit: () -> Void
 

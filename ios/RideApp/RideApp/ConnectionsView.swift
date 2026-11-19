@@ -21,9 +21,7 @@ struct ConnectionsView: View {
                         .accessibilityLabel("Settings")
                     }
                     .padding(.horizontal, 4).padding(.top, 8)
-                    if let error = model.error {
-                        Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
-                    }
+                    StatusLine()
                     AppleHealthCard()
                     MonoLabel("Accounts").padding(.horizontal, 4).padding(.top, 8)
                     ForEach(model.connections.filter { $0.auth != "device" }) { c in
@@ -127,7 +125,7 @@ struct ProviderCard: View {
                     if connected {
                         Text("\(connection.recordings) rides").font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
                         Spacer()
-                        Button("Sync now") { Task { await model.run { _ = try await APIClient().sync(connection.provider) } } }
+                        Button("Sync now") { Task { await model.run("Couldn't sync \(connection.name)") { _ = try await APIClient().sync(connection.provider) } } }
                             .buttonStyle(SecondaryButton())
                         Button("Disconnect", role: .destructive) { confirmDisconnect = true }
                             .buttonStyle(SecondaryButton(color: Theme.heart))
@@ -142,7 +140,7 @@ struct ProviderCard: View {
         .sheet(isPresented: $showKeySheet) { APIKeySheet(connection: connection) }
         .confirmationDialog("Disconnect \(connection.name)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
             Button("Disconnect and delete its rides", role: .destructive) {
-                Task { await model.run { try await APIClient().disconnect(connection.provider) } }
+                Task { await model.run("Couldn't disconnect \(connection.name)") { try await APIClient().disconnect(connection.provider) } }
             }
         }
     }

@@ -56,8 +56,8 @@ struct RoutesView: View {
                         HStack(spacing: 10) {
                             Image(systemName: uploading || inbox.busy ? "hourglass" : "square.and.arrow.down")
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(uploading || inbox.busy ? "Reading the route…" : "Check a route").font(Theme.text(16, .semibold))
-                                Text("A GPX from Ride with GPS, Komoot or anywhere: surface, singletrack, stops, busy roads, your time.")
+                                Text(uploading || inbox.busy ? "Reading the route…" : "Route Enhancer").font(Theme.text(16, .semibold))
+                                Text("Bring a GPX from Ride with GPS, Komoot or anywhere. In seconds: its surfaces, busy roads, where to stop and your time. Then tune it and send it to your Edge.")
                                     .font(Theme.text(13)).foregroundStyle(.white.opacity(0.8))
                                     .multilineTextAlignment(.leading)
                             }

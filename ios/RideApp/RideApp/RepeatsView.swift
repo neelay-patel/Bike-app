@@ -223,7 +223,7 @@ struct RepeatDetailView: View {
         let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
         if let value { name = value }  // show it straight away; the refresh confirms it
         Task {
-            await model.run { try await APIClient().rename(history.kind, id: history.id, to: value) }
+            await model.run("Couldn't rename it") { try await APIClient().rename(history.kind, id: history.id, to: value) }
             name = value ?? (model.you.flatMap { you in
                 history.kind == .route ? you.routes?.first { $0.id == history.id }?.name
                                        : you.climbs?.first { $0.id == history.id }?.name

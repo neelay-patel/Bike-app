@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// You: the four headline numbers and the goal's targets first, then fitness and recovery, the tallies
-/// that only go up (with prizes), this year, personal bests, the home loop, lately, and the binder.
+/// You (18 Nov 2026): your rider card first (top trumps), then the four headline numbers and the goal's
+/// targets, fitness and recovery, badges, personal bests, the tallies that only go up, this year, and the
+/// home loop. Your rides and their cards live in Efforts.
 /// Everything comes from the server's rules (rideengine/analysis/headline.py, records.py), not an AI model.
 struct YouView: View {
     @EnvironmentObject var model: AppModel
@@ -19,28 +20,37 @@ struct YouView: View {
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
+                    StatusLine()
 
+                    // Your top-trumps card first: the fun bit about you.
+                    if model.collection != nil || model.you != nil {
+                        RiderCardSection()
+                    }
                     if let headline = model.you?.headline {
+                        SectionTitle("Your four numbers")
                         HeadlineCard(headline: headline)
                     }
                     if let recovery = model.recovery, recovery.hasAnything {
                         RecoverySection(recovery: recovery)
                     }
+                    if let c = model.collection, !c.badges.isEmpty {
+                        SectionTitle("Badges")
+                        Text("\(c.rider.badgesEarned) of \(c.rider.badgesTotal) earned: your latest, then the closest.")
+                            .font(Theme.text(14)).foregroundStyle(Theme.inkMuted).padding(.horizontal, 4)
+                        BadgeGrid(badges: c.badges, rides: model.rides)
+                    }
                     if let you = model.you, you.all.rides > 0 {
+                        BestsCabinet(bests: you.bests, rides: model.rides)
                         SectionTitle("Every ride adds up")
                         AllTimeHero(tally: you.all)
                         TotalsPanel(you: you)
-                        if let ms = you.milestones, !ms.isEmpty { PrizeShelf(milestones: ms, rides: model.rides) }
+                        // Prizes are put away (18 Nov 2026) until there's a fun engagement model to bring them
+                        // back into; PrizeShelf and the server's milestones are kept for then.
                         YearCompare(you: you)
-                        BestsCabinet(bests: you.bests, rides: model.rides)
                         if let home = you.routes?.first(where: \.home) {
                             HomeLoopLink(route: home, rides: model.rides)
                         }
-                        LatelyList(recent: you.recent.filter { !$0.notes.isEmpty }, rides: model.rides)
-                        BinderSection()
-                    } else if let error = model.error {
-                        Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
-                    } else if !model.isLoading {
+                    } else if model.problem == nil && !model.isLoading {
                         Text("Your totals and personal bests show up here once rides arrive.")
                             .font(Theme.text(15)).foregroundStyle(Theme.inkMuted)
                             .padding(.vertical, 24)
@@ -146,7 +156,7 @@ private struct HeadlineCard: View {
         .sheet(isPresented: $settingGoal) { GoalFlow() }
         .confirmationDialog("End this goal?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("End goal", role: .destructive) {
-                Task { await model.run { try await APIClient().endGoal() } }
+                Task { await model.run("Couldn't end the goal") { try await APIClient().endGoal() } }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -591,39 +601,6 @@ private struct BestsCabinet: View {
         if let fresh {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.4)) { celebrate = fresh }
         }
-    }
-}
-
-/// The latest rides that had something worth saying.
-private struct LatelyList: View {
-    let recent: [YouSummary.Recent]
-    let rides: [RideSummary]
-
-    var body: some View {
-        if !recent.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                MonoLabel("Lately").padding(.horizontal, 4).padding(.top, 8)
-                ForEach(recent) { r in
-                    if let ride = rides.first(where: { $0.rideId == r.rideId }) {
-                        NavigationLink { RideDetailView(ride: ride) } label: { row(r) }.buttonStyle(.plain)
-                    } else {
-                        row(r)
-                    }
-                }
-            }
-        }
-    }
-
-    private func row(_ r: YouSummary.Recent) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(Date(timeIntervalSince1970: r.start).formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))) · \(Format.number(r.km, decimals: 1)) km")
-                .font(Theme.mono(12)).foregroundStyle(Theme.inkMuted)
-            NoteList(notes: r.notes)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .surfaceCard(radius: 16)
-        .contentShape(Rectangle())
     }
 }
 

@@ -13,6 +13,10 @@ struct RideApp: App {
             ServerConfig.serverURL = server
             ServerConfig.token = token
         }
+        // Dev only: RIDE_DEV_SEEN_UNTIL (seconds since 1970) shows the efforts after it as new.
+        if let seen = env["RIDE_DEV_SEEN_UNTIL"].flatMap(Double.init) {
+            UserDefaults.standard.set(seen, forKey: "efforts.seenUntil")
+        }
         #endif
         // HealthKit only wakes the app for new rides while an observer is registered, and that
         // has to happen at every launch, including the background launches HealthKit triggers.
@@ -40,12 +44,21 @@ final class AppModel: ObservableObject {
     @Published var recovery: RecoverySummary?
     @Published var goal: GoalView?
     @Published var plan: TrainingPlan?
+    /// Every effort's card (by year, holo for bests, gaps for missed weeks), the badges and the rider card's numbers.
+    @Published var collection: CollectionSummary?
     /// The rider's bike (from the avatar spec), remembered for the tab icon at launch.
     @Published var bike = BikeSpec.saved {
         didSet { if bike != oldValue { BikeSpec.saved = bike } }
     }
-    @Published var error: String?
+    /// What to tell the rider about the connection to the server, if anything (StatusLine shows it).
+    @Published var problem: Problem?
+    /// When rides last loaded from the server: shown when it can't be reached.
+    @Published var loadedAt: Date?
+    /// Sending new Watch rides and asking the server to check Garmin.
+    @Published var checking = false
     @Published var isLoading = false
+    /// Kept for screens that only need to know something is wrong.
+    var error: String? { problem?.text(loadedAt: loadedAt) }
 
     private let api = APIClient()
 
@@ -59,14 +72,17 @@ final class AppModel: ObservableObject {
         if let last = lastCatchUp, Date().timeIntervalSince(last) < 60 { return }
         lastCatchUp = Date()
         await refresh()
+        guard problem == nil else { return }       // can't reach the server: nothing to send now
+        checking = true
         let fromWatch = await HealthSync.shared.syncNew()
         let fromGarmin = (try? await api.refreshSources()) ?? 0
+        checking = false
         if fromWatch + fromGarmin > 0 { await refresh() }
     }
 
     func refresh() async {
         guard ServerConfig.isConfigured else {
-            error = "Add the server address and token in Settings."
+            problem = .setup
             return
         }
         isLoading = true
@@ -83,26 +99,106 @@ final class AppModel: ObservableObject {
             async let g = try? api.currentGoal()
             async let pl = try? api.plan()
             async let me = try? api.me()
+            async let col = try? api.collection()
             (connections, rides) = try await (c, r)
             you = await y
             recovery = await rc
             goal = (await g) ?? nil
             plan = (await pl) ?? nil
+            if let col = await col { collection = col }
             if let me = await me { bike = BikeSpec(avatar: me.avatar) }
-            error = nil
+            loadedAt = Date()
+            problem = nil
         } catch {
-            self.error = error.localizedDescription
+            if let p = Problem(error) { problem = p }   // a cancelled load (the screen moved on) isn't a problem
         }
     }
 
-    func run(_ action: () async throws -> Void) async {
+    /// Something the rider did (delete a ride, sync now, rename...). If it fails, say what didn't happen.
+    func run(_ what: String = "That didn't go through", _ action: () async throws -> Void) async {
+        var failed: Problem?
         do {
             try await action()
-            error = nil
         } catch {
-            self.error = error.localizedDescription
+            if let p = Problem(error) { failed = p.isConnection ? p : .action(what, error.localizedDescription) }
         }
         await refresh()
+        if let failed, problem == nil { problem = failed }   // the refresh worked; still say what didn't
+    }
+}
+
+/// What can go wrong talking to the server, in words that say what it means and what to do. A cancelled
+/// request (the app moved on before it finished) isn't a problem and is never shown.
+enum Problem: Equatable {
+    case setup                       // no server or token yet
+    case offline                     // can't reach the Mac (not on home Wi-Fi, or the server is off)
+    case signIn                      // the server didn't accept the token
+    case server(String)              // the server answered with an error
+    case action(String, String)      // something the rider did didn't go through: what, why
+
+    init?(_ error: Error) {
+        if error is CancellationError { return nil }
+        if let u = error as? URLError {
+            switch u.code {
+            case .cancelled: return nil
+            case .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .timedOut, .networkConnectionLost,
+                 .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff, .secureConnectionFailed:
+                self = .offline
+            default: self = .server(u.localizedDescription)
+            }
+            return
+        }
+        if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return nil }
+        if let a = error as? APIError {
+            if a.status == 401 { self = .signIn } else if a.status == nil && !ServerConfig.isConfigured { self = .setup }
+            else { self = .server(a.message) }
+            return
+        }
+        self = .server(error.localizedDescription)
+    }
+
+    var isConnection: Bool { self == .setup || self == .offline || self == .signIn }
+    /// Not the rider's doing and not broken: just out of reach for now.
+    var isQuiet: Bool { self == .offline }
+
+    func text(loadedAt: Date?) -> String {
+        switch self {
+        case .setup:
+            return "Add your server and token in Settings (Sources, then the gear) to see your efforts."
+        case .offline:
+            let when = loadedAt.map { " Showing what loaded at \($0.formatted(date: .omitted, time: .shortened))." } ?? ""
+            return "Can't reach your server right now.\(when) New rides come in when you're back on your home Wi-Fi and the Mac is on."
+        case .signIn:
+            return "The server didn't accept your token. Paste a new one in Settings (Sources, then the gear)."
+        case .server(let why):
+            return "The server ran into a problem (\(why)). Pull down to try again."
+        case .action(let what, let why):
+            return "\(what): \(why)"
+        }
+    }
+}
+
+/// One line under a screen's title about the connection: checking for new rides, out of reach (grey, with
+/// when things last loaded), or a real problem (red). Nothing when all is well.
+struct StatusLine: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if let p = model.problem {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: p.isQuiet ? "wifi.slash" : "exclamationmark.circle.fill")
+                Text(p.text(loadedAt: model.loadedAt)).fixedSize(horizontal: false, vertical: true)
+            }
+            .font(Theme.text(13)).foregroundStyle(p.isQuiet ? Theme.inkMuted : Theme.heart)
+            .padding(.horizontal, 4)
+        } else if model.checking {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.mini)
+                Text("Checking for new rides…")
+            }
+            .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+            .padding(.horizontal, 4)
+        }
     }
 }
 

@@ -408,7 +408,7 @@ struct SessionDetail: View {
                 HStack {
                     Button(session.status == "done" ? "Mark not done" : "Mark as done") {
                         Task {
-                            await model.run { try await APIClient().setDone(session.id, session.status != "done") }
+                            await model.run("Couldn't update the session") { try await APIClient().setDone(session.id, session.status != "done") }
                         }
                     }
                     .buttonStyle(SecondaryButton())
@@ -518,7 +518,7 @@ private struct FTPSheet: View {
                     Button("Save") {
                         let w = Double(text.trimmingCharacters(in: .whitespaces))
                         Task {
-                            await model.run { try await APIClient().setFTP(w) }
+                            await model.run("Couldn't save your FTP") { try await APIClient().setFTP(w) }
                             dismiss()
                         }
                     }
@@ -596,7 +596,7 @@ private struct DaysSheet: View {
         let order = all.filter(days.contains)
         let t = Dictionary(uniqueKeysWithValues: order.map { ($0, f.string(from: times[$0] ?? Self.time("07:00"))) })
         Task {
-            await model.run { _ = try await APIClient().planSettings(days: order, times: t, weeklyHours: hours) }
+            await model.run("Couldn't save your plan settings") { _ = try await APIClient().planSettings(days: order, times: t, weeklyHours: hours) }
             dismiss()
         }
     }

@@ -1,18 +1,22 @@
 import SwiftUI
 
-/// Efforts, newest first, in the D look (docs/design.md): each one the real ride of a session, with its false
-/// starts (and any other part of the same outing) folded in.
+/// Efforts (18 Nov 2026): new efforts first, as their full ride card, then this month in one line, then
+/// your collection of every effort's card. Each effort is the real ride of a session, with its false starts
+/// (and any other part of the same outing) folded in.
 struct RidesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
     @State private var deleting: RideSummary?
     @AppStorage("rides.showHidden") private var showHidden = false
+    /// The newest effort you've already seen here: anything after it is new.
+    @AppStorage("efforts.seenUntil") private var seenUntil: Double = 0
+    /// New this visit (kept while you look, so they don't vanish as soon as they're marked seen).
+    @State private var fresh: [String] = []
+    @State private var freshSince: Double = 0
 
     private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
-    /// One row per effort: its main ride. Showing hidden ones lists every recording.
-    private var shown: [RideSummary] {
-        showHidden ? model.rides : visible.filter { $0.effort == nil || $0.effort == $0.rideId }
-    }
+    /// One per effort: its main ride.
+    private var efforts: [RideSummary] { visible.filter { $0.effort == nil || $0.effort == $0.rideId } }
     private var hiddenCount: Int { model.rides.count - visible.count }
 
     private func folded(_ ride: RideSummary) -> (falseStarts: Int, parts: Int) {
@@ -20,38 +24,38 @@ struct RidesView: View {
         return (mine.filter { $0.hidden != nil }.count, mine.filter { $0.hidden == nil }.count)
     }
 
+    private var hero: [RideSummary] {
+        let new = fresh.compactMap { id in efforts.first { $0.rideId == id } }
+        return new.isEmpty ? Array(efforts.prefix(1)) : new
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
-                        if let month = MonthTotal(rides: visible) { MonoLabel(month.title) }
+                        if !efforts.isEmpty { MonoLabel("\(efforts.count) efforts on record") }
                         Text("Efforts").font(Theme.heading(44)).foregroundStyle(Theme.ink)
                     }
                     .padding(.horizontal, 4)
                     .padding(.top, 8)
 
-                    if let error = model.error {
-                        Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
+                    StatusLine()
+                    if !hero.isEmpty {
+                        EffortHero(rides: hero, isNew: !fresh.isEmpty && hero.contains { fresh.contains($0.rideId) },
+                                   since: freshSince > 0 ? Date(timeIntervalSince1970: freshSince) : nil)
                     }
                     if let month = MonthTotal(rides: visible) {
-                        MonthHero(month: month)
+                        MonthStrip(month: month)
                     }
-                    if shown.isEmpty && model.error == nil && !model.isLoading {
+                    if efforts.isEmpty && model.problem == nil && !model.isLoading {
                         Text("No rides yet. Connect Apple Health or Garmin in Sources.")
                             .font(Theme.text(15)).foregroundStyle(Theme.inkMuted)
                             .padding(.vertical, 24)
                     }
-                    LazyVStack(spacing: 8) {
-                        ForEach(shown) { ride in
-                            NavigationLink { RideDetailView(ride: ride) } label: {
-                                RideRow(ride: ride, folded: showHidden ? (0, 0) : folded(ride))
-                            }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("Delete ride", systemImage: "trash", role: .destructive) { deleting = ride }
-                                }
-                        }
+                    if !efforts.isEmpty {
+                        EffortCollection(efforts: showHidden ? model.rides : efforts, showingHidden: showHidden,
+                                         folded: folded, delete: { deleting = $0 })
                     }
                     if hiddenCount > 0 {
                         Toggle(isOn: $showHidden) {
@@ -63,6 +67,7 @@ struct RidesView: View {
                         .surfaceCard(radius: 16)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
@@ -73,17 +78,31 @@ struct RidesView: View {
                 _ = try? await APIClient().refreshSources()
                 await model.refresh()
             }
+            .onAppear(perform: markSeen)
+            .onChange(of: efforts.first?.rideId) { _, _ in markSeen() }
             .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },
                                                                           set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible, presenting: deleting) { ride in
                 Button("Delete ride", role: .destructive) {
-                    Task { await model.run { try await APIClient().deleteRide(ride.rideId) } }
+                    Task { await model.run("Couldn't delete the ride") { try await APIClient().deleteRide(ride.rideId) } }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { ride in
                 Text(DeleteRide.message(ride))
             }
         }
+    }
+
+    /// Efforts that arrived since you last looked become this visit's new ones (up to five), and are seen
+    /// from now on. The very first time, nothing is new: the latest leads.
+    private func markSeen() {
+        guard let latest = efforts.map(\.summary.start).max() else { return }
+        guard seenUntil > 0 else { seenUntil = latest; return }
+        let newer = efforts.filter { $0.summary.start > seenUntil }.map(\.rideId)
+        guard !newer.isEmpty else { return }
+        if fresh.isEmpty { freshSince = seenUntil }
+        fresh = Array((newer + fresh.filter { !newer.contains($0) }).prefix(5))
+        seenUntil = latest
     }
 }
 
@@ -109,37 +128,6 @@ struct MonthTotal {
         climbed = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.ascentM ?? 0) }  // nor its virtual climbing
         longest = month.map { $0.noDistance ? 0 : $0.summary.km }.max() ?? 0
         hours = month.reduce(0) { $0 + $1.summary.movingH }
-    }
-}
-
-struct MonthHero: View {
-    let month: MonthTotal
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            MonoLabel("This month", color: Theme.cobaltSoft)
-            if month.km < 0.5 {
-                // All indoors so far: time is the month's number.
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Format.duration(hours: month.hours)).font(Theme.hero(64))
-                    Text("hours").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
-                }
-                Text("\(month.rides) effort\(month.rides == 1 ? "" : "s"), all indoors")
-                    .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Format.hero(month.km, decimals: 0)).font(Theme.hero(64))
-                    Text("km").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
-                }
-                Text("\(month.rides) effort\(month.rides == 1 ? "" : "s") · \(Format.number(month.climbed, decimals: 0)) m climbed · longest \(Format.number(month.longest, decimals: 1)) km")
-                    .font(Theme.text(14)).foregroundStyle(Color(hex: 0xE3E8F7))
-            }
-        }
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20).padding(.vertical, 18)
-        .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -293,7 +281,7 @@ struct RideDetailView: View {
         .confirmationDialog("Delete this ride?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete ride", role: .destructive) {
                 Task {
-                    await model.run { try await APIClient().deleteRide(ride.rideId) }
+                    await model.run("Couldn't delete the ride") { try await APIClient().deleteRide(ride.rideId) }
                     dismiss()
                 }
             }
