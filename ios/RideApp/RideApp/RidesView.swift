@@ -10,9 +10,15 @@ struct RidesView: View {
     @AppStorage("rides.showHidden") private var showHidden = false
     /// The newest effort you've already seen here: anything after it is new.
     @AppStorage("efforts.seenUntil") private var seenUntil: Double = 0
-    /// New this visit (kept while you look, so they don't vanish as soon as they're marked seen).
-    @State private var fresh: [String] = []
+    /// What you'd seen before this visit: efforts after it are new (kept while you look, so they don't vanish
+    /// as soon as they're marked seen). By time, not id: a Watch ride that Garmin's copy then merges into
+    /// comes back under a new id, and is still the same new ride.
     @State private var freshSince: Double = 0
+    /// New rides to celebrate on the way in (those after this time): the tallies slide up and count on.
+    @State private var celebrateSince: Double?
+    /// Only rides that arrive while you're looking at Efforts count as seen (not while you're on another tab
+    /// or a ride's screen): otherwise they'd be marked seen, and celebrated, out of sight.
+    @State private var onScreen = false
 
     private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
     /// One per effort: its main ride.
@@ -24,9 +30,16 @@ struct RidesView: View {
         return (mine.filter { $0.hidden != nil }.count, mine.filter { $0.hidden == nil }.count)
     }
 
-    private var hero: [RideSummary] {
-        let new = fresh.compactMap { id in efforts.first { $0.rideId == id } }
-        return new.isEmpty ? Array(efforts.prefix(1)) : new
+    /// New this visit, newest first (up to five).
+    private var fresh: [RideSummary] {
+        freshSince > 0 ? Array(efforts.filter { $0.summary.start > freshSince }.prefix(5)) : []
+    }
+
+    private var hero: [RideSummary] { fresh.isEmpty ? Array(efforts.prefix(1)) : fresh }
+
+    private var arrived: [RideSummary] {
+        guard let since = celebrateSince else { return [] }
+        return efforts.filter { $0.summary.start > since }
     }
 
     var body: some View {
@@ -42,7 +55,7 @@ struct RidesView: View {
 
                     StatusLine()
                     if !hero.isEmpty {
-                        EffortHero(rides: hero, isNew: !fresh.isEmpty && hero.contains { fresh.contains($0.rideId) },
+                        EffortHero(rides: hero, isNew: !fresh.isEmpty,
                                    since: freshSince > 0 ? Date(timeIntervalSince1970: freshSince) : nil)
                     }
                     if let month = MonthTotal(rides: visible) {
@@ -72,13 +85,23 @@ struct RidesView: View {
                 .padding(.bottom, 24)
             }
             .background(Theme.ground.ignoresSafeArea())
+            .overlay(alignment: .bottom) {
+                if !arrived.isEmpty, let you = model.you {
+                    NewRideMoment(rides: arrived, you: you) {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { celebrateSince = nil }
+                    }
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 await health.syncNew()
                 _ = try? await APIClient().refreshSources()
                 await model.refresh()
             }
-            .onAppear(perform: markSeen)
+            .onAppear { onScreen = true; markSeen() }
+            .onDisappear { onScreen = false }
             .onChange(of: efforts.first?.rideId) { _, _ in markSeen() }
             .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },
                                                                           set: { if !$0 { deleting = nil } }),
@@ -96,13 +119,16 @@ struct RidesView: View {
     /// Efforts that arrived since you last looked become this visit's new ones (up to five), and are seen
     /// from now on. The very first time, nothing is new: the latest leads.
     private func markSeen() {
-        guard let latest = efforts.map(\.summary.start).max() else { return }
+        guard onScreen, let latest = efforts.map(\.summary.start).max() else { return }
         guard seenUntil > 0 else { seenUntil = latest; return }
-        let newer = efforts.filter { $0.summary.start > seenUntil }.map(\.rideId)
-        guard !newer.isEmpty else { return }
-        if fresh.isEmpty { freshSince = seenUntil }
-        fresh = Array((newer + fresh.filter { !newer.contains($0) }).prefix(5))
+        guard latest > seenUntil else { return }
+        let since = seenUntil
+        if freshSince == 0 { freshSince = since }
         seenUntil = latest
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))   // after the new card has landed
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { celebrateSince = since }
+        }
     }
 }
 

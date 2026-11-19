@@ -128,7 +128,7 @@ private struct HeadlineCard: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(headline.metrics.enumerated()), id: \.element.id) { i, m in
-                    MetricRow(metric: m, shown: shown, open: open == m.id)
+                    MetricRow(metric: m, shown: shown, open: open == m.id, order: i)
                         .contentShape(Rectangle())
                         .onTapGesture { withAnimation(.snappy) { open = open == m.id ? nil : m.id } }
                     if i < headline.metrics.count - 1 { Rectangle().fill(Theme.panelLine).frame(height: 1) }
@@ -152,7 +152,7 @@ private struct HeadlineCard: View {
         }
         .padding(18)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onAppear { withAnimation(.easeOut(duration: 0.9).delay(0.15)) { shown = true } }
+        .onFirstSeen { shown = true }   // each row counts up in turn (MetricRow)
         .sheet(isPresented: $settingGoal) { GoalFlow() }
         .confirmationDialog("End this goal?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("End goal", role: .destructive) {
@@ -169,6 +169,13 @@ private struct MetricRow: View {
     let metric: YouSummary.Headline.Metric
     let shown: Bool
     let open: Bool
+    var order = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Counts up from zero when the card comes into view, one row after another, like the tallies.
+    private var count: Animation? {
+        reduceMotion ? nil : .easeOut(duration: 1.3).delay(0.1 + Double(order) * 0.15)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -189,8 +196,9 @@ private struct MetricRow: View {
                 Spacer(minLength: 8)
                 if let cur = metric.current {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        CountingText(value: shown ? cur : (metric.baseline ?? cur) * 0.9, decimals: metric.decimals)
+                        CountingText(value: shown ? cur : 0, decimals: metric.decimals)
                             .font(Theme.hero(30)).foregroundStyle(.white)
+                            .animation(count, value: shown)
                         Text(metric.unit).font(Theme.text(12, .medium)).foregroundStyle(Theme.panelLabel)
                     }
                 } else {
@@ -200,6 +208,7 @@ private struct MetricRow: View {
             if let p = metric.progress {
                 ProgressTrack(progress: shown ? p : 0)
                     .frame(height: 8)
+                    .animation(count, value: shown)
             }
             if let pending = metric.pending {
                 Text(pending).font(Theme.text(12)).foregroundStyle(Theme.panelLabel)
@@ -254,13 +263,15 @@ private struct ProgressTrack: View {
 struct CountingText: View, Animatable {
     var value: Double
     var decimals: Int = 0
+    /// How to write the number (a duration, say); the dot-matrix hero format otherwise.
+    var format: ((Double) -> String)? = nil
     var animatableData: Double {
         get { value }
         set { value = newValue }
     }
 
     var body: some View {
-        Text(Format.hero(value, decimals: decimals)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+        Text(format?(value) ?? Format.hero(value, decimals: decimals)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
     }
 }
 
@@ -287,7 +298,7 @@ private struct AllTimeHero: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.vertical, 18)
         .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onAppear { withAnimation(.easeOut(duration: 1.4)) { shown = true } }
+        .onFirstSeen { withAnimation(.easeOut(duration: 1.4)) { shown = true } }
         .accessibilityElement(children: .combine)
     }
 }
@@ -313,7 +324,7 @@ private struct TotalsPanel: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 18).padding(.vertical, 16)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onAppear { withAnimation(.easeOut(duration: 1.4)) { shown = true } }
+        .onFirstSeen { withAnimation(.easeOut(duration: 1.4)) { shown = true } }
     }
 
     private func stat(_ label: String, _ value: Double, _ unit: String?) -> some View {

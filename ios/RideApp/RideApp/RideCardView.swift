@@ -15,6 +15,8 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
     @Published private(set) var failed: String?
     @Published private(set) var size = CardRenderer.size
     var onResize: ((CGSize) -> Void)?
+    /// The page as last drawn, to draw it again if iOS throws the web view's content away in the background.
+    private var page: String?
 
     override init() {
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: WKWebViewConfiguration())
@@ -36,7 +38,8 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
         do {
             let html = try await fetch()
             failed = nil
-            webView.loadHTMLString(Self.embedFonts(html), baseURL: nil)
+            page = Self.embedFonts(html)
+            webView.loadHTMLString(page!, baseURL: nil)
         } catch {
             failed = error.localizedDescription
         }
@@ -54,6 +57,13 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
             }
             isLoaded = true
         }
+    }
+
+    /// iOS can end a web view's content process (in the background, short of memory), leaving it blank
+    /// though the card counts as drawn. Draw it again.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard let page else { return }
+        webView.loadHTMLString(page, baseURL: nil)
     }
 
     /// The card as an image for sharing: 1080 pixels wide (1080 x 1920 for a 9:16 card), on white.
@@ -111,24 +121,36 @@ private struct CardWebView: UIViewRepresentable {
 struct RideCard: View {
     @ObservedObject var renderer: CardRenderer
     let rideId: String
+    var entrance = false     // a new effort: a little spring and a sheen as it lands
 
     var body: some View {
-        CardFrame(renderer: renderer).task { await renderer.load(rideId: rideId) }
+        CardFrame(renderer: renderer, entrance: entrance).task(id: rideId) { await renderer.load(rideId: rideId) }
     }
 }
 
 /// Any 360 x 640 card page, scaled to fit the width.
 struct CardFrame: View {
     @ObservedObject var renderer: CardRenderer
+    var entrance = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
             let scale = min(1, geo.size.width / CardRenderer.size.width)
             CardWebView(renderer: renderer)
                 .frame(width: renderer.size.width, height: renderer.size.height)
+                .overlay {
+                    if entrance {
+                        // The page draws the card 12 pt in from its edges, with 14 pt corners.
+                        Sheen(run: renderer.isLoaded)
+                            .mask(RoundedRectangle(cornerRadius: 14, style: .continuous).padding(12))
+                    }
+                }
                 .scaleEffect(scale, anchor: .topLeading)
                 .offset(x: max(0, (geo.size.width - CardRenderer.size.width) / 2))
                 .opacity(renderer.isLoaded ? 1 : 0)
+                .scaleEffect(entrance && !reduceMotion && !renderer.isLoaded ? 0.92 : 1, anchor: .center)
+                .animation(entrance ? .spring(response: 0.5, dampingFraction: 0.68) : nil, value: renderer.isLoaded)
                 .overlay {
                     if let failed = renderer.failed {
                         Text(failed).font(Theme.text(13)).foregroundStyle(Theme.heart).padding()

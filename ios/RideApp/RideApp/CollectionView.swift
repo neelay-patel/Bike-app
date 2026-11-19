@@ -119,7 +119,9 @@ struct EffortHero: View {
 
     private func card(_ r: RideSummary) -> some View {
         NavigationLink { RideDetailView(ride: r) } label: {
-            RideCard(renderer: cards.renderer(r.rideId), rideId: r.rideId)
+            // Keyed to the ride: when a new ride takes the spot, its card is drawn (not the old one's loader kept).
+            RideCard(renderer: cards.renderer(r.rideId), rideId: r.rideId, entrance: isNew)
+                .id(r.rideId)
                 .allowsHitTesting(false)   // the web page would take the tap
                 .contentShape(Rectangle())
         }
@@ -142,31 +144,55 @@ struct EffortHero: View {
     }
 }
 
-/// This month in one line: distance (or time, when it's all been indoors), efforts and climbing.
+/// This month in one line: distance (or time, when it's all been indoors), efforts and climbing. The numbers
+/// count up the first time you see it, and count on when a new ride adds to them.
 struct MonthStrip: View {
     let month: MonthTotal
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The numbers as shown: zero until first seen, then counted to the month's. Animated only in their own
+    /// transactions, so the strip moving down the page (a new card above it) doesn't drag them along.
+    @State private var shown: [Double] = [0, 0, 0]
+    @State private var seen = false
+
+    private var values: [Double] {
+        [month.km < 0.5 ? month.hours : month.km, month.climbed, Double(month.rides)]
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             MonoLabel(month.title, color: Theme.cobaltSoft)
             Spacer(minLength: 4)
             if month.km < 0.5 {
-                stat(Format.duration(hours: month.hours), "indoors")
+                stat(0, "indoors") { Format.duration(hours: $0) }
             } else {
-                stat(Format.number(month.km, decimals: 0), "km")
-                stat(Format.number(month.climbed, decimals: 0), "m")
+                stat(0, "km")
+                stat(1, "m")
             }
-            stat("\(month.rides)", month.rides == 1 ? "effort" : "efforts")
+            stat(2, month.rides == 1 ? "effort" : "efforts")
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16).padding(.vertical, 12)
         .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
+        .onFirstSeen { seen = true; count(after: 0.1, duration: 1.2) }
+        .onChange(of: values) { _, _ in if seen { count(after: 0.5, duration: 1.4) } }   // a new ride counts on
     }
 
-    private func stat(_ value: String, _ unit: String) -> some View {
+    private func count(after delay: Double, duration: Double) {
+        let target = values
+        for i in target.indices {
+            if reduceMotion {
+                shown[i] = target[i]
+            } else {
+                withAnimation(.easeOut(duration: duration).delay(delay + Double(i) * 0.12)) { shown[i] = target[i] }
+            }
+        }
+    }
+
+    private func stat(_ i: Int, _ unit: String, format: ((Double) -> String)? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
-            Text(value).font(Theme.text(17, .semibold)).monospacedDigit()
+            CountingText(value: shown[i], format: format ?? { Format.number($0, decimals: 0) })
+                .font(Theme.text(17, .semibold))
             Text(unit).font(Theme.text(12)).foregroundStyle(Theme.cobaltSoft)
         }
     }
