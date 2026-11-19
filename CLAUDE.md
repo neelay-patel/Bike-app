@@ -103,6 +103,9 @@ python -m backend rebuild-insights --user 1         # rework routes, climbs, not
 python -m backend set-tz --user 1 America/Toronto
 python -m backend build-map data/osm/ontario-latest.osm.pbf   # our own map for the route check (Geofabrik extract)
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
+scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a login service (launchd): starts at login,
+                                                    # restarts if it stops; log in data/backend/server.log.
+                                                    # After a backend change: scripts/mac-server.sh restart
 ```
 
 ## Verified numbers (for sanity checks)
@@ -125,7 +128,8 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 - **Home:** set in Settings, else where most of the past year's rides start.
 - **New rides arrive on their own** (18 Nov): the server pulls Garmin every 15 min (`Backend.start_polling`), and the
   app, each time it opens, sends new Watch rides and asks the server to check Garmin (`POST /v1/refresh`). Needs the
-  Mac's server running and the phone on the home Wi-Fi until the backend is hosted.
+  phone on the home Wi-Fi until the backend is hosted. The Mac's server runs as a login service
+  (`scripts/mac-server.sh`, 18 Nov), not in a terminal tab, so it survives sessions ending and restarts itself.
 
 ## Next steps
 1. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays

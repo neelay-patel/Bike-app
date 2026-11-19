@@ -33,7 +33,8 @@ Done on Neelay's iPhone, 14 Nov 2026 (iOS 27.2, Xcode 27.2, free Personal Team `
    ```
    First launch fails until you trust yourself: Settings → General → VPN & Device Management → Developer App →
    Apple Development: … → Trust.
-5. On the Mac: `python -m backend serve --host 0.0.0.0`, and a token for your existing account:
+5. On the Mac: `scripts/mac-server.sh install` (the server as a login service; or run
+   `python -m backend serve --host 0.0.0.0` by hand), and a token for your existing account:
    `python -m backend new-token --user 1 | awk '/^token /{printf "%s", $2}' | pbcopy` (copies it without showing
    it; Universal Clipboard pastes it on the phone). In the app's Settings: server `http://<mac>.local:8000`, paste the
    token, Save. Allow local network access.
