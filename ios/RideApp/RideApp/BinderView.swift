@@ -145,10 +145,16 @@ struct BadgeTile: View {
 
 /// A ride's card in miniature: number, the route's outline, distance. Holo cards shimmer.
 struct MiniCard: View {
+    static let indoorSymbol = "figure.indoor.cycle"
     let card: CollectionSummary.BinderCard
+    var hours: Double? = nil     // moving time, the indoor card's number
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
+    private var indoor: Bool { card.km < 0.05 }
+
+    // The big card in small (19 Nov 2026): name strip, the route on blue (outdoors), the number in
+    // dot-matrix on graphite (indoors with the indoor icon), the colour ribbon, then name and date on sand.
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -159,19 +165,31 @@ struct MiniCard: View {
             .foregroundStyle(card.holo ? Theme.ink : .white)
             .padding(.horizontal, 7).frame(height: 18)
             .background { header }
-            RouteShape(points: card.shape)
-                .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-                .padding(10)
-                .overlay {
-                    if card.shape.isEmpty {
-                        Image(systemName: "figure.indoor.cycle").font(.system(size: 22)).foregroundStyle(Theme.cobaltSoft)
-                    }
+            Group {
+                if indoor {
+                    Image(systemName: Self.indoorSymbol).font(.system(size: 24)).foregroundStyle(Theme.cobaltSoft)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.panel)
+                } else {
+                    RouteShape(points: card.shape)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                        .padding(9)
+                        .background(Theme.cobalt)
                 }
-                .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
-                .background(Theme.cobalt)
+            }
+            .frame(maxWidth: .infinity).aspectRatio(1.3, contentMode: .fit)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(number).font(Theme.hero(19)).lineLimit(1).minimumScaleFactor(0.6)
+                Text(unit).font(Theme.mono(9))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7).padding(.vertical, 5)
+            .background(Theme.panel)
+            Ribbon(height: 1.2)
             VStack(alignment: .leading, spacing: 1) {
-                Text(card.name ?? BadgeTile.day(card.date)).font(Theme.text(10, .semibold)).lineLimit(1)
-                Text(card.km < 0.05 ? "indoor" : "\(Format.number(card.km, decimals: 1)) km").font(Theme.mono(9)).foregroundStyle(Theme.inkSoft)
+                Text(card.name ?? fallbackName).font(Theme.text(10, .semibold)).lineLimit(1)
+                Text(BadgeTile.day(card.date)).font(Theme.mono(9)).foregroundStyle(Theme.inkSoft).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 7).padding(.vertical, 5)
@@ -188,7 +206,20 @@ struct MiniCard: View {
             withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { phase = 1 }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Ride \(card.number), \(Format.number(card.km, decimals: 1)) km\(card.holo ? ", personal best" : "")")
+        .accessibilityLabel("Ride \(card.number), \(indoor ? "indoors, \(number)" : "\(Format.number(card.km, decimals: 1)) km")\(card.holo ? ", personal best" : "")")
+    }
+
+    private var number: String {
+        if indoor { return hours.map { Format.duration(hours: $0) } ?? "–" }
+        return Format.hero(card.km, decimals: card.km < 100 ? 1 : 0)
+    }
+
+    private var unit: String { indoor ? "h" : "km" }
+
+    /// As the big card names a ride with no route name: "Saturday ride", "Wednesday indoor ride".
+    private var fallbackName: String {
+        let day = Date(timeIntervalSince1970: card.start).formatted(.dateTime.weekday(.wide))
+        return card.start > 0 ? "\(day) \(indoor ? "indoor " : "")ride" : "Ride"
     }
 
     @ViewBuilder private var header: some View {
@@ -208,29 +239,35 @@ struct GapSlot: View {
     let week: String
 
     var body: some View {
+        // An invisible card underneath gives the slot exactly a card's shape.
+        MiniCard(card: .init(rideId: "", start: 0, date: week, number: 1, name: "x", km: 1, ascentM: nil, holo: false,
+                             headline: nil, shape: [], week: week))
+            .hidden()
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+            }
+            .overlay {
+                VStack(spacing: 2) {
+                    Text("Week of").font(Theme.mono(9)).foregroundStyle(Theme.label)
+                    Text(BadgeTile.day(week)).font(Theme.mono(9)).foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(4)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("No ride in the week of \(BadgeTile.day(week))")
+    }
+}
+
+/// The colour ribbon from the ride card (design/tokens.json "stripes").
+struct Ribbon: View {
+    var height: CGFloat = 4
+    var body: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: 18)
-            Color.clear.frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
-            VStack(spacing: 1) {
-                Text("x").font(Theme.text(10, .semibold))
-                Text("x").font(Theme.mono(9))
-            }
-            .hidden().padding(.vertical, 5)
+            ForEach(Array(Theme.stripes.enumerated()), id: \.offset) { _, c in c.frame(height: height) }
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-        }
-        .overlay {
-            VStack(spacing: 2) {
-                Text("Week of").font(Theme.mono(9)).foregroundStyle(Theme.label)
-                Text(BadgeTile.day(week)).font(Theme.mono(9)).foregroundStyle(Theme.label)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(4)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("No ride in the week of \(BadgeTile.day(week))")
+        .accessibilityHidden(true)
     }
 }
 

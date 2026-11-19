@@ -20,6 +20,8 @@ def test_swift_theme_matches_tokens():
     for name, hexval in found.items():
         assert name in TOKENS["color"], f"{name} in Theme.swift but not in tokens.json"
         assert TOKENS["color"][name].lstrip("#").upper() == hexval.upper(), f"{name} differs"
+    stripes = re.search(r"static let stripes = \[(.*?)\]", swift).group(1)
+    assert re.findall(r"0x([0-9A-Fa-f]{6})", stripes) == [c.lstrip("#").upper() for c in TOKENS["color"]["stripes"]]
 
 
 def test_bundled_fonts_exist_with_licences():

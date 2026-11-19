@@ -167,5 +167,5 @@ def test_indoor_session_without_distance():
     s = summary(ride)
     assert s["km"] == 0 and s["moving_h"] == 0.5 and s["avg_kmh"] is None  # time from the workout, not 0
     html = ride_card(ride, places=[])
-    assert "30 minutes indoors." in html and "INDOOR · HEART RATE" in html and "DISTANCE" not in html
+    assert "30 minutes indoors." in html and "· INDOOR<" in html and "DISTANCE" not in html
     assert "MAX HEART RATE" in html and "indoor ride" in html

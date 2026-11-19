@@ -2,8 +2,11 @@
 
     html = ride_card(ride, number=34, name="Durham Forest", headline="Lunch in Uxbridge, earned.")
 
-Writes one self-contained HTML page, 360×640 CSS px, 9:16 for sharing. Fonts come from Google Fonts,
-or (fonts="local") from files beside the page: the iPhone app loads it with its own bundled fonts.
+Writes one self-contained HTML page, 360 CSS px wide: the name, the route on its map (outdoors), the
+numbers in dot-matrix on graphite (indoors with the app's indoor icon in the corner), the colour ribbon and the
+headline (19 Nov 2026). An outdoor card comes out about 9:16; an indoor one, with no map, is shorter.
+Fonts come from Google Fonts, or (fonts="local") from files beside the page: the iPhone app loads it
+with its own bundled fonts.
 hide_near: points (home) whose surroundings are cut from the drawn route, so a shared card doesn't
 show where the rider lives (PRIVACY_M around each).
 Colours and fonts come from design/tokens.json. Everything shown is the ride's own data: the route
@@ -112,72 +115,6 @@ background-size:300% 300%!important;animation:sheen 7s linear infinite}
 @media (prefers-reduced-motion:reduce){.holo{animation:none}}"""
 
 
-def _power_trace(ride: Ride, c: dict) -> str:
-    """Indoors with power: power across the session (30 s average), the best 20 minutes shaded."""
-    from ..model import power_series
-    t0, series = power_series(ride.samples)
-    n = len(series)
-    if n < 120:
-        return _hr_trace(ride, c)
-    csum = [0.0]
-    for p in series:
-        csum.append(csum[-1] + p)
-    smooth = [(csum[min(n, i + 15)] - csum[max(0, i - 15)]) / (min(n, i + 15) - max(0, i - 15)) for i in range(n)]
-    hi = max(smooth) or 1
-    left, right, top, bottom = 24, W - 24, MAP_TOP + 24, MAP_H - 30
-    def x(i):
-        return round(left + i / max(n - 1, 1) * (right - left), 1)
-    def y(p):
-        return round(bottom - p / hi * (bottom - top), 1)
-    step = max(1, n // 300)
-    line = "M" + " L".join(f"{x(i)} {y(smooth[i])}" for i in range(0, n, step))
-    band = ""
-    if n >= 1200:
-        k = max(range(n - 1199), key=lambda i: csum[i + 1200] - csum[i])
-        w20 = round((csum[k + 1200] - csum[k]) / 1200)
-        bx0, bx1 = x(k), x(k + 1199)
-        label = f"BEST 20 MIN · {w20} W"
-        half = len(label) * LABEL_CHAR_PX / 2
-        lx, anchor = min(max((bx0 + bx1) / 2, left + half), right - half), "middle"
-        band = (f'<rect x="{bx0}" y="{top - 14}" width="{round(bx1 - bx0, 1)}" height="{bottom - top + 14}" fill="#FFFFFF" opacity="0.22"/>'
-                f'<text x="{lx}" y="{top - 2}" text-anchor="{anchor}" fill="#FFFFFF" font-family="IBM Plex Mono, monospace" '
-                f'font-size="11" letter-spacing="1">{label}</text>')
-    return (band +
-            f'<path d="{line}" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
-            f'<text x="{left}" y="{MAP_H - 10}" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" font-size="10" '
-            f'letter-spacing="1.5">INDOOR · POWER</text>'
-            f'<text x="{right}" y="{MAP_H - 10}" text-anchor="end" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
-            f'font-size="10" letter-spacing="1.5">{round(n / 60)} MIN</text>')
-
-
-def _hr_trace(ride: Ride, c: dict) -> str:
-    """No route indoors: the map shows heart rate across the session instead, with its peak marked."""
-    pts = [(x.t, x.hr) for x in ride.samples if x.hr is not None]
-    if len(pts) < 5:
-        return (f'<text x="{W / 2}" y="{MAP_H / 2}" text-anchor="middle" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
-                f'font-size="12" letter-spacing="2">INDOOR RIDE</text>')
-    t0, t1 = pts[0][0], pts[-1][0]
-    lo, hi = min(h for _, h in pts), max(h for _, h in pts)
-    left, right, top, bottom = 24, W - 24, MAP_TOP + 24, MAP_H - 30
-    step = max(1, len(pts) // 300)
-    def xy(t, h):
-        return (round(left + (t - t0) / max(t1 - t0, 1) * (right - left), 1),
-                round(bottom - (h - lo) / max(hi - lo, 1) * (bottom - top), 1))
-    line = "M" + " L".join(f"{x} {y}" for x, y in (xy(t, h) for t, h in pts[::step]))
-    pt, ph = max(pts, key=lambda p: p[1])
-    px, py = xy(pt, ph)
-    label_x, anchor = (px + 10, "start") if px < W / 2 else (px - 10, "end")
-    mins = round((t1 - t0) / 60)
-    return (f'<path d="{line}" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
-            f'<circle cx="{px}" cy="{py}" r="6" fill="#FFFFFF"/>'
-            f'<text x="{label_x}" y="{py - 8}" text-anchor="{anchor}" fill="#FFFFFF" font-family="IBM Plex Mono, monospace" '
-            f'font-size="11" letter-spacing="1">♥ {round(ph)}</text>'
-            f'<text x="{left}" y="{MAP_H - 10}" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" font-size="10" '
-            f'letter-spacing="1.5">INDOOR · HEART RATE</text>'
-            f'<text x="{right}" y="{MAP_H - 10}" text-anchor="end" fill="#E3E8F7" font-family="IBM Plex Mono, monospace" '
-            f'font-size="10" letter-spacing="1.5">{mins} MIN</text>')
-
-
 def _avatar_layer(spec: dict, cobalt: str, uid: str) -> str:
     """The rider's avatar, big and in tints of the map's blue, behind the km dots and the route."""
     from .avatar import _shade, avatar_svg
@@ -281,16 +218,33 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
         stats.append(("Avg speed", f"{_hero(s['avg_kmh'], 1)} km/h"))
     if s["calories"]:
         stats.append(("Calories", _hero(s["calories"])))
-    rows = "".join(
-        f'<div style="display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;'
-        f'{"border-bottom:1px solid " + c["sandLine"] + ";" if i < len(stats) - 1 else ""}">'
-        f'<dt style="font-family:\'{f["label"]}\',monospace;font-size:12px;letter-spacing:0.14em">{st[0].upper()}</dt>'
-        f'<dd style="margin:0;font-family:\'{f["hero"]}\',monospace;font-size:22px;font-weight:900;'
-        f'{"color:" + c["heart"] + ";" if len(st) > 2 else ""}">{st[1]}</dd></div>'
-        for i, st in enumerate(stats))
     stripes = "".join(f'<div style="height:4px;background:{x}"></div>' for x in c["stripes"])
-    no = f"NO. {number} · {when:%Y}" if number else f"{when:%Y}"
-    aria = (f"{html.escape(name)}: power across the session" if power else f"Route of {html.escape(name)}, {_num(km, 1)} km") + (f", heart rate peaked at {round(peak[3])} bpm" if peak else "")
+    tag = f"★ PB · NO. {number}" if holo and number else (f"NO. {number}" if number else "")
+    aria = f"Route of {html.escape(name)}, {_num(km, 1)} km" + (f", heart rate peaked at {round(peak[3])} bpm" if peak else "")
+    hcolor, tcolor = (c["ink"], c["ink"]) if holo else ("#FFFFFF", "#E2DADC")
+    label = f"font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em"
+
+    cells = "".join(
+        f'<div><div style="{label};color:{c["panelLabel"]}">{st[0].upper()}</div>'
+        f'<div style="font-family:\'{f["hero"]}\',monospace;font-size:34px;font-weight:900;line-height:1.05;margin-top:3px;'
+        f'{"color:#F2A3B8;" if len(st) > 2 else ""}white-space:nowrap">{_split_unit(st[1], f)}</div></div>'
+        for st in stats)
+    if indoor and fonts == "local":
+        # The indoor mark in the last right-hand slot: the app swaps in its own icon (the one on the
+        # collection's small cards), as it does the fonts.
+        cells += ('<div style="grid-column:2;display:flex;justify-content:flex-end;align-items:flex-end">'
+                  f'<img src="{INDOOR_MARK}" alt="" style="height:52px"></div>')
+    route = "" if indoor else f"""<div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
+<svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="{aria}" style="position:absolute;left:0;top:0;overflow:hidden">
+{_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
+{_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
+<path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
+{marks}
+</svg>
+<p style="position:absolute;left:14px;top:12px;margin:0;{label};color:#E3E8F7">{when:%a %-d %b %Y}</p>
+</div>"""
+    dateline = (f'<p style="margin:0 0 12px 0;{label};color:{c["panelLabel"]}">{when:%a %-d %b %Y} · INDOOR</p>'.upper()
+                if indoor else "")
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -298,27 +252,37 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
 {GOOGLE_FONTS if fonts == "google" else "<style>" + LOCAL_FONTS + "</style>"}
 <style>body{{margin:0;background:{background};display:flex;justify-content:center}}{HOLO_CSS if holo else ""}</style></head>
 <body>
-<article style="width:360px;height:640px;box-sizing:border-box;background:{background};padding:12px;display:flex;flex-direction:column;color:{c['ink']}">
-<header class="{'holo' if holo else ''}" style="background:{c['strip']};color:{c['ink'] if holo else '#FFFFFF'};border-radius:14px 14px 0 0;padding:10px 14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px">
-<h1 style="margin:0;font-family:'{f['heading']}',serif;font-size:30px;font-weight:400;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{html.escape(name)}</h1>
-<span style="font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:{c['ink'] if holo else '#E2DADC'};white-space:nowrap">{"★ PB · NO. " + str(number) if holo and number else no}</span>
+<article style="width:360px;box-sizing:border-box;background:{background};padding:12px;display:flex;flex-direction:column;color:{c['ink']}">
+<header class="{'holo' if holo else ''}" style="background:{c['strip']};color:{hcolor};border-radius:14px 14px 0 0;padding:10px 14px;display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+<h1 id="name" style="margin:0;font-family:'{f['heading']}',serif;font-size:30px;font-weight:400;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{html.escape(name)}</h1>
+<span style="{label};color:{tcolor};white-space:nowrap">{tag}</span>
 </header>
-<div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
-<svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="{aria}" style="position:absolute;left:0;top:0;overflow:hidden">
-{_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
-{_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
-<path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
-{(_power_trace(ride, c) if power else _hr_trace(ride, c)) if indoor else ""}
-{marks}
-</svg>
-<p style="position:absolute;left:14px;top:12px;margin:0;font-family:'{f['label']}',monospace;font-size:11px;letter-spacing:0.14em;color:#E3E8F7">{when:%a %-d %b %Y}</p>
+{route}
+<div style="background:{c['panel']};color:#FFFFFF;padding:{"12px" if indoor else "16px"} 16px 16px 16px">
+{dateline}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 12px">{cells}</div>
 </div>
 <div aria-hidden="true" style="display:flex;flex-direction:column">{stripes}</div>
-<p style="margin:0;background:{c['sand']};padding:12px 14px 6px 14px;font-family:'{f['heading']}',serif;font-size:22px;line-height:1.15">{html.escape(title)}</p>
-<dl style="margin:0;flex:1;background:{c['sand']};border-radius:0 0 14px 14px;padding:4px 14px 12px 14px;display:flex;flex-direction:column;justify-content:space-between">{rows}</dl>
+<p style="margin:0;background:{c['sand']};border-radius:0 0 14px 14px;padding:12px 14px 14px 14px;font-family:'{f['heading']}',serif;font-size:22px;line-height:1.15">{html.escape(title)}</p>
 </article>
+<script>{FIT_NAME}</script>
 </body></html>
 """
+
+
+INDOOR_MARK = "indoor-mark.png"  # filled in by the iPhone app (CardRenderer.embedFonts)
+
+# A long name shrinks to fit the header (down to 20 px) before it is cut off with an ellipsis.
+FIT_NAME = ("document.fonts.ready.then(function(){var h=document.getElementById('name'),s=30;"
+            "while(h.scrollWidth>h.clientWidth&&s>20){s--;h.style.fontSize=s+'px'}})")
+
+
+def _split_unit(value: str, f: dict) -> str:
+    """'41.3 km' as a dot-matrix number with its unit small in Plex beside it (as in the app)."""
+    num, _, unit = value.partition(" ")
+    small = (f'<span style="font-family:\'{f["label"]}\',monospace;font-size:13px;font-weight:500;margin-left:4px">'
+             f'{html.escape(unit)}</span>') if unit else ""
+    return html.escape(num) + small
 
 
 def _dist_to(ride: Ride, target) -> float:

@@ -20,6 +20,8 @@ enum Theme {
     static let heart = Color(hex: 0x7C1E3E)
     static let sand = Color(hex: 0xF1E2B6)
     static let strip = Color(hex: 0x3A3537)
+    /// The colour ribbon under the map on a ride card.
+    static let stripes = [Color(hex: 0x4F86E8), Color(hex: 0xD23A55), Color(hex: 0x1B1618), Color(hex: 0xF2C230), Color(hex: 0x3E9B4F)]
 
     // MARK: Type
     /// Instrument Serif: screen and ride titles only.

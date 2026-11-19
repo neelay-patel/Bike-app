@@ -224,16 +224,15 @@ struct RideDetailView: View {
                 // The collectible card first: it's the ride's story, and what gets shared.
                 RideCard(renderer: card, rideId: ride.rideId)
 
-                // What you did: the session's phases, read from the samples.
-                EffortPanel(rideId: ride.rideId)
+                // What you did: power (or heart rate) with the session's phases, the elevation, the story.
+                EffortPanel(rideId: ride.rideId, profile: ride.noDistance ? nil : profile,
+                            outdoor: !ride.noDistance, km: ride.summary.km)
 
                 if let notes = ride.notes, !notes.isEmpty {
                     NoteList(notes: notes)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16).surfaceCard()
                 }
-
-                ProfilePanel(ride: ride, profile: profile)
 
                 if let more = secondary {
                     Text(more).font(Theme.text(14)).foregroundStyle(Theme.inkSoft).padding(.horizontal, 4)
@@ -342,50 +341,6 @@ struct RideDetailView: View {
 }
 
 /// Dark panel: halftone elevation profile with the heart-rate peak, then the four hero totals.
-struct ProfilePanel: View {
-    let ride: RideSummary
-    let profile: Profile?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if ride.noDistance {
-                // Indoors: no route or elevation (the card above shows heart rate across the session).
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
-                          alignment: .leading, spacing: 12) {
-                    HeroStat(label: "Time", value: Format.duration(hours: ride.summary.movingH), unit: nil)
-                    if let watts = ride.summary.avgPower, ride.summary.power60S != nil {
-                        // A trainer or power meter: power leads.
-                        HeroStat(label: "Avg power", value: "\(Int(watts.rounded()))", unit: "W")
-                        HeroStat(label: "Best 20 min", value: ride.summary.power1200S.map { "\(Int($0))" } ?? "–", unit: "W")
-                    } else {
-                        HeroStat(label: "Calories", value: ride.summary.calories.map { Format.hero($0, decimals: 0) } ?? "–", unit: "kcal")
-                        HeroStat(label: "Max heart rate", value: ride.summary.maxHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
-                    }
-                    HeroStat(label: "Avg heart rate", value: ride.summary.avgHr.map { "\(Int($0.rounded()))" } ?? "–", unit: "bpm")
-                }
-            } else {
-            ElevationProfile(profile: profile, totalKm: ride.summary.km)
-                .frame(height: 118)
-            Rectangle().fill(Theme.panelLine).frame(height: 1)
-            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
-                      alignment: .leading, spacing: 12) {
-                HeroStat(label: "Length", value: Format.number(ride.summary.km, decimals: 1), unit: "km")
-                HeroStat(label: "Climbing", value: ride.summary.ascentM.map { Format.hero($0, decimals: 0) } ?? "–", unit: "m")
-                HeroStat(label: "Moving", value: Format.duration(hours: ride.summary.movingH), unit: nil)
-                if let hr = ride.summary.avgHr {
-                    HeroStat(label: "Avg heart rate", value: "\(Int(hr.rounded()))", unit: "bpm")
-                } else {
-                    HeroStat(label: "Avg speed", value: ride.summary.avgKmh.map { Format.number($0, decimals: 1) } ?? "–", unit: "km/h")
-                }
-            }
-            }
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 18).padding(.vertical, 16)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-}
-
 struct HeroStat: View {
     let label: String
     let value: String
@@ -438,7 +393,7 @@ struct ElevationProfile: View {
             let axis: CGFloat = 16
             let plotH = size.height - axis
             guard let pts = profile?.points, pts.count > 1, totalKm > 0 else {
-                ctx.draw(Text("Loading profile…").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+                ctx.draw(Text("Loading profile…").font(Theme.mono(11)).foregroundColor(Theme.label),
                          at: CGPoint(x: size.width / 2, y: plotH / 2))
                 return
             }
@@ -458,29 +413,33 @@ struct ElevationProfile: View {
                 layer.clip(to: area)
                 var y: CGFloat = 2.5
                 while y < plotH {
-                    let alpha = 0.9 - 0.75 * Double(y / plotH)
+                    let alpha = 0.75 - 0.6 * Double(y / plotH)
                     var x: CGFloat = 2.5
                     while x < size.width {
                         layer.fill(Path(ellipseIn: CGRect(x: x - 1.1, y: y - 1.1, width: 2.2, height: 2.2)),
-                                   with: .color(.white.opacity(alpha)))
+                                   with: .color(Theme.cobalt.opacity(alpha)))
                         x += 5
                     }
                     y += 5
                 }
             }
-            ctx.stroke(line, with: .color(.white), lineWidth: 1.6)
-            ctx.fill(Path(CGRect(x: 0, y: plotH, width: size.width, height: 1)), with: .color(Theme.inkMuted))
+            ctx.stroke(line, with: .color(Theme.cobalt), lineWidth: 1.6)
+            ctx.fill(Path(CGRect(x: 0, y: plotH, width: size.width, height: 1)), with: .color(Theme.line))
             if let peak = profile?.peak,
                let near = pts.min(by: { abs($0.km - peak.km) < abs($1.km - peak.km) }) {
                 let p = at(near.km, near.ele)
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(.white))
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(Theme.heart))
                 let label = Text("MAX ♥ \(Int(peak.bpm)) · KM \(Int(peak.km.rounded()))")
-                    .font(Theme.mono(11)).foregroundColor(.white)
-                ctx.draw(label, at: CGPoint(x: min(p.x + 8, size.width - 120), y: max(p.y - 10, 6)), anchor: .leading)
+                    .font(Theme.mono(11)).foregroundColor(Theme.heart)
+                let right = p.x < size.width / 2   // the label on the roomier side of its dot
+                ctx.draw(label, at: CGPoint(x: right ? p.x + 8 : p.x - 8, y: max(p.y - 12, 18)),
+                         anchor: right ? .leading : .trailing)
             }
-            ctx.draw(Text("0").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+            ctx.draw(Text("\(Int(hi.rounded())) M").font(Theme.mono(10)).foregroundColor(Theme.label),
+                     at: CGPoint(x: 0, y: 5), anchor: .leading)
+            ctx.draw(Text("0").font(Theme.mono(11)).foregroundColor(Theme.label),
                      at: CGPoint(x: 0, y: size.height - 6), anchor: .leading)
-            ctx.draw(Text("\(Format.number(totalKm, decimals: 1)) KM").font(Theme.mono(11)).foregroundColor(Theme.panelLabel),
+            ctx.draw(Text("\(Format.number(totalKm, decimals: 1)) KM").font(Theme.mono(11)).foregroundColor(Theme.label),
                      at: CGPoint(x: size.width, y: size.height - 6), anchor: .trailing)
         }
         .accessibilityLabel("Elevation profile" + (profile?.peak.map { ", heart rate peaked at \(Int($0.bpm)) at kilometre \(Int($0.km.rounded()))" } ?? ""))
@@ -612,10 +571,14 @@ enum DeleteRide {
 
 // MARK: - Effort: what you did
 
-/// The session's phases (warm-up, structured workout, own riding, pauses, cool-down) as a strip under the
-/// power (or heart-rate) trace, then the story in words. From GET /v1/efforts/{id}.
+/// What you did: power (or heart rate) across the session with its phases (warm-up, structured workout, own
+/// riding, pauses, cool-down) as a strip under it, the elevation for an outdoor ride, then the story in
+/// words. From GET /v1/efforts/{id} and the ride's trace.
 struct EffortPanel: View {
     let rideId: String
+    var profile: Profile? = nil
+    var outdoor = false
+    var km = 0.0
     @State private var effort: Effort?
     @State private var failed = false
 
@@ -625,22 +588,31 @@ struct EffortPanel: View {
 
     var body: some View {
         Group {
-            if let effort, let part {
+            if effort != nil || outdoor {
                 VStack(alignment: .leading, spacing: 12) {
                     MonoLabel("What you did")
-                    if !part.phases.phases.isEmpty {
+                    if let part, !part.phases.phases.isEmpty {
+                        let watts = part.phases.basis == "power"
+                        ChartTitle(watts ? "Power" : "Heart rate", unit: watts ? "watts" : "beats per minute")
                         EffortChart(phases: part.phases).frame(height: 132)
                         PhaseLegend(phases: part.phases.phases)
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(effort.lines.enumerated()), id: \.offset) { _, line in
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(Theme.inkMuted)
-                                    .frame(width: 12)
-                                Text(line).font(Theme.text(15)).foregroundStyle(Theme.ink)
-                                    .fixedSize(horizontal: false, vertical: true)
+                    if outdoor {
+                        ChartTitle("Elevation", unit: "metres above sea level, by km").padding(.top, 4)
+                        ElevationProfile(profile: profile, totalKm: km).frame(height: 110)
+                    }
+                    if let effort, !effort.lines.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(effort.lines.enumerated()), id: \.offset) { _, line in
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(Theme.inkMuted)
+                                        .frame(width: 12)
+                                    Text(line).font(Theme.text(15)).foregroundStyle(Theme.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
+                        .padding(.top, 4)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -651,6 +623,20 @@ struct EffortPanel: View {
         }
         .task(id: rideId) {
             do { effort = try await APIClient().effort(rideId) } catch { failed = true }
+        }
+    }
+}
+
+/// A chart's name, with its unit beside it.
+struct ChartTitle: View {
+    let title: String
+    let unit: String
+    init(_ title: String, unit: String) { self.title = title; self.unit = unit }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(title).font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+            Text(unit).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
         }
     }
 }

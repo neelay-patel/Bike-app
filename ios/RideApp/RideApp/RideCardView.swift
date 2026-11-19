@@ -7,11 +7,14 @@ import WebKit
 /// into the page, so it works offline and asks nothing of Google. The route is already cut around home.
 @MainActor
 final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
+    /// Cards are 360 wide; a ride card is as tall as it needs (an indoor one has no map), measured on load.
     static let size = CGSize(width: 360, height: 640)
 
     let webView: WKWebView
     @Published private(set) var isLoaded = false
     @Published private(set) var failed: String?
+    @Published private(set) var size = CardRenderer.size
+    var onResize: ((CGSize) -> Void)?
 
     override init() {
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: WKWebViewConfiguration())
@@ -40,16 +43,26 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        isLoaded = true
+        Task {
+            // The page's height once its fonts are in (the name is fitted to the header then too).
+            let height = try? await webView.callAsyncJavaScript(
+                "await document.fonts.ready; return document.body.scrollHeight", contentWorld: .page) as? Double
+            if let height, height > 100, abs(height - size.height) > 0.5 {
+                size = CGSize(width: Self.size.width, height: height.rounded(.up))
+                webView.frame.size = size
+                onResize?(size)
+            }
+            isLoaded = true
+        }
     }
 
-    /// The card as an image for sharing: 1080 x 1920, on white.
+    /// The card as an image for sharing: 1080 pixels wide (1080 x 1920 for a 9:16 card), on white.
     func image() async -> UIImage? {
         let config = WKSnapshotConfiguration()
-        config.rect = CGRect(origin: .zero, size: Self.size)
+        config.rect = CGRect(origin: .zero, size: size)
         guard let shot = try? await webView.takeSnapshot(configuration: config) else { return nil }
-        // 1080 x 1920 pixels (9:16), whatever the screen's scale.
-        let pixels = CGRect(x: 0, y: 0, width: 1080, height: 1920)
+        // 1080 pixels wide whatever the screen's scale; as tall as the card.
+        let pixels = CGRect(x: 0, y: 0, width: 1080, height: (1080 * size.height / size.width).rounded())
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
@@ -73,7 +86,19 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
 
     static func embedFonts(_ html: String) -> String {
         fontData.reduce(html) { page, font in page.replacingOccurrences(of: "url('\(font.key)')", with: "url('\(font.value)')") }
+            .replacingOccurrences(of: "src=\"indoor-mark.png\"", with: "src=\"\(indoorMark)\"")
     }
+
+    /// The indoor ride card's mark: the same icon as the collection's small indoor cards.
+    private static let indoorMark: String = {
+        let config = UIImage.SymbolConfiguration(pointSize: 52, weight: .regular)
+        guard let symbol = UIImage(systemName: MiniCard.indoorSymbol, withConfiguration: config)?
+            .withTintColor(UIColor(Theme.cobaltSoft), renderingMode: .alwaysOriginal) else { return "" }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        let png = UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in symbol.draw(at: .zero) }.pngData()
+        return png.map { "data:image/png;base64," + $0.base64EncodedString() } ?? ""
+    }()
 }
 
 private struct CardWebView: UIViewRepresentable {
@@ -100,7 +125,7 @@ struct CardFrame: View {
         GeometryReader { geo in
             let scale = min(1, geo.size.width / CardRenderer.size.width)
             CardWebView(renderer: renderer)
-                .frame(width: CardRenderer.size.width, height: CardRenderer.size.height)
+                .frame(width: renderer.size.width, height: renderer.size.height)
                 .scaleEffect(scale, anchor: .topLeading)
                 .offset(x: max(0, (geo.size.width - CardRenderer.size.width) / 2))
                 .opacity(renderer.isLoaded ? 1 : 0)
@@ -112,7 +137,7 @@ struct CardFrame: View {
                     }
                 }
         }
-        .aspectRatio(CardRenderer.size.width / CardRenderer.size.height, contentMode: .fit)
+        .aspectRatio(renderer.size.width / renderer.size.height, contentMode: .fit)
         .frame(maxWidth: CardRenderer.size.width)
         .frame(maxWidth: .infinity)
         .accessibilityLabel("Card")

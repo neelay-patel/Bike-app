@@ -147,7 +147,7 @@ def test_ride_card_endpoint(env):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
     html = r.text
     assert "googleapis" not in html and "Doto-Black.ttf" in html  # the app's own fonts
-    assert ">Home loop</h1>" in html and "NO. 5 ·" in html        # the route's name, its number in the year
+    assert ">Home loop</h1>" in html and ">NO. 5<" in html         # the route's name, its number in the year
     assert "Your fastest home loop yet." in html                   # the top note as headline
     assert client.get("/v1/rides/1/card").status_code == 404
     assert client.get(f"/v1/rides/{rid}/card?fonts=comic").status_code == 400

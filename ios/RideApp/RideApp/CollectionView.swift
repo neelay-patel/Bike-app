@@ -8,13 +8,18 @@ import SwiftUI
 @MainActor
 final class CardStore: ObservableObject {
     private var cards: [String: CardRenderer] = [:]
+    /// Each card's size once drawn (indoor cards are shorter), so the pager can fit the one showing.
+    @Published private(set) var sizes: [String: CGSize] = [:]
 
     func renderer(_ rideId: String) -> CardRenderer {
         if let r = cards[rideId] { return r }
         let r = CardRenderer()
+        r.onResize = { [weak self] size in self?.sizes[rideId] = size }
         cards[rideId] = r
         return r
     }
+
+    func size(_ rideId: String) -> CGSize { sizes[rideId] ?? CardRenderer.size }
 }
 
 /// The newest efforts as their full ride card: the ones that arrived since you last looked ("New"), else
@@ -52,11 +57,11 @@ struct EffortHero: View {
             if rides.count > 1 {
                 TabView(selection: $page) {
                     ForEach(Array(rides.enumerated()), id: \.element.id) { i, r in
-                        card(r).padding(.horizontal, 2).tag(i)
+                        card(r).padding(.horizontal, 2).frame(maxHeight: .infinity, alignment: .top).tag(i)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .aspectRatio(CardRenderer.size.width / CardRenderer.size.height, contentMode: .fit)
+                .aspectRatio(cards.size(ride.rideId).width / cards.size(ride.rideId).height, contentMode: .fit)
                 .frame(maxWidth: CardRenderer.size.width).frame(maxWidth: .infinity)
                 dots
             } else {
@@ -305,13 +310,12 @@ struct EffortCollection: View {
             ForEach(slots) { slot in
                 if let ride = slot.ride {
                     NavigationLink { RideDetailView(ride: ride) } label: {
-                        MiniCard(card: slot.card ?? Self.placeholder(ride))
+                        MiniCard(card: slot.card ?? Self.placeholder(ride), hours: ride.summary.movingH)
                     }
                     .buttonStyle(.plain)
                     .contextMenu { Button("Delete ride", systemImage: "trash", role: .destructive) { delete(ride) } }
                 } else {
-                    // A card's shape (header, square route, two lines), so a week alone in its row isn't tall.
-                    GapSlot(week: String(slot.id.dropFirst(4))).aspectRatio(0.7, contentMode: .fit)
+                    GapSlot(week: String(slot.id.dropFirst(4)))
                 }
             }
         }
