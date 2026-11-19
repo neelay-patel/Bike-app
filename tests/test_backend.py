@@ -292,7 +292,7 @@ def test_you_power_from_a_trainer_ride(env):
     assert p["best_60s"] == 180 and p["best_1200s"] == 171   # every 20 minutes includes the stopped minute
     assert p["ftp"] == {"watts": 162, "source": "estimated from your best 20 minutes"}
     y = client.get("/v1/you").json()
-    assert y["all"]["km"] == 0  # a trainer's km aren't road km
+    assert y["all"]["km"] == y["all"]["indoor"]["km"]  # a trainer's km count, split out as indoor
     # The headline card: sustained power and punch measured; no goal, so targets are proposals.
     hl = {m["id"]: m for m in y["headline"]["metrics"]}
     assert hl["sustained"]["current"] == 162 and hl["sustained"]["target"] == 170 and hl["punch"]["current"] == 180

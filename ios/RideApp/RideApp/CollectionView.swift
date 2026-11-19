@@ -216,7 +216,7 @@ struct EffortCollection: View {
         let title: String
         let rides: [RideSummary]
         let gaps: [String]
-        var km: Double { rides.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.km) } }
+        var km: Double { rides.reduce(0) { $0 + $1.summary.km } }  // a trainer's km count too
         var hours: Double { rides.reduce(0) { $0 + $1.summary.movingH } }
     }
 

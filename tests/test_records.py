@@ -41,15 +41,17 @@ def test_crow_flies():
 def test_tallies_streaks_and_bests():
     rides = weekly(7) + [ride("2025-06-01", 90, up=1500), ride("2026-04-20", 60, up=300, indoor=True)]
     y = records.you(rides, today=date(2026, 4, 22), tz=UTC)
-    assert y["all"]["rides"] == 9 and y["all"]["km"] == 370  # the indoor ride's 60 km are trainer km: not counted
-    # ... nor its 300 m of (virtual) climbing
-    assert y["all"]["ascent_m"] == 2200 and y["all"]["everests"] == round(2200 / 8849, 2)
+    # Indoor km and (virtual) climbing count in the tallies and Everests, split out as indoor (19 Nov 2026).
+    assert y["all"]["rides"] == 9 and y["all"]["km"] == 430
+    assert y["all"]["ascent_m"] == 2500 and y["all"]["everests"] == round(2500 / 8849, 2)
+    assert y["all"]["indoor"] == {"rides": 1, "km": 60, "hours": y["all"]["indoor"]["hours"], "ascent_m": 300}
+    assert y["all"]["longest_km"] == 90
     assert y["year"]["rides"] == 8 and y["last_year"]["km"] == 90
     assert y["month"]["label"] == "April 2026" and y["month"]["rides"] == 3
     assert y["since"] == "2025-06-01"
     # Seven Mondays in a row (2 Mar to 13 Apr), then the ride on 20 Apr makes it eight.
     assert y["streak"] == {"longest_weeks": 8, "longest_from": "2026-03-02", "current_weeks": 8}
-    best = {b["kind"]: b for b in y["bests"]}
+    best = {b["kind"]: b for b in y["bests"]}  # bests stay road rides
     assert best["distance"]["value"] == 90 and best["distance"]["date"] == "2025-06-01"
     assert best["climbing"]["text"] == "1,500 m"
     # Speed bests leave out indoor rides; power only comes from measured power.

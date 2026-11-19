@@ -55,7 +55,7 @@ def seasons(es: list[_Entry], today: date, years: int = 2) -> dict:
     count = {m: [0, 0] for m in range(1, 13)}
     for e in es:
         if e.day >= since:
-            count[e.day.month][0 if e.km >= 0.05 else 1] += 1
+            count[e.day.month][0 if not e.indoor and e.km >= 0.05 else 1] += 1
     months = {}
     for m, (out, ind) in count.items():
         months[m] = "none" if out + ind == 0 else "outdoor" if out >= 2 * max(ind, 0.5) \

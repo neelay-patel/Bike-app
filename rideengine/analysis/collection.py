@@ -80,10 +80,10 @@ def badges(es: list[_Entry], found: dict, tz: tzinfo | None = None,
         earned, best = None, 0.0
         if kind in ("ride_km", "ride_up", "fast50", "fast30", "dawn"):
             for e in es:
-                if kind == "ride_km":
-                    v = e.km
+                if kind == "ride_km":       # one ride's distance or climbing: road rides (as bests)
+                    v = e.value("km") or 0
                 elif kind == "ride_up":
-                    v = e.ascent or 0
+                    v = e.value("ascent") or 0
                 elif kind == "fast50":
                     v = (e.kmh or 0) if e.km >= 50 and not e.indoor else 0
                 elif kind == "fast30":
@@ -195,6 +195,7 @@ def binder(es: list[_Entry], notes: dict[str, list[dict]], names: dict[str, str]
             ns = notes.get(e.ride_id, [])
             cards.append({"ride_id": e.ride_id, "start": e.start, "date": e.day.isoformat(), "number": i,
                           "name": names.get(e.ride_id), "km": round(e.km, 1), "ascent_m": e.ascent,
+                          "indoor": e.indoor,
                           "holo": is_holo(ns), "headline": ns[0]["text"] if ns else None,
                           "shape": shapes.get(e.ride_id) or [], "week": _week(e.day).isoformat()})
         first = _week(rides[0].day)

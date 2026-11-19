@@ -285,9 +285,17 @@ private struct AllTimeHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             MonoLabel("All time", color: Theme.cobaltSoft)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                CountingText(value: shown ? tally.km : 0).font(Theme.hero(64))
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                CountingText(value: shown ? tally.km : 0).font(Theme.hero(64)).lineLimit(1).minimumScaleFactor(0.6)
                 Text("km").font(Theme.text(16)).foregroundStyle(Theme.cobaltSoft)
+                if let indoor = tally.indoor, indoor.km >= 0.5 {
+                    Spacer(minLength: 8)
+                    // Road and trainer km side by side: both count (19 Nov 2026).
+                    VStack(alignment: .trailing, spacing: 6) {
+                        split("Outdoors", tally.km - indoor.km)
+                        split("Indoors", indoor.km)
+                    }
+                }
             }
             if let crow = tally.crowFlies {
                 Text("About \(crow), as the crow flies.")
@@ -300,6 +308,16 @@ private struct AllTimeHero: View {
         .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .onFirstSeen { withAnimation(.easeOut(duration: 1.4)) { shown = true } }
         .accessibilityElement(children: .combine)
+    }
+
+    private func split(_ label: String, _ km: Double) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            MonoLabel(label, color: Theme.cobaltSoft)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                CountingText(value: shown ? km : 0, format: { Format.number($0, decimals: 0) }).font(Theme.text(17, .semibold))
+                Text("km").font(Theme.text(12)).foregroundStyle(Theme.cobaltSoft)
+            }
+        }
     }
 }
 

@@ -76,8 +76,12 @@ class _Entry:
     p1200: float | None = None     # best 20 minutes of measured power
 
     def value(self, key: str) -> float | None:
+        """For bests and a ride's notes. A trainer's km and climbing count in tallies (19 Nov 2026), but a
+        Zwift ride isn't your longest or hilliest road ride, so bests stay road-only."""
         v = getattr(self, key)
         if key == "kmh" and (self.indoor or self.km < SPEED_MIN_KM):
+            return None
+        if key in ("km", "ascent") and self.indoor:
             return None
         return v if v else None
 
@@ -87,15 +91,16 @@ def ride_id(ride: Ride) -> str:
 
 
 def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
-    """One flat record per ride, oldest first, in the rider's local time. A trainer's km aren't road km, nor
-    its climbing (Zwift's virtual hills): indoor rides count 0 km and 0 m in tallies and bests."""
+    """One flat record per ride, oldest first, in the rider's local time. Indoor km and climbing (Zwift's
+    virtual hills) count in tallies, streaks and Everests, split out as `indoor` (Neelay, 19 Nov 2026: the work
+    is real); bests stay road-only (_Entry.value)."""
     from .goals import power_curve
     out = []
     for r in rides:
         s = summary(r)
         pc = power_curve(r.samples, (60, 1200)) if r.provenance.get("channel:power") else {}
         out.append(_Entry(ride_id(r), r.start, datetime.fromtimestamp(r.start, tz).astimezone(tz).date(),
-                          0.0 if r.indoor else s["km"] or 0.0, None if r.indoor else s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
+                          s["km"] or 0.0, s["ascent_m"], s["moving_h"] or 0.0, s["avg_kmh"],
                           s["avg_power"] if r.provenance.get("channel:power") else None, r.indoor,
                           s["hr_drop_60s"], pc.get("60"), pc.get("1200")))
     return sorted(out, key=lambda e: e.start)
@@ -104,7 +109,7 @@ def entries(rides: list[Ride], tz: tzinfo | None = None) -> list[_Entry]:
 def entries_from_features(feats: list[dict], tz: tzinfo | None = None) -> list[_Entry]:
     """The same records from stored per-ride features (features.extract), without the samples."""
     out = [_Entry(f["ride_id"], f["start"], datetime.fromtimestamp(f["start"], tz).astimezone(tz).date(),
-                  0.0 if f["indoor"] else f["km"], None if f["indoor"] else f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
+                  f["km"] or 0.0, f["ascent_m"], f["moving_s"] / 3600, f["kmh"], f["power"], f["indoor"],
                   f.get("hr_drop_60s"), (f.get("power_curve") or {}).get("60"),
                   (f.get("power_curve") or {}).get("1200")) for f in feats]
     return sorted(out, key=lambda e: e.start)
@@ -145,11 +150,16 @@ def crow_flies(km: float) -> str | None:
 
 # --- tallies -------------------------------------------------------------------------------
 def _tally(es: list[_Entry]) -> dict:
+    """Everything counts, indoors too; `indoor` is the part of it on a trainer. Longest is a road ride."""
     km = sum(e.km for e in es)
     up = sum(e.ascent or 0 for e in es)
+    ins = [e for e in es if e.indoor]
     return {"rides": len(es), "km": round(km, 1), "hours": round(sum(e.hours for e in es), 1),
             "ascent_m": round(up), "everests": round(up / EVEREST_M, 2),
-            "longest_km": round(max((e.km for e in es), default=0), 1)}
+            "longest_km": round(max((e.value("km") or 0 for e in es), default=0), 1),
+            "indoor": {"rides": len(ins), "km": round(sum(e.km for e in ins), 1),
+                       "hours": round(sum(e.hours for e in ins), 1),
+                       "ascent_m": round(sum(e.ascent or 0 for e in ins))}}
 
 
 def _week(d: date) -> date:

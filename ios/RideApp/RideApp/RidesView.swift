@@ -149,9 +149,9 @@ struct MonthTotal {
         let month = all.filter { cal.isDate($0.date, equalTo: latest, toGranularity: .month) }
         let efforts = month.filter { $0.effort == nil || $0.effort == $0.rideId }.count
         title = latest.formatted(.dateTime.month(.wide).year())
-        km = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.km) }  // trainer km aren't road km
+        km = month.reduce(0) { $0 + $1.summary.km }  // a trainer's km and climbing count too (19 Nov 2026)
         rides = efforts
-        climbed = month.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.ascentM ?? 0) }  // nor its virtual climbing
+        climbed = month.reduce(0) { $0 + ($1.summary.ascentM ?? 0) }
         longest = month.map { $0.noDistance ? 0 : $0.summary.km }.max() ?? 0
         hours = month.reduce(0) { $0 + $1.summary.movingH }
     }

@@ -261,6 +261,9 @@ struct YouSummary: Decodable {
         let everests: Double
         let longestKm: Double
         let crowFlies: String?
+        /// The part of it on a trainer (Zwift km and climbing count in the totals, 19 Nov 2026).
+        let indoor: Indoor?
+        struct Indoor: Decodable { let rides: Int; let km: Double; let hours: Double; let ascentM: Double }
     }
 
     struct Streak: Decodable {
@@ -583,6 +586,7 @@ struct CollectionSummary: Decodable {
         let headline: String?
         let shape: [[Double]]
         let week: String
+        var indoor: Bool? = nil
     }
 }
 

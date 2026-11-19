@@ -58,10 +58,10 @@ struct NewRideMoment: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var counted = false
 
-    private var addedKm: Double { rides.reduce(0) { $0 + ($1.noDistance ? 0 : $1.summary.km) } }
+    private var addedKm: Double { rides.reduce(0) { $0 + $1.summary.km } }
     private var addedHours: Double { rides.reduce(0) { $0 + $1.summary.movingH } }
-    private var addedUp: Double { rides.reduce(0) { $0 + ($1.noDistance ? 0 : ($1.summary.ascentM ?? 0)) } }
-    /// Outdoors the kilometres lead; a trainer adds no road km (CLAUDE.md), so indoors the hours do.
+    private var addedUp: Double { rides.reduce(0) { $0 + ($1.summary.ascentM ?? 0) } }
+    /// Kilometres lead, a trainer's too (Zwift); a session with no distance at all leads with the hours.
     private var kmLead: Bool { addedKm >= 0.5 }
 
     var body: some View {

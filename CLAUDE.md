@@ -78,9 +78,12 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
 - **Strava is not a data source.** Its API terms bar AI use and showing a user's data to others.
 - Prefer device totals (barometric climbing, moving time, wearable calories) over values derived from GPS. Record where every value came from.
 - **Simulated power must always be labelled** (SIM) and never feed real totals (calories, load).
-- A trainer's km aren't road km, nor its climbing (Zwift's virtual metres, 18 Nov 2026): indoor rides count 0 km and
-  0 m in tallies, bests and month totals (17 Nov 2026), and show
-  time, power and heart rate instead. Average power is over pedalling time (zeros left out), as Zwift shows it.
+- Indoor km and climbing (a trainer's distance, Zwift's virtual metres) **count** in every tally, streak, Everest and
+  month total (Neelay, 19 Nov 2026: the work is real; replaces the 17-18 Nov "count 0" rule), with the indoor part
+  split out (`indoor` in each tally; All Time shows outdoors/indoors). Bests and single-ride badges stay road rides; no
+  separate indoor bests or virtual segments (too cluttered). Only climbing a ride game reports counts, never invented
+  from ERG power. Indoor rides lead with time, power and heart rate, plus Climbed when they climbed. Average power is
+  over pedalling time (zeros left out), as Zwift shows it.
 - Calories: the wearable wins (Neelay's call), then energy from measured power, then the head unit.
 - Python 3.11+, standard library only for the engine (keeps it portable to a backend). pytest for tests.
 - Request only the data a ride needs from every provider (workouts and HR during them), keep the original files, and delete a provider's data when the rider disconnects it.
@@ -123,7 +126,7 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 - **Data:** Garmin personal-key connector (matches the verified numbers, 13 Nov); Apple Health (185 Watch rides,
   heart rate after rides, 2 years of HRV/resting HR/VO2 max, 14 Nov); KICKR power read via the Watch (17 Nov).
 - **Efforts** (18 Nov): sessions with false starts folded in and phases read from the samples. Indoor km and climbing
-  count 0. The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
+  count in tallies (19 Nov). The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
   (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
   by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
 - **Ride card** (redone 19 Nov): dot-matrix numbers on graphite with the colour ribbon, the map on top outdoors, the

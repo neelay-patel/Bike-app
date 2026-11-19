@@ -151,7 +151,7 @@ struct MiniCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
-    private var indoor: Bool { card.km < 0.05 }
+    private var indoor: Bool { card.indoor == true || card.km < 0.05 }
 
     // The big card in small (19 Nov 2026): name strip, the route on blue (outdoors), the number in
     // dot-matrix on graphite (indoors with the indoor icon), the colour ribbon, then name and date on sand.

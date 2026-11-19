@@ -169,7 +169,8 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     name = name or f"{when:%A} {'indoor ' if indoor else ''}ride"
     minutes = round((s["moving_h"] or 0) * 60)
     if indoor:
-        lead = f"{minutes} minutes indoors."
+        # A ride game's climbing (Zwift) is real work against gravity: it counts and is shown (19 Nov 2026).
+        lead = f"{minutes} minutes indoors" + (f", {_num(up)} m climbed." if up and up >= 1 else ".")
     else:
         lead = f"{_num(up)} m in {round(km)} km." if up else f"{_num(km, 1)} km."
     title = f"{lead} {headline}" if headline else lead
@@ -205,6 +206,8 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     if up and not indoor:
         stats.append(("Climbing", f"{_hero(up)} m"))
     stats.append(("Time" if indoor else "Moving time", _duration(s["moving_h"] * 3600)))
+    if indoor and up and up >= 1:
+        stats.append(("Climbed", f"{_hero(up)} m"))
     power = indoor and s["power_60s"] is not None
     if power:
         stats.append(("Avg power", f"{round(s['avg_power'])} W"))
