@@ -167,9 +167,7 @@ struct MiniCard: View {
             .background { header }
             Group {
                 if indoor {
-                    Image(systemName: Self.indoorSymbol).font(.system(size: 24)).foregroundStyle(Theme.cobaltSoft)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Theme.panel)
+                    IndoorPicture(card: card)
                 } else {
                     RouteShape(points: card.shape)
                         .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
@@ -182,6 +180,10 @@ struct MiniCard: View {
                 Text(number).font(Theme.hero(19)).lineLimit(1).minimumScaleFactor(0.6)
                 Text(unit).font(Theme.mono(9))
                 Spacer(minLength: 0)
+                if indoor {
+                    Image(systemName: Self.indoorSymbol).font(.system(size: 13)).foregroundStyle(Theme.cobaltSoft)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 7).padding(.vertical, 5)
@@ -231,6 +233,74 @@ struct MiniCard: View {
                       Color(hex: 0xBFF5DD), Color(hex: 0xF7D6E6)]
         return LinearGradient(colors: colors, startPoint: UnitPoint(x: -1 + 2 * phase, y: 0),
                               endPoint: UnitPoint(x: 1 + 2 * phase, y: 1))
+    }
+}
+
+/// An indoor card's picture, on wine where the outdoor ones are on blue: the ride game's virtual route
+/// (Zwift sends made-up GPS) with its world's name, else the session's shape over time (power, else heart
+/// rate), else just the indoor icon. The small icon sits in the black strip, by the time.
+private struct IndoorPicture: View {
+    let card: CollectionSummary.BinderCard
+
+    var body: some View {
+        ZStack {
+            Theme.heart
+            if !card.shape.isEmpty {
+                RouteShape(points: card.shape)
+                    .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .padding(.horizontal, 12).padding(.top, 20).padding(.bottom, 9)  // clear of the world's name
+            } else if let trace = card.trace, trace.count > 1 {
+                ZStack {
+                    TraceShape(values: trace, closed: true)
+                        .fill(LinearGradient(colors: [.white.opacity(0.38), .white.opacity(0.04)],
+                                             startPoint: .top, endPoint: .bottom))
+                    TraceShape(values: trace)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
+                }
+                .padding(.top, 20).padding(.bottom, 4)
+            } else {
+                Image(systemName: MiniCard.indoorSymbol).font(.system(size: 24)).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let label {
+                Text(label).font(Theme.mono(7)).tracking(0.8).foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1).padding(.horizontal, 6).padding(.top, 7)
+            }
+        }
+    }
+
+    private var label: String? {
+        if let world = card.world { return world.uppercased() }
+        guard card.shape.isEmpty, (card.trace?.count ?? 0) > 1 else { return nil }
+        return card.traceKind == "power" ? "POWER" : "♥ RATE"
+    }
+}
+
+/// A series scaled 0..1 drawn left to right (high values at the top); closed fills down to the bottom.
+struct TraceShape: Shape {
+    let values: [Double]
+    var closed = false
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        guard values.count > 1 else { return p }
+        let step = rect.width / CGFloat(values.count - 1)
+        let pts = values.enumerated().map { CGPoint(x: rect.minX + CGFloat($0.offset) * step,
+                                                    y: rect.maxY - CGFloat($0.element) * rect.height) }
+        p.move(to: pts[0])
+        // Smooth through the points (midpoint curves), so 48 steps read as a line, not a staircase.
+        for i in 1..<pts.count {
+            let mid = CGPoint(x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2)
+            p.addQuadCurve(to: mid, control: pts[i - 1])
+        }
+        p.addLine(to: pts[pts.count - 1])
+        if closed {
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.closeSubpath()
+        }
+        return p
     }
 }
 

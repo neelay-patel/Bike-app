@@ -18,8 +18,8 @@ from .goals import power_curve
 from .headline import hold, watts_per_beat
 from .repeats import Track
 
-VERSION = 8  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
-             # 8 efficiency and durability (headline.py)
+VERSION = 9  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
+             # 8 efficiency and durability (headline.py); 9 indoor trace, virtual route and world (mini cards)
 
 
 def extract(ride: Ride) -> dict:
@@ -35,6 +35,13 @@ def extract(ride: Ride) -> dict:
          "m_per_beat": None, "hold": hold(ride),
          "cells": [], "first": None, "last": None, "bbox": None, "track_km": 0.0, "climbs": []}
     if ride.indoor:
+        # The indoor mini card's picture: the ride game's virtual route when there is one (Zwift sends its
+        # made-up GPS), else the session's shape over time (power, else heart rate).
+        f["trace"], f["trace_kind"] = trace(ride)
+        t = Track.of(ride)
+        if len(t.lat) >= 10:
+            f["shape"] = shape(t)
+            f["world"] = virtual_world(t.lat[0], t.lon[0])
         return f
     t = Track.of(ride)
     if len(t.lat) < 10:
@@ -66,6 +73,37 @@ def shape(t: Track, points: int = 48) -> list[list[float]]:
     ox = (span - (max(xs) - min(xs))) / 2
     oy = (span - (max(ys) - min(ys))) / 2
     return [[round((x - min(xs) + ox) / span, 3), round((y - min(ys) + oy) / span, 3)] for x, y in picks]
+
+
+def trace(ride: Ride, points: int = 48) -> tuple[list[float], str | None]:
+    """The session over time in `points` steps, scaled 0..1: measured power if any, else heart rate."""
+    for kind in ("power", "hr"):
+        if kind == "power" and not ride.provenance.get("channel:power"):
+            continue
+        xs = [(s.t, getattr(s, kind)) for s in ride.samples if getattr(s, kind) is not None]
+        if len(xs) < points:
+            continue
+        t0, span = xs[0][0], (xs[-1][0] - xs[0][0]) or 1
+        bins: list[list[float]] = [[] for _ in range(points)]
+        for t, v in xs:
+            bins[min(points - 1, int((t - t0) / span * points))].append(v)
+        avg, last = [], None
+        for b in bins:
+            last = sum(b) / len(b) if b else last
+            avg.append(last)
+        avg = [a if a is not None else next(x for x in avg if x is not None) for a in avg]
+        lo, hi = min(avg), max(avg)
+        return [round((a - lo) / ((hi - lo) or 1), 3) for a in avg], kind
+    return [], None
+
+
+# Zwift's made-up worlds sit on fake coordinates in the Pacific; the others ride real cities' maps.
+VIRTUAL_WORLDS = [("Watopia", -11.75, -11.6, 166.85, 167.05), ("Makuri Islands", -10.85, -10.7, 165.75, 165.9),
+                  ("France", -21.8, -21.6, 166.1, 166.3)]
+
+
+def virtual_world(lat: float, lon: float) -> str | None:
+    return next((n for n, a, b, c, d in VIRTUAL_WORLDS if a <= lat <= b and c <= lon <= d), None)
 
 
 class Brief:

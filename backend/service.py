@@ -680,10 +680,14 @@ class Backend:
         badges = col.badges(es, found, tz, local)
         names = {l["ride_id"]: r["name"] for r in found["routes"] for l in r["laps"]}
         shapes = {f["ride_id"]: f.get("shape") or [] for f in vfeats}
+        # Indoor mini cards: the session's shape over time and the ride game's world (features.trace).
+        inside = {f["ride_id"]: {"trace": f.get("trace") or [], "trace_kind": f.get("trace_kind"),
+                                 "world": f.get("world")}
+                  for f in vfeats if f["indoor"]}
         me = self.me(user_id)
         return {"rider": {**col.ratings(es, today), "name": me["name"], "avatar": me["avatar"],
                           "badges_earned": sum(b["earned"] for b in badges), "badges_total": len(badges)},
-                "badges": badges, "binder": col.binder(es, notes, names, shapes, today)}
+                "badges": badges, "binder": col.binder(es, notes, names, shapes, today, inside)}
 
     def rider_card_html(self, user_id: int, fonts: str = "google", background: str = "#FFFFFF") -> str:
         from rideengine.card.rider_card import rider_card

@@ -587,6 +587,10 @@ struct CollectionSummary: Decodable {
         let shape: [[Double]]
         let week: String
         var indoor: Bool? = nil
+        /// Indoors: the session over time, 0..1 (power, else heart rate), and the ride game's world (Zwift).
+        var trace: [Double]? = nil
+        var traceKind: String? = nil
+        var world: String? = nil
     }
 }
 

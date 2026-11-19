@@ -169,3 +169,19 @@ def test_indoor_session_without_distance():
     html = ride_card(ride, places=[])
     assert "30 minutes indoors." in html and "· INDOOR<" in html and "DISTANCE" not in html
     assert "MAX HEART RATE" in html and "indoor ride" in html
+
+
+def test_indoor_mini_card_picture():
+    """Indoor cards get a picture: the ride game's virtual route and world (Zwift), else the session's shape."""
+    from rideengine.analysis import features
+    from rideengine.model import Ride, Sample
+    hr_only = Ride(start=0, end=3600, sport="cycling", indoor=True, totals={}, provenance={}, recordings=[],
+                   samples=[Sample(t=float(i), hr=100 + i / 60) for i in range(0, 3600, 5)])
+    f = features.extract(hr_only)
+    assert f["trace_kind"] == "hr" and len(f["trace"]) == 48 and f["trace"][0] == 0 and f["trace"][-1] == 1
+    assert not f.get("shape") and "world" not in f
+    zwift = Ride(start=0, end=600, sport="cycling", indoor=True, totals={}, provenance={}, recordings=[],
+                 samples=[Sample(t=float(i), lat=-11.65 + i * 1e-5, lon=166.95, hr=130) for i in range(600)])
+    f = features.extract(zwift)
+    assert f["world"] == "Watopia" and len(f["shape"]) == 49
+    assert features.virtual_world(43.65, -79.38) is None  # Toronto is real

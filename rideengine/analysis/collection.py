@@ -181,7 +181,7 @@ def ratings(es: list[_Entry], today: date) -> dict:
 
 # --- season binder ---------------------------------------------------------------------------
 def binder(es: list[_Entry], notes: dict[str, list[dict]], names: dict[str, str], shapes: dict[str, list],
-           today: date) -> list[dict]:
+           today: date, indoor: dict[str, dict] | None = None) -> list[dict]:
     """One page per year, newest first: every ride's card in order (number in the year, holo when it
     set a personal best), and the weeks of the season with no ride (the gaps in the binder)."""
     years: dict[int, list[_Entry]] = {}
@@ -195,7 +195,7 @@ def binder(es: list[_Entry], notes: dict[str, list[dict]], names: dict[str, str]
             ns = notes.get(e.ride_id, [])
             cards.append({"ride_id": e.ride_id, "start": e.start, "date": e.day.isoformat(), "number": i,
                           "name": names.get(e.ride_id), "km": round(e.km, 1), "ascent_m": e.ascent,
-                          "indoor": e.indoor,
+                          "indoor": e.indoor, **((indoor or {}).get(e.ride_id) or {}),
                           "holo": is_holo(ns), "headline": ns[0]["text"] if ns else None,
                           "shape": shapes.get(e.ride_id) or [], "week": _week(e.day).isoformat()})
         first = _week(rides[0].day)

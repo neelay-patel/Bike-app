@@ -130,7 +130,7 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
   by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
 - **Ride card** (redone 19 Nov): dot-matrix numbers on graphite with the colour ribbon, the map on top outdoors, the
-  indoor icon indoors. The collection's small cards match (route on blue or the icon on black, km or time in dot-matrix,
+  indoor icon indoors. The collection's small cards match (route on blue; indoors on wine with Zwift's virtual route and world, else the session's power or heart-rate shape, `features.trace`; km or time in dot-matrix,
   ribbon, name and date). The ride screen no longer repeats the card's numbers: "What you did" has a titled Power (or
   Heart rate) chart with the session's phases, then the Elevation profile for outdoor rides.
 - **You tab** (redesigned 18 Nov): the rider card (top trumps) first with Share, avatar and your bike; then the four
