@@ -119,10 +119,16 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 - **Data:** Garmin personal-key connector (matches the verified numbers, 13 Nov); Apple Health (185 Watch rides,
   heart rate after rides, 2 years of HRV/resting HR/VO2 max, 14 Nov); KICKR power read via the Watch (17 Nov).
 - **Efforts** (18 Nov): sessions with false starts folded in and phases read from the samples. Indoor km and climbing
-  count 0.
-- **You tab:** four headline numbers with goal targets, fitness and recovery, tallies with prizes, bests, home loop,
-  Binder (rider card, bike, badges, avatar). **Plan tab:** training plan, calendar feed, Zwift export.
-- **Routes:** check a GPX (surfaces, singletrack, busy roads, rest stops, time, cue sheet), our own Ontario map, send to
+  count 0. The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
+  (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
+  by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
+- **You tab** (redesigned 18 Nov): the rider card (top trumps) first with Share, avatar and your bike; then the four
+  headline numbers with goal targets, fitness and recovery, badges, bests, tallies, this year, home loop. The season
+  binder and "Lately" moved into Efforts; prizes are put away (code kept). **Plan tab:** training plan, calendar feed,
+  Zwift export.
+- **Status line** (18 Nov): one line under each title: checking for new rides, out of reach (grey, with when data last
+  loaded), or a real problem in red that says what to do. A cancelled request is never shown.
+- **Routes:** the Route Enhancer: check a GPX (surfaces, singletrack, busy roads, rest stops, time, cue sheet), our own Ontario map, send to
   the Edge (FIT course), tune it (shorter/longer, add a stop, start elsewhere, undo), and **describe a ride** (loops,
   one way, there and back; addresses via Apple Maps; "not much gravel near home" offers better starts).
 - **Home:** set in Settings, else where most of the past year's rides start.
@@ -132,20 +138,25 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   (`scripts/mac-server.sh`, 18 Nov), not in a terminal tab, so it survives sessions ending and restarts itself.
 
 ## Next steps
-1. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays
+1. **Live with the new Efforts and You** (18 Nov) and adjust from real use: is the full-size card too much on a day
+   with nothing new (could shrink it then); does the collection make history feel close at hand.
+2. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
+   milestones are kept). Badges, holo cards and the rider card are the pieces to build on.
+3. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays
    out of totals.
-2. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile). Then Sign in with Apple (paid
+4. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile). Then Sign in with Apple (paid
    developer account) in place of the dev token.
-3. **Engine and AI** (`docs/coaching.md` section 7): agreed in principle, parked until Neelay decides. Order: match
+5. **Engine and AI** (`docs/coaching.md` section 7): agreed in principle, parked until Neelay decides. Order: match
    efforts to the plan, the AI layer (retelling efforts from the engine's numbers; needs an Anthropic API key in the
-   backend's environment), re-planning, conversation. He has no goal set yet.
-4. **Routes, next:** Garmin Courses API for one-tap sending (with the Starter tier); scenery scoring; starts at a café
+   backend's environment), re-planning, conversation. His goal: keep up with the fast group, ready by 1 May 2027.
+6. **Routes, next:** Garmin Courses API for one-tap sending (with the Starter tier); scenery scoring; starts at a café
    or car park rather than a town centre; move a one-way's destination in tuning; people to ride with
    (`docs/routes.md`).
-5. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
-   (every ride's per-second samples are stored twice as JSON), delete account, Sign in with Apple, host the backend
+7. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
+   (every ride's per-second samples are stored twice as JSON; `GET /v1/rides` takes ~1.7 s, the app's blank first
+   second or two), delete account, Sign in with Apple, host the backend
    (also ends the home Wi-Fi limit), Garmin Starter tier (OAuth + push webhook, apply early), privacy policy, TestFlight.
-6. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's
+8. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's
    terms in full and fill in `SOURCE_POLICY`.
 
 ## Linked work in claude.ai (Project "Cycling app")
