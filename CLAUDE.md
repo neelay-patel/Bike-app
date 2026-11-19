@@ -57,7 +57,11 @@ normal riding, an AI coach that explains while the engine calculates. Data strat
   (18 Nov 2026): `request.py` (the rider's words to a request, rule-based: loop, one way, there and back) and
   `generate.py` (up to three routes on our map, scored, each saved as a checked course); `gravelmap.py` (where the gravel is: offers better starts when a gravel loop from home can't be one). The check picks a few rest stops (`rest_stops`), not every café. Backend `/v1/courses` (+ `/plan`, `/tune`, `/undo`, `/options`); app:
   Routes tab with Describe a ride and a Tune it card.
-- `rideengine/card/`: `ride_card.py`, the collectible ride card in the chosen look (D), from a Ride (privacy zone around home, local or Google fonts); `make_card.py` is the older graphite card (prototype). Served at `GET /v1/rides/{id}/card` and shown at the top of each ride in the app, with Share (asks first when a source isn't cleared for sharing). `python -m backend card --user 1 <ride_id>`.
+- `rideengine/card/`: `ride_card.py`, the collectible ride card in the chosen look (D), from a Ride (privacy zone around home, local or Google fonts).
+  Redone 19 Nov 2026: name strip, the route map on blue (outdoors only), the numbers in dot-matrix on graphite, the colour
+  ribbon, the headline on sand. Indoors there's no map or power trace (Neelay: it told him nothing); the app's indoor icon
+  (SF Symbol `figure.indoor.cycle`, swapped in by `CardRenderer.embedFonts` for `indoor-mark.png`) sits in the panel's corner.
+  360 wide and as tall as it needs (indoor cards are shorter; the app measures each); long names shrink to fit. `make_card.py` is the older graphite card (prototype). Served at `GET /v1/rides/{id}/card` and shown at the top of each ride in the app, with Share (asks first when a source isn't cleared for sharing). `python -m backend card --user 1 <ride_id>`.
 - `design/tokens.json` + `docs/design.md`: the look (direction D, 13 Nov 2026). The app's `Theme.swift` copies the tokens (test checks they match); fonts bundled in `ios/RideApp/RideApp/Fonts/` with their licences.
 - `rideengine/__main__.py`: CLI (`python -m rideengine import|rides|show|trends|card`).
 - `backend/`: hosted service (FastAPI; SQLite in dev, Postgres later). `service.py` (users, connections, sync, upload, re-merge by time window), `connectors/` (one module per provider on `base.Connector`; `__init__` lists all seven with status), `insights.py` (stored, incremental insights: features per ride, routes, climbs, laps, attempts, notes; background refresh; see `docs/insights.md`), `app.py` (HTTP API; home is the one the rider set in Settings, else where most of the past year's rides start: `Backend.home_point`, used for routes from home, the home loop, local times and the card's privacy zone), `crypto.py` (credentials encrypted at rest), `__main__.py` (dev CLI). Dev data in `data/backend/`. Dependencies in `requirements-backend.txt`; the engine itself stays stdlib-only.
@@ -114,7 +118,7 @@ scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a logi
   From the Garmin .FIT via the personal API (13 Nov 2026): 104.3 km, 850 m (device barometric total, which wins over the 633 m GPX-track figure), 4:25 moving.
 - Durham Forest via the Garmin personal API (13 Nov 2026): 68.7 km, 1,139 m, 3:55 moving. Matches.
 
-## Where things stand (18 Nov 2026)
+## Where things stand (19 Nov 2026)
 Built and on Neelay's iPhone (all pushed to origin/main):
 - **Data:** Garmin personal-key connector (matches the verified numbers, 13 Nov); Apple Health (185 Watch rides,
   heart rate after rides, 2 years of HRV/resting HR/VO2 max, 14 Nov); KICKR power read via the Watch (17 Nov).
@@ -122,6 +126,10 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   count 0. The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
   (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
   by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
+- **Ride card** (redone 19 Nov): dot-matrix numbers on graphite with the colour ribbon, the map on top outdoors, the
+  indoor icon indoors. The collection's small cards match (route on blue or the icon on black, km or time in dot-matrix,
+  ribbon, name and date). The ride screen no longer repeats the card's numbers: "What you did" has a titled Power (or
+  Heart rate) chart with the session's phases, then the Elevation profile for outdoor rides.
 - **You tab** (redesigned 18 Nov): the rider card (top trumps) first with Share, avatar and your bike; then the four
   headline numbers with goal targets, fitness and recovery, badges, bests, tallies, this year, home loop. The season
   binder and "Lately" moved into Efforts; prizes are put away (code kept). **Plan tab:** training plan, calendar feed,
@@ -138,8 +146,9 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   (`scripts/mac-server.sh`, 18 Nov), not in a terminal tab, so it survives sessions ending and restarts itself.
 
 ## Next steps
-1. **Live with the new Efforts and You** (18 Nov) and adjust from real use: is the full-size card too much on a day
-   with nothing new (could shrink it then); does the collection make history feel close at hand.
+1. **Live with the new Efforts, ride card and You** (18-19 Nov) and adjust from real use: is the full-size card too
+   much on a day with nothing new (could shrink it then); does the collection make history feel close at hand; do
+   indoor cards (shorter than 9:16) share well, or should they be padded to 9:16 for Instagram.
 2. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
    milestones are kept). Badges, holo cards and the rider card are the pieces to build on.
 3. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays
