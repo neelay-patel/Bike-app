@@ -126,7 +126,7 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 - **Data:** Garmin personal-key connector (matches the verified numbers, 13 Nov); Apple Health (185 Watch rides,
   heart rate after rides, 2 years of HRV/resting HR/VO2 max, 14 Nov); KICKR power read via the Watch (17 Nov).
 - **Efforts** (18 Nov): sessions with false starts folded in and phases read from the samples. Indoor km and climbing
-  count in tallies (19 Nov). The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
+  count in every tally, streak and Everest, split out as indoor (19 Nov; All Time shows outdoors/indoors). The tab (redesigned 18 Nov evening): new efforts since you last looked lead as their full ride card
   (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
   by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
 - **Ride card** (redone 19 Nov): dot-matrix numbers on graphite with the colour ribbon, the map on top outdoors, the
@@ -137,6 +137,9 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   headline numbers with goal targets, fitness and recovery, badges, bests, tallies, this year, home loop. The season
   binder and "Lately" moved into Efforts; prizes are put away (code kept). **Plan tab:** training plan, calendar feed,
   Zwift export.
+- **Motion** (19 Nov, `Motion.swift`): dot-matrix numbers count up (headline numbers, tallies, month strip); a new
+  effort's card springs in with a sheen; when new rides arrive, the all-time tallies slide up from the bottom and count
+  on. "New" is tracked by start time, not ride id (ids change when the server re-merges a Watch ride with Garmin's).
 - **Status line** (18 Nov): one line under each title: checking for new rides, out of reach (grey, with when data last
   loaded), or a real problem in red that says what to do. A cancelled request is never shown.
 - **Routes:** the Route Enhancer: check a GPX (surfaces, singletrack, busy roads, rest stops, time, cue sheet), our own Ontario map, send to
@@ -151,11 +154,13 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 ## Next steps
 1. **Live with the new Efforts, ride card and You** (18-19 Nov) and adjust from real use: is the full-size card too
    much on a day with nothing new (could shrink it then); does the collection make history feel close at hand; do
-   indoor cards (shorter than 9:16) share well, or should they be padded to 9:16 for Instagram.
+   indoor cards (shorter than 9:16) share well, or should they be padded to 9:16 for Instagram. **App name and icon** (19 Nov): the app is **Kova** on the phone (Finnish: hard, strong; quick searches found no app of that name; Kado and Orka were tried first). Icon: "the climb", five columns of white dots rising to a yellow summit on graphite, no ribbon, drawn by `swift scripts/make_icon.swift ios/RideApp/RideApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png --no-ribbon`. Mock-ups: https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9. The bundle id and project are still RideApp. Check the trademark before going public.
 2. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
    milestones are kept). Badges, holo cards and the rider card are the pieces to build on.
-3. **Check Zwift via Garmin** after his next Zwift ride: it arrives as "Zwift (via Garmin)" and virtual climbing stays
-   out of totals.
+3. **Zwift via Garmin works** (checked 19 Nov): arrives as "Zwift (via Garmin)" with its climbing and virtual route
+   (Watopia), now counted in totals. The four headline bars have known quirks (sustained only moves on a new best
+   20 min; efficiency's baseline from one ride; durability needs 2 h+ rides so never indoors, and its bar was full from
+   day one): Neelay chose to leave them as they are for now.
 4. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile). Then Sign in with Apple (paid
    developer account) in place of the dev token.
 5. **Engine and AI** (`docs/coaching.md` section 7): agreed in principle, parked until Neelay decides. Order: match
