@@ -1,0 +1,244 @@
+"""Train, step 2 (docs/train-tab.md): today's session or rest, and how the rest of the week lays out.
+
+The plan's dates are a guide (the rider's usual days); what's still open this week is a menu. Each day the best
+next session is picked from it, given what's done, the last few days, recovery and the days left:
+
+    plan_today(sessions, recent, today, week_start, readiness) ->
+        {"state": "session" | "rest" | "done", "session_id", "why", "then", "moved", "schedule"}
+
+Limits no plan change (and no AI) can cross: no hard days back to back, no more than MAX_STREAK riding days in a
+row, a rest day after STREAK_REST in a row when the week allows. Words follow docs/train-words.md.
+"""
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+HARD = {"surges", "steady", "threshold", "vo2", "over_unders", "sprint", "group", "mixed"}
+EASY = {"endurance", "long", "easy"}
+STREAK_REST = 3          # after this many riding days in a row, rest if the week allows
+MAX_STREAK = 4           # never more than this many in a row
+# Which open session comes first when several could: the goal's key work, then the rest.
+PRIORITY = ["surges", "steady", "threshold", "vo2", "over_unders", "sprint", "group", "long", "endurance", "easy"]
+WEEKDAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+# Why each session, tied to getting faster and keeping up (docs/train-words.md: WHY is the goal, in a sentence).
+WHY = {"surges": "When the group speeds up, efforts like these keep you on the wheel.",
+       "steady": "It raises the power you can hold for a whole ride: the base of keeping up.",
+       "threshold": "It lifts the most you can hold for an hour.",
+       "over_unders": "It teaches you to recover while still working, as you must in a hard group.",
+       "vo2": "It raises your top end, so the hard moments feel less hard.",
+       "sprint": "Snap for the moments that decide a ride.",
+       "group": "Practice for the real thing: holding the wheel and answering the surges.",
+       "endurance": "Easy hours build the engine everything else sits on.",
+       "long": "Time in the saddle builds the endurance for longer, faster rides.",
+       "easy": "It keeps your legs turning while you recover."}
+# How each session should feel (docs/train-words.md, the glossary): feel words first; watts are added by the caller.
+FEEL = {"surges": "Hard parts 8–9 out of 10, too hard to talk; everything else easy.",
+        "steady": "7 out of 10: comfortably hard, short sentences only.",
+        "threshold": "8 out of 10: hard but steady, a few words at a time.",
+        "over_unders": "The overs hard, the unders just below: no real rest until the set ends.",
+        "vo2": "9 out of 10 for each effort: breathing hard, no talking.",
+        "sprint": "All out for the sprint itself, then completely easy.",
+        "group": "Varied: sit in when you can, then answer the surges.",
+        "endurance": "4 out of 10: you could chat all the way.",
+        "long": "4 out of 10: you could chat all the way. Eat and drink from the first hour.",
+        "easy": "2–3 out of 10: legs turning, nothing more."}
+
+
+def hard(kind: str | None) -> bool:
+    return kind in HARD
+
+
+def _day_name(d: date, today: date) -> str:
+    if d == today:
+        return "Today"
+    if d == today + timedelta(days=1):
+        return "Tomorrow"
+    return WEEKDAY[d.weekday()]
+
+
+def short(session: dict) -> str:
+    """A session in a few words: its name and its main set ("Sweet spot, 3 × 12 min")."""
+    name = session["title"]
+    sets = [s["set"] for s in session.get("steps") or [] if "set" in s]
+    if sets:
+        main = sets[0].split(" / ")[0].split(" (")[0]
+        main = main.replace(" sweet spot", "").replace(" hard", "").replace(" threshold", "")
+        return f"{name}, {main}"
+    minutes = round((session.get("seconds") or 0) / 60)
+    return f"{name}, {minutes} min" if minutes and not session.get("off_bike") else name
+
+
+def _streak(rode: set, before: date) -> int:
+    n, d = 0, before - timedelta(days=1)
+    while d in rode:
+        n += 1
+        d -= timedelta(days=1)
+    return n
+
+
+def schedule(open_sessions: list[dict], first: date, end: date, rode: set, hard_days: set) -> dict[str, date] | None:
+    """Place the open sessions on days from `first` to before `end`: each on the earliest day on or after the
+    later of its planned date and `first`, with no hard day next to another and no more than MAX_STREAK riding
+    days in a row (counting rides already done). None if they don't all fit."""
+    placed: dict[str, date] = {}
+    riding, harder = set(rode), set(hard_days)
+    order = sorted(open_sessions, key=lambda s: (s["date"], PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99))
+    for s in order:
+        d = max(first, date.fromisoformat(s["date"]))
+        while d < end:
+            ok = d not in riding
+            if ok and hard(s["kind"]):
+                ok = (d - timedelta(days=1)) not in harder and (d + timedelta(days=1)) not in harder
+            if ok:
+                riding.add(d)
+                ok = _streak(riding, d + timedelta(days=1)) <= MAX_STREAK
+                riding.discard(d)
+            if ok:
+                break
+            d += timedelta(days=1)
+        if d >= end:
+            # Not after its planned date: try any free day from `first` (a session can come earlier).
+            d = first
+            while d < end and (d in riding or (hard(s["kind"]) and ((d - timedelta(days=1)) in harder or
+                                                                    (d + timedelta(days=1)) in harder))):
+                d += timedelta(days=1)
+            if d >= end:
+                return None
+        placed[s["id"]] = d
+        riding.add(d)
+        if hard(s["kind"]):
+            harder.add(d)
+    return placed
+
+
+def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start: date,
+               readiness: str = "unknown") -> dict:
+    """sessions: this week's sessions, each with "status" (done | open | today | upcoming | missed).
+    recent: rides of the last 7 days and today, [{"date": date, "kind": str | None, "minutes": int}].
+    readiness: good | watch | strained | unknown (wellness.readiness)."""
+    end = week_start + timedelta(days=7)
+    rides = [r for r in recent if r.get("kind") is not None or (r.get("minutes") or 0) >= 15]
+    rode = {r["date"] for r in rides if r["date"] < today}
+    hard_days = {r["date"] for r in rides if r["date"] < today and hard(r.get("kind"))}
+    rode_today = [r for r in rides if r["date"] == today]
+    open_ = [s for s in sessions if s.get("status") != "done" and not s.get("off_bike")]
+    off_bike = [s for s in sessions if s.get("status") != "done" and s.get("off_bike")]
+    yesterday = today - timedelta(days=1)
+    streak = _streak(rode, today)
+    out = {"state": "rest", "session_id": None, "why": "", "then": "", "moved": [], "schedule": {}}
+
+    def finish(start_from: date, today_session: dict | None) -> dict:
+        riding, harder = set(rode), set(hard_days)
+        if rode_today:
+            riding.add(today)
+            if any(hard(r.get("kind")) for r in rode_today):
+                harder.add(today)
+        rest = [s for s in open_ if not today_session or s["id"] != today_session["id"]]
+        if today_session:
+            riding.add(today)
+            if hard(today_session["kind"]):
+                harder.add(today)
+        placed = schedule(rest, start_from, end, riding, harder) or {}
+        if today_session:
+            placed[today_session["id"]] = today
+        out["schedule"] = {sid: d.isoformat() for sid, d in placed.items()}
+        out["moved"] = [{"id": s["id"], "title": s["title"], "from": s["date"], "to": placed[s["id"]].isoformat()}
+                        for s in open_ if s["id"] in placed and placed[s["id"]].isoformat() != s["date"]]
+        # What's next, in words: tomorrow (a session or rest), then the next session after it this week.
+        by_day = {v: k for k, v in placed.items()}
+        names = {s["id"]: s for s in open_}
+        tomorrow = today + timedelta(days=1)
+        if tomorrow >= end:
+            out["then"] = "A new week starts tomorrow."
+            return out
+        sid = by_day.get(tomorrow)
+        words = [f"Tomorrow: {short(names[sid]) if sid else 'rest'}."]
+        later = sorted(d for d in by_day if d > tomorrow)
+        if later:
+            words.append(f"{_day_name(later[0], today)}: {short(names[by_day[later[0]]])}.")
+        else:
+            words.append(f"A new week starts {_day_name(end, today).lower() if end - today > timedelta(days=1) else 'tomorrow'}."
+                         .replace("starts monday", "starts on Monday"))
+        if off_bike:
+            words.append(f"{off_bike[0]['title']} is still open this week.")
+        out["then"] = " ".join(words)
+        return out
+
+    if rode_today:
+        out["state"] = "done"
+        out["why"] = "You've ridden today. Rest and eat well; the next session is set out below."
+        return finish(today + timedelta(days=1), None)
+    if not open_:
+        out["why"] = ("Every session this week is done. Rest, or ride easy if you'd like to." if sessions else
+                      "No sessions planned this week.")
+        if off_bike:
+            out["why"] += f" {off_bike[0]['title']} is still open: a good day for it."
+        return finish(today + timedelta(days=1), None)
+
+    easy_open = [s for s in open_ if not hard(s["kind"])]
+    if readiness == "strained":
+        if easy_open:
+            pick = easy_open[0]
+            out.update(state="session", session_id=pick["id"],
+                       why="Your recovery is lower than usual this morning, so today is easy. The harder sessions "
+                           "move later in the week.")
+            return finish(today + timedelta(days=1), pick)
+        out["why"] = ("Your recovery is lower than usual this morning, so today is rest. The harder sessions move "
+                      "later in the week.")
+        return finish(today + timedelta(days=1), None)
+
+    # Would the week still fit if today were rest?
+    planned_today = [s for s in open_ if s["date"] == today.isoformat()]
+    fits_after = schedule(open_, today + timedelta(days=1), end, rode, hard_days) is not None
+    if streak >= MAX_STREAK or (streak >= STREAK_REST and fits_after):
+        out["why"] = (f"{streak} days of riding in a row. Rest today: the fitness from them is built while you "
+                      f"recover, and the next session will be better for it.")
+        if off_bike:
+            out["why"] += f" {off_bike[0]['title']} fits well today."
+        return finish(today + timedelta(days=1), None)
+    if not planned_today and fits_after:
+        out["why"] = "Rest today: the rest of this week's sessions still fit on the days ahead."
+        if off_bike:
+            out["why"] += f" {off_bike[0]['title']} fits well today."
+        return finish(today + timedelta(days=1), None)
+
+    yesterday_hard = yesterday in hard_days
+    choices = [s for s in open_ if not (yesterday_hard and hard(s["kind"]))]
+    if not choices:
+        if fits_after:
+            out["why"] = "Yesterday was hard, so rest today; the harder sessions come later in the week."
+            return finish(today + timedelta(days=1), None)
+        choices = open_          # the week is short of days: the work comes first
+    choices.sort(key=lambda s: (s["date"] != today.isoformat(),
+                                PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99, s["date"]))
+    pick = choices[0]
+    out.update(state="session", session_id=pick["id"])
+    if yesterday_hard and not hard(pick["kind"]):
+        out["why"] = f"Yesterday was hard, so today is easy: {pick['title'].lower()}."
+    elif pick["date"] == today.isoformat():
+        out["why"] = WHY.get(pick["kind"]) or pick.get("purpose") or ""
+    else:
+        was = date.fromisoformat(pick["date"])
+        when = "earlier this week" if was < today else WEEKDAY[was.weekday()]
+        out["why"] = f"Planned for {when}; it's the one to do next. " + (WHY.get(pick["kind"]) or pick.get("purpose") or "")
+    return finish(today + timedelta(days=1), pick)
+
+
+def greeting(recent: list[dict], today: date, readiness: str, state: str) -> str:
+    """The coach's opening line: the last week of riding, recovery, and what that means for today."""
+    days = sorted({r["date"] for r in recent if today - timedelta(days=7) <= r["date"] < today})
+    n = len(days)
+    first = (f"You rode {n} {'day' if n == 1 else 'days'} in the last week" if n else "No rides in the last week")
+    if n and (today - timedelta(days=1)) not in days:
+        first += " and rested yesterday"
+    first += "."
+    rec = {"good": "Your recovery looks normal", "watch": "Your recovery is a little lower than usual",
+           "strained": "Your recovery is lower than usual"}.get(readiness)
+    if state == "session":
+        tail = (f" {rec}, so today's session is on." if readiness in ("good", "unknown") and rec else
+                f" {rec}." if rec else "")
+    elif state == "done":
+        tail = " Today's ride is in."
+    else:
+        tail = f" {rec}." if rec else ""
+    return (first + tail).strip()

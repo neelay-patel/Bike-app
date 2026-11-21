@@ -48,7 +48,17 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
   ride; Sat 85 min mostly steady with climbs → counted as endurance. (The mock-up had Tue and Sat the other way
   round; the engine is right.) A test checks this when `data/` is present.
 
-### 2. Engine: today's session, rest, and adapting
+### 2. Engine: today's session, rest, adapting, and feedback on every ride (built 21 Nov 2026)
+- Built: `rideengine/analysis/today.py` (`plan_today`: today's session, rest or done, why, how it should feel, what's
+  next, sessions moved; `greeting`), `rideengine/analysis/feedback.py` (`pointers`: one thing to try; `contribution`:
+  load and new bests), features v11 (cadence, the climbs' pushes, heart-rate drift). API: `GET /v1/train/today`,
+  `GET /v1/train/week?start=`, `GET /v1/train/rides/{id}` (the ride note: what you did, counted as, what it means,
+  what's next, one thing to try). Before the plan's first week, Today says when it starts. Not yet: the change log
+  stored over time (moves are worked out fresh each day), and "how did it feel" feeding back (step 5).
+- **Feedback that makes a better rider** (Neelay, 21 Nov 2026): after every ride, one constructive thing to try,
+  from what the ride contained (cadence, pacing, easy days too hard, fuelling), in `docs/train-words.md`'s format.
+  His Saturday Zwift ride, counted as endurance: "Keep easy days easy" (43 of 81 minutes near his limit), then
+  "Spin a lighter gear on the climbs" (down to 55 rpm on 3 climbs).
 - **Pick today:** from the week's open sessions, the best next one given: what's done, the last few days (no hard
   days back to back; rest after three or four riding days), readiness from `wellness.readiness()` (strained → easy
   or rest), and days left in the week. Rest is a real result with its reason.

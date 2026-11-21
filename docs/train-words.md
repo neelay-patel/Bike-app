@@ -15,6 +15,16 @@ A rider should always know whether they're reading a fact, how Kova filed it, wh
 | **WHAT IT MEANS** | The link to the goal | One or two sentences. Names the goal or a marker. Says honestly whether it moved, held or dropped. Praise lives here | Punch is your best hard minute, and 273 W is past the 223 W you were aiming for by May |
 | **WHAT'S NEXT** | One clear step | Starts with the day or the verb. One action, with when. Doable today | Tomorrow: rest. Wednesday: sweet spot, 3 × 12 min |
 
+Plus **ONE THING TO TRY** (after a ride, when there is one; added 21 Nov 2026 at Neelay's request): constructive
+coaching from what the ride contained, to make the rider better. One per ride on the card (the rest a tap away).
+It says what we saw, with the numbers; what to try; and why it helps, in the rider's terms. Coaching, never
+criticism. Example: "On 3 of the climbs your cadence dropped to as low as 55 rpm. Try a lighter gear and keep it
+at 75 rpm or more: grinding a big gear tires your legs faster, while a quicker cadence shares the work with your
+heart and lungs, so you've more left at the top." What we look for, most useful first: an easy day ridden hard;
+going out too hard on the first of a set of efforts; cadence on the climbs; sweet spot drifting into threshold;
+heart rate climbing at the same power late in long rides (drink and eat); no warm-up before hard work; cadence on
+steady riding too low or too high (`rideengine/analysis/feedback.py`).
+
 Plus **ASK**: one question, answered with one tap ("How did it feel?").
 
 A session that's still to come uses the same idea in its own order: **the session** (name, and what it is in one

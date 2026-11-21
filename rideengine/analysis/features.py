@@ -19,9 +19,10 @@ from .train import work as train_work
 from .headline import hold, watts_per_beat
 from .repeats import Track
 
-VERSION = 10  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
+VERSION = 11  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
               # 8 efficiency and durability (headline.py); 9 indoor trace, virtual route and world (mini cards);
-              # 10 what the ride contained, for counting it against the plan (train.py)
+              # 10 what the ride contained, for counting it against the plan (train.py); 11 cadence, pushes and
+              # heart-rate drift in it, for the coach's one thing to try
 
 
 def extract(ride: Ride) -> dict:

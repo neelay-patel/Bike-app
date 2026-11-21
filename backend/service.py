@@ -722,6 +722,161 @@ class Backend:
                                 (user_id, ride_id, session_id, db.now()))
         return True
 
+    # --- Train (docs/train-tab.md, step 2): today, the week ahead, and a note for each ride --------------
+    def _recent_kinds(self, c: dict, days: int = 8) -> list[dict]:
+        """Rides of the last `days` days and today, with what kind of training each was."""
+        from rideengine.analysis import train
+        out = []
+        cut = c["today"] - timedelta(days=days)
+        for f in c["feats"]:
+            d = datetime.fromtimestamp(f["start"], c["tz"]).astimezone(c["tz"]).date()
+            if d < cut or d > c["today"]:
+                continue
+            cls = (train.classify(f["work"], c["ftp"]["watts"], c["max_hr"], c["resting_hr"]) if f.get("work") else
+                   {"kind": "mixed" if (f.get("moving_s") or 0) >= train.MIN_MINUTES * 60 else None, "facts": {}})
+            out.append({"ride_id": f["ride_id"], "date": d, "kind": cls["kind"],
+                        "minutes": round((f.get("moving_s") or 0) / 60)})
+        return out
+
+    def _this_week(self, view: dict, today: date) -> Optional[dict]:
+        return next((w for w in view["weeks"] if date.fromisoformat(w["week_start"]) <= today <
+                     date.fromisoformat(w["week_start"]) + timedelta(days=7)), None)
+
+    def _goal_markers(self, user_id: int, c: dict) -> Optional[dict]:
+        """The active goal, and the numbers it's judged by (the ones it focuses on), in plain words."""
+        from rideengine.analysis import headline as hl
+        row = self._active_goal_row(user_id)
+        if row is None:
+            return None
+        goal = json.loads(row["data"])
+        four = hl.four(c["feats"], c["today"], goal, self.me(user_id).get("ftp"))
+        markers = [{"id": m["id"], "name": m["label"], "meaning": m["plain"], "unit": m["unit"],
+                    "current": m["current"], "target": m.get("target"),
+                    "reached": bool(m["current"] and m.get("target") and m["current"] >= m["target"])}
+                   for m in four["metrics"] if m.get("focus")]
+        ready = date.fromisoformat(goal["ready_by"]) if goal.get("ready_by") else None
+        return {"title": goal.get("title"), "words": goal.get("words"), "ready_by": goal.get("ready_by"),
+                "weeks_left": max(0, (ready - c["today"]).days // 7) if ready else None, "markers": markers}
+
+    def train_today(self, user_id: int) -> dict:
+        """Today on the Train tab: the coach's opening line, today's session (or rest, or done), why, how it
+        should feel, what's next, sessions moved from their planned day, the goal, and the latest ride's note."""
+        from rideengine.analysis import today as td
+        view = self.plan_view(user_id)
+        if view is None:
+            return {"state": "no_plan"}
+        c = self._plan_context(user_id)
+        week = self._this_week(view, c["today"])
+        recent = self._recent_kinds(c)
+        readiness = (self.recovery(user_id).get("readiness") or {}).get("status", "unknown")
+        if week is None:
+            ahead = [w for w in view["weeks"] if date.fromisoformat(w["week_start"]) > c["today"]]
+            if not ahead:
+                return {"state": "no_plan", "goal": self._goal_markers(user_id, c)}
+            first = date.fromisoformat(ahead[0]["week_start"])
+            nxt = min(ahead[0]["sessions"], key=lambda s: s["date"]) if ahead[0]["sessions"] else None
+            when = "tomorrow" if first == c["today"] + timedelta(days=1) else f"on {td.WEEKDAY[first.weekday()]}"
+            return {"date": c["today"].isoformat(), "week": 0, "weeks": len(view["weeks"]), "phase": None,
+                    "state": "rest", "greeting": td.greeting(recent, c["today"], readiness, "rest"),
+                    "session": None, "why": f"Your plan starts {when}. Until then, ride as you like.",
+                    "feel": None, "then": (f"{td.WEEKDAY[date.fromisoformat(nxt['date']).weekday()]}: {td.short(nxt)}."
+                                           if nxt else ""),
+                    "moved": [], "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": None}
+        t = td.plan_today(week["sessions"], recent, c["today"], date.fromisoformat(week["week_start"]), readiness)
+        session = next((s for s in week["sessions"] if s["id"] == t["session_id"]), None)
+        feel = None
+        if session:
+            feel = td.FEEL.get(session["kind"])
+            hard = [x for st in session["steps"] for x in (st.get("steps") or [st])
+                    if (x.get("target") or {}).get("watts") and x.get("zone") not in ("Z1", "Z2")]
+            if hard and feel:
+                lo = min(x["target"]["watts"][0] for x in hard)
+                hi = max(x["target"]["watts"][1] for x in hard)
+                watts = f"about {lo}–{hi} W" if lo != hi else f"about {lo} W"
+                head, sep, rest = feel.partition(";") if ";" in feel else feel.rstrip(".").partition("\0")
+                feel = f"{head} ({watts}){sep}{rest}" + ("" if sep else ".")
+        latest = None
+        rides_back = sorted((r for r in recent if r["date"] >= c["today"] - timedelta(days=2)),
+                            key=lambda r: r["date"], reverse=True)
+        if rides_back:
+            latest = self.train_ride_note(user_id, rides_back[0]["ride_id"], _today=t)
+        return {"date": c["today"].isoformat(), "week": week["index"], "weeks": len(view["weeks"]),
+                "phase": week["phase"], "state": t["state"], "greeting": td.greeting(recent, c["today"], readiness, t["state"]),
+                "session": session, "why": t["why"], "feel": feel, "then": t["then"], "moved": t["moved"],
+                "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
+
+    def train_week(self, user_id: int, start: Optional[str] = None) -> Optional[dict]:
+        """A plan week with each session's status and the ride that counted, the week's rides with what kind of
+        training each was, and (this week) the days the open sessions are now expected on."""
+        from rideengine.analysis import today as td
+        view = self.plan_view(user_id)
+        if view is None:
+            return None
+        c = self._plan_context(user_id)
+        week = (next((w for w in view["weeks"] if w["week_start"] == start), None) if start
+                else self._this_week(view, c["today"]) or next(       # before the plan starts: its first week
+                    (w for w in view["weeks"] if date.fromisoformat(w["week_start"]) > c["today"]), None))
+        if week is None:
+            return None
+        out = {**week, "schedule": {}, "moved": []}
+        ws = date.fromisoformat(week["week_start"])
+        if ws <= c["today"] < ws + timedelta(days=7):
+            readiness = (self.recovery(user_id).get("readiness") or {}).get("status", "unknown")
+            t = td.plan_today(week["sessions"], self._recent_kinds(c), c["today"], ws, readiness)
+            out.update(schedule=t["schedule"], moved=t["moved"])
+        return out
+
+    def train_ride_note(self, user_id: int, ride_id: str, _today: Optional[dict] = None) -> Optional[dict]:
+        """After a ride (docs/train-words.md): what you did, what it counted as, what it means for the goal,
+        what's next, and one thing to try. Every number comes from the engine."""
+        from rideengine.analysis import feedback, train
+        from rideengine.analysis import today as td
+        c = self._plan_context(user_id)
+        f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None)
+        if f is None:
+            return None
+        d = datetime.fromtimestamp(f["start"], c["tz"]).astimezone(c["tz"]).date()
+        ftp = c["ftp"]["watts"]
+        cls = (train.classify(f["work"], ftp, c["max_hr"], c["resting_hr"]) if f.get("work")
+               else {"kind": None, "confidence": 0, "reason": "", "facts": {}})
+        counted, intent = None, None
+        view = self.plan_view(user_id)
+        if view:
+            for w in view["weeks"]:
+                for s in w["sessions"]:
+                    if (s.get("counted") or {}).get("ride_id") == ride_id:
+                        planned = date.fromisoformat(s["date"])
+                        counted = {"session_id": s["id"], "title": s["title"], "kind": s["kind"],
+                                   "planned_for": td.WEEKDAY[planned.weekday()] if planned != d else None,
+                                   "reason": s["counted"]["reason"], "by_hand": s["counted"].get("by_hand", False)}
+                        intent = s["kind"]
+        earlier = [x for x in c["feats"] if x["start"] < f["start"]]
+        contrib = feedback.contribution(f, earlier, ftp)
+        tips = feedback.pointers(f.get("work") or {}, cls, ftp, intent) if f.get("work") else []
+        goal = self._goal_markers(user_id, c)
+        means = [b["text"] for b in contrib["bests"]]
+        for m in (goal or {}).get("markers", []):
+            hit = next((b for b in contrib["bests"] if (m["id"] == "punch" and b["id"] == "60") or
+                        (m["id"] == "sustained" and b["id"] == "1200")), None)
+            if hit and m.get("target"):
+                if m["reached"]:
+                    means.append(f"{m['name']} ({m['meaning'][0].lower() + m['meaning'][1:].split(':')[0]}) is "
+                                 f"{m['current']} {m['unit']}, past the {m['target']} {m['unit']} you were aiming for.")
+                else:
+                    means.append(f"{m['name']} is now {m['current']} {m['unit']}, on the way to {m['target']} {m['unit']}.")
+        if _today is None:
+            _today = self.train_today(user_id) if d == c["today"] else None
+        nxt = None
+        if _today and d >= c["today"] - timedelta(days=2):
+            nxt = _today.get("then") if _today.get("state") in ("done", "rest") else None
+        return {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"),
+                "did": {"km": round(f.get("km") or 0, 1), "minutes": round((f.get("moving_s") or 0) / 60),
+                        "ascent_m": f.get("ascent_m"), "avg_power": f.get("power"), "avg_hr": f.get("avg_hr"),
+                        "best_minute": (f.get("power_curve") or {}).get("60")},
+                "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
+                "reason": cls.get("reason"), "counted": counted, "means": means, "load": contrib["load"],
+                "next": nxt, "try": tips[0] if tips else None, "tips": tips}
+
     def plan_session(self, user_id: int, session_id: str) -> Optional[dict]:
         view = self.plan_view(user_id)
         if view is None:

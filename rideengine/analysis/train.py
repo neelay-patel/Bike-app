@@ -76,7 +76,12 @@ def work(ride) -> dict:
     hr = _per_second(ride, "hr", 20)
     n = len(power)
     with_power = bool(ride.provenance.get("channel:power")) and sum(p is not None for p in power) > n / 2
-    out: dict = {"basis": None, "p30": [], "h30": [], "blocks": [], "minutes": 0}
+    out: dict = {"basis": None, "p30": [], "h30": [], "c30": [], "blocks": [], "pushes": [], "drift": None,
+                 "minutes": 0}
+    cad = _per_second(ride, "cadence", 5)
+    if sum(c is not None and c >= 20 for c in cad) >= 300:     # five minutes of cadence or more
+        r = _rolling([c if c is not None and c >= 20 else None for c in cad], ROLL_S // 2)
+        out["c30"] = [None if v is None else round(v) for v in r[::STEP_S]]
     if with_power:
         pedal = [p if p is not None and p >= 20 else None for p in power]
         r = _rolling(pedal, ROLL_S // 2)
@@ -84,8 +89,12 @@ def work(ride) -> dict:
         out["minutes"] = round(sum(p is not None for p in pedal) / 60)
         out["basis"] = "power"
         from .effort import phases
-        out["blocks"] = [[b["seconds"], b["power"]] for ph in phases(ride)["phases"] if ph["kind"] == "structured"
-                         for b in ph.get("blocks", [])]
+        ph = phases(ride)
+        out["blocks"] = [[b["seconds"], b["power"]] for p_ in ph["phases"] if p_["kind"] == "structured"
+                         for b in p_.get("blocks", [])]
+        # The harder pushes inside the rider's own riding (indoors, mostly the climbs): [start s, seconds, W, rpm].
+        out["pushes"] = [[x["start_s"], x["seconds"], x["power"], x["cadence"]] for x in ph["pushes"]]
+        out["drift"] = ph["drift"]["bpm"] if ph.get("drift") else None
     if not with_power and any(h is not None for h in hr):     # heart rate only matters when there's no power
         r = _rolling(hr, ROLL_S // 2)
         out["h30"] = [None if v is None else round(v) for v in r[::STEP_S]]

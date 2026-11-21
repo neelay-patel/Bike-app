@@ -236,6 +236,31 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such session")
         return {"id": session_id, "done": False}
 
+    @app.get("/v1/train/today")
+    def train_today(uid: int = Depends(user)):
+        """Today on the Train tab (docs/train-tab.md): the coach's opening line; today's session, or rest, or
+        done; why; how it should feel; what's next; sessions moved from their planned day; the goal and its
+        numbers; and the latest ride's note. state "no_plan" until a goal is set."""
+        return be.train_today(uid)
+
+    @app.get("/v1/train/week")
+    def train_week(start: Optional[str] = None, uid: int = Depends(user)):
+        """A plan week (this one, or the week starting `start`): sessions with what counted as each and why,
+        the week's rides by kind, extra rides, and the days open sessions are now expected on."""
+        w = be.train_week(uid, start)
+        if w is None:
+            raise HTTPException(404, "No such plan week")
+        return w
+
+    @app.get("/v1/train/rides/{ride_id}")
+    def train_ride(ride_id: str, uid: int = Depends(user)):
+        """After a ride: what you did, what it counted as and why, what it means for the goal, what's next, and
+        one thing to try (constructive feedback from what the ride contained)."""
+        n = be.train_ride_note(uid, ride_id)
+        if n is None:
+            raise HTTPException(404, "No such ride")
+        return n
+
     @app.put("/v1/plan/rides/{ride_id}/counts-as")
     def ride_counts_as(ride_id: str, body: dict = Body(...), uid: int = Depends(user)):
         """{"session_id": "..."} counts the ride as that session; {"session_id": null} as none. Rides are
