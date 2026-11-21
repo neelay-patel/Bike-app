@@ -385,10 +385,10 @@ def _ics_text(s: str) -> str:
     return s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-def to_ics(sessions: list[dict], tz: tzinfo | None, name: str = "Ride training") -> str:
+def to_ics(sessions: list[dict], tz: tzinfo | None, name: str = "Kova training") -> str:
     """A calendar feed (iCalendar) of the plan's sessions. Times in UTC, computed from the rider's zone."""
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Ride//Training plan//EN", "CALSCALE:GREGORIAN",
+    out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Kova//Training plan//EN", "CALSCALE:GREGORIAN",
            f"X-WR-CALNAME:{_ics_text(name)}", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H"]
     for s in sessions:
         d = date.fromisoformat(s["date"])
@@ -442,6 +442,6 @@ def to_zwo(w: dict) -> str:
         else:
             parts.append(f'<SteadyState Duration="{s["seconds"]}" Power="{mid(s["zone"])}"/>')
     body = "\n    ".join(parts)
-    return (f'<workout_file>\n  <author>Ride</author>\n  <name>{escape(w["title"])}</name>\n'
+    return (f'<workout_file>\n  <author>Kova</author>\n  <name>{escape(w["title"])}</name>\n'
             f'  <description>{escape(w["purpose"])}</description>\n  <sportType>bike</sportType>\n'
             f'  <tags/>\n  <workout>\n    {body}\n  </workout>\n</workout_file>\n')

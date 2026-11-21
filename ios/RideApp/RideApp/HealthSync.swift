@@ -171,7 +171,7 @@ final class HealthSync: ObservableObject {
             } else if !elsewhere.isEmpty {
                 lastMessage = "Power during your rides was recorded by \(elsewhere.sorted().joined(separator: ", ")), not the workout's own device."
             } else {
-                lastMessage = "No rides with power found in Apple Health. Check that Cycling Power is on for Ride in Health."
+                lastMessage = "No rides with power found in Apple Health. Check that Cycling Power is on for Kova in Health."
             }
         } catch {
             lastMessage = "Couldn't re-send rides with power: \(error.localizedDescription)"

@@ -57,7 +57,7 @@ struct AppleHealthCard: View {
                     .buttonStyle(PrimaryButton())
             }
             if !health.isConnected {
-                Text("On the Health screen, turn on every item and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Ride.")
+                Text("On the Health screen, turn on every item and choose \"All Recorded Data\" so older rides can be imported. For new rides to arrive in the background, keep Background App Refresh on for Kova.")
                     .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
             }
             DatePicker("Import rides since", selection: $since, displayedComponents: .date)

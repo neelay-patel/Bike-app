@@ -39,7 +39,7 @@ Done on Neelay's iPhone, 14 Nov 2026 (iOS 27.2, Xcode 27.2, free Personal Team `
    it; Universal Clipboard pastes it on the phone). In the app's Settings: server `http://<mac>.local:8000`, paste the
    token, Save. Allow local network access.
 6. Sources → Connect Apple Health → turn on every item → **All Recorded Data**. Rides upload, then two years of
-   recovery readings. Keep Background App Refresh on for Ride.
+   recovery readings. Keep Background App Refresh on for Kova.
 
 With a free account the app stops opening after 7 days: plug in and install again.
 Background sync to the Mac only works while the phone can reach it (same network, server running).

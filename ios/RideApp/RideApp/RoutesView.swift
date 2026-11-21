@@ -69,7 +69,7 @@ struct RoutesView: View {
                         Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart)
                     }
                     if courses.isEmpty && error == nil {
-                        Text("No routes yet. In Ride with GPS, open a route, choose Export → GPX Track, and share it to Ride (or pick the file here).")
+                        Text("No routes yet. In Ride with GPS, open a route, choose Export → GPX Track, and share it to Kova (or pick the file here).")
                             .font(Theme.text(15)).foregroundStyle(Theme.inkMuted).padding(.vertical, 16)
                     }
                     LazyVStack(spacing: 8) {

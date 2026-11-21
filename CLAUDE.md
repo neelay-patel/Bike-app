@@ -104,8 +104,7 @@ On Neelay's iPhone, all pushed to origin/main:
 
 ## Next steps (detail: `docs/roadmap.md`)
 1. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile).
-2. **Live with Kova and the cleaner screens**, and adjust from real use. Leftovers: a few places still say "Ride"
-   (Apple Health permission text, Background App Refresh line on Sources); do indoor cards share well at their size.
+2. **Live with Kova and the cleaner screens**, and adjust from real use: do indoor cards share well at their size.
 3. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
 4. **Engine and AI** (`docs/coaching.md` section 7), parked until Neelay decides. His goal: keep up with the fast
