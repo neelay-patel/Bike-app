@@ -1043,8 +1043,10 @@ struct PlanBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                MonoLabel("Describe a ride")
+            // Titled like the Route Enhancer below it, so it reads as a feature, not a disabled form (20 Nov 2026).
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "wand.and.stars").foregroundStyle(Theme.cobalt)
+                Text("Route Generator").font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
                 Spacer()
                 if !text.isEmpty || result != nil || !made.isEmpty {
                     Button("Start over") { startOver() }
@@ -1052,8 +1054,8 @@ struct PlanBox: View {
                         .buttonStyle(.plain)
                 }
             }
-            Text("A loop, one way (from Uxbridge to Port Perry, or to an address) or there and back (40 km out and back from Goodwood).")
-                .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+            Text("Describe a ride: a loop, one way (from Uxbridge to Port Perry, or to an address) or there and back (40 km out and back from Goodwood).")
+                .font(Theme.text(13)).foregroundStyle(Theme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("60–70 km gravel loop near Uxbridge, café halfway", text: $text, axis: .vertical)
                 .font(Theme.text(16))
@@ -1069,7 +1071,9 @@ struct PlanBox: View {
                     }
                 }
                 .padding(12)
-                .background(Theme.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(focus == .words ? Theme.cobalt : Theme.line, lineWidth: focus == .words ? 1.5 : 1))
             if let result, !result.tags.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(result.tags, id: \.self) { t in
@@ -1094,14 +1098,15 @@ struct PlanBox: View {
             } else if let q = result?.questions.first {
                 question(q)
             } else {
-                Button { go() } label: {
-                    Text("Find routes").font(Theme.text(16, .semibold)).foregroundStyle(.white)
+                // Always solid: a faded button made the whole box look switched off. With nothing typed yet,
+                // a tap puts you in the field instead.
+                Button { trimmed.isEmpty ? (focus = .words) : go() } label: {
+                    Label("Find routes", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .font(Theme.text(16, .semibold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
-                        .background(Theme.cobalt.opacity(trimmed.isEmpty ? 0.4 : 1),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(Theme.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(trimmed.isEmpty)
             }
             if !made.isEmpty {
                 Text("\(made.count) route\(made.count == 1 ? "" : "s") made: at the top of your routes, best first, each checked. Open one to tune it or send it to your Edge.")
