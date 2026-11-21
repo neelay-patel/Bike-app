@@ -137,3 +137,47 @@ def test_addresses_and_one_way_words():
     assert d.guess == {} and d.km == (60, 70) and d.missing == []
     e = read("gravel to the Port Perry bakery from Uxbridge", find=find2)
     assert e.start["name"] == "Uxbridge" and e.guess == {"end": "Port Perry bakery"}
+
+
+def test_reading_a_climbing_target():
+    a = read("30km, road loop from Uxbridge.  Between 50-100m of elevation", find=fake_find)
+    assert a.climb == (50, 100) and a.hills is None and a.km == (28, 32)
+    assert a.tags == ["LOOP", "28–32 KM", "ROAD", "FROM UXBRIDGE", "50–100 M UP"]
+    assert Ask.from_dict(a.to_dict()).climb == (50, 100)
+    assert read("80 km with about 800 m of climbing", find=fake_find).climb == (680, 920)
+    assert read("hilly gravel, 2000 ft of vert", find=fake_find).climb == (518, 701)
+    assert read("under 300m of climbing please", find=fake_find).climb == (0, 300)
+    assert read("climbing 400-600 m, gravel", find=fake_find).climb == (400, 600)
+    assert read("elevation gain: 1,200 m", find=fake_find).climb == (1020, 1380)
+    assert read("60-70km gravel loop near Uxbridge, cafe halfway", find=fake_find).climb is None
+    assert read("100 km, lots of climbing", find=fake_find).hills == "hilly"
+
+
+class EastHills:
+    """Flat west of the start; rolling hills (about 50 m up every 2 km) east of it."""
+    def __init__(self, lon0):
+        self.lon0 = lon0
+
+    def height(self, lat, lon):
+        import math
+        if lon <= self.lon0:
+            return 250.0
+        x = (lon - self.lon0) * 111_320 * math.cos(math.radians(lat))
+        return 250.0 + 25 * math.sin(2 * math.pi * x / 2000) + 25 * math.sin(2 * math.pi * lat * 111_320 / 2000)
+
+
+def test_loops_aim_for_the_climbing_asked_for():
+    ways = grid(n=26)
+    g = Graph(ways, gen.prefs_for(Ask(surface="road")))
+    s = node(12, 12)
+    hills = EastHills(s[1] + 0.001)
+    base = dict(km=(25, 30), surface="road", gravel=(0.0, 0.15), start={"name": "Mid", "lat": s[0], "lon": s[1]})
+
+    def climbed(o):
+        return gen._climb_per_km(o.path.points, hills) * o.path.m / 1000
+
+    flat = gen.loops(Ask(**base, climb=(0, 40)).refresh(), g, [], heights=hills)
+    hilly = gen.loops(Ask(**base, climb=(300, 500)).refresh(), g, [], heights=hills)
+    assert climbed(flat[0]) <= 40 and "as asked" in flat[0].why[-1]
+    assert climbed(hilly[0]) > 150 > climbed(flat[0])
+    assert "m of climbing" in hilly[0].why[-1]

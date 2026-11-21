@@ -1101,6 +1101,9 @@ class Backend:
                 ask.stop = v if v in ("midway", "any") else None
             elif k == "hills":
                 ask.hills = v if v in ("flat", "hilly") else None
+            elif k == "climb":              # metres of climbing: [lo, hi], or one number (±15%)
+                lo, hi = (float(v[0]), float(v[1])) if isinstance(v, (list, tuple)) else (float(v) * 0.85, float(v) * 1.15)
+                ask.climb = (round(lo), round(hi))
             elif k == "gravel_start":       # little gravel around the start: somewhere else, or stay
                 if v == "stay":
                     ask.stay = True

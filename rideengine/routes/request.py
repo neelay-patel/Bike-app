@@ -33,6 +33,7 @@ class Ask:
     via: dict | None = None                     # a place a loop goes through
     stop: str | None = None                     # "midway" | "any" | None
     hills: str | None = None                    # "flat" | "hilly" | None
+    climb: tuple[float, float] | None = None    # metres of climbing wanted ("between 50-100m of elevation")
     singletrack: bool = False                   # wanted? (no by default)
     stay: bool = False                          # start here even with little gravel around (the rider said so)
     guess: dict = field(default_factory=dict)   # {"end": "48 Sample Cres, Markham"}: words we couldn't place
@@ -49,6 +50,7 @@ class Ask:
     def from_dict(d: dict) -> "Ask":
         a = Ask(**{k: v for k, v in d.items() if k in Ask.__dataclass_fields__})
         a.km = tuple(a.km) if a.km else None
+        a.climb = tuple(a.climb) if a.climb else None
         a.gravel = tuple(a.gravel) if a.gravel else (SURFACES.get(a.surface) if a.surface else None)
         a.refresh()
         return a
@@ -86,7 +88,10 @@ class Ask:
             tags.append(f"VIA {self.via['name'].upper()}")
         if self.stop:
             tags.append("CAFÉ HALFWAY" if self.stop == "midway" else "CAFÉ STOP")
-        if self.hills:
+        if self.climb:
+            lo, hi = self.climb
+            tags.append(f"UNDER {hi:.0f} M UP" if lo == 0 else f"{lo:.0f}–{hi:.0f} M UP")
+        elif self.hills:
             tags.append(self.hills.upper())
         self.tags = tags
         return self
@@ -107,6 +112,39 @@ def _km(text: str):
     if u.startswith("mi"):
         lo, hi = lo * 1.609, hi * 1.609
     return (round(min(lo, hi)), round(max(lo, hi)))
+
+
+CLIMB_WORDS = r"(?:elevation(?:\s+gain)?|climbing|climb(?:ed|s)?|ascent|gain|vert(?:ical)?|up|elev)"
+NUM = r"(\d{1,2}(?:,\d{3})|\d{1,5})"
+UNIT = r"\s*(m|metres?|meters?|ft|feet|foot)\b"
+
+
+def _climb(text: str):
+    """Metres of climbing wanted: "between 50-100m of elevation", "about 800 m climbing", "2000 ft of vert",
+    "under 300m of climbing", "at least 500 m up", "climbing 400-600 m". None if there's no number for it."""
+    t = text.lower().replace("–", "-").replace("—", "-")
+    amount = NUM + r"(?:" + UNIT + r")?\s*(?:-|to|and)\s*" + NUM + UNIT + r"|" + NUM + UNIT
+    m = (re.search(r"(?:^|[^\w.])(?:(under|below|less than|no more than|max(?:imum)?|up to|at most|over|more than|"
+                   r"at least|min(?:imum)?)\s+)?(?:about |around |~)?(?:" + amount + r")\s*(?:of\s+)?(?:total\s+)?"
+                   + CLIMB_WORDS + r"\b", t)
+         or re.search(CLIMB_WORDS + r"\s*(?:of|:)?\s*(?:(under|below|less than|no more than|max(?:imum)?|up to|"
+                      r"at most|over|more than|at least|min(?:imum)?)\s+)?(?:about |around |~|between )?(?:" + amount + r")", t))
+    if not m:
+        return None
+    word, lo, u1, hi, u2, one, u3 = m.groups()
+    num = lambda v: float(v.replace(",", ""))
+    unit = u2 or u3 or u1 or "m"
+    if one:
+        v = num(one)
+        lo, hi = (0, v) if word in ("under", "below", "less than", "no more than", "max", "maximum", "up to", "at most") \
+            else (v, v * 1.4) if word in ("over", "more than", "at least", "min", "minimum") else (v * 0.85, v * 1.15)
+    else:
+        lo, hi = num(lo), num(hi)
+    f = 0.3048 if unit.startswith(("f", "foot")) else 1.0
+    lo, hi = sorted((lo * f, hi * f))
+    if hi < 5 or hi > 10000:
+        return None
+    return (round(lo), round(hi))
 
 
 def read(text: str, home: dict | None = None, find=places_mod.find) -> Ask:
@@ -134,6 +172,9 @@ def read(text: str, home: dict | None = None, find=places_mod.find) -> Ask:
         a.hills = "flat"
     elif re.search(r"\bhilly\b|\bclimb(s|ing)?\b|\bhills\b", low):
         a.hills = "hilly"
+    a.climb = _climb(text)
+    if a.climb:
+        a.hills = None              # the number says it better than "hilly"
     if re.search(r"\bsingle ?track\b", low) and not re.search(r"\bno single ?track\b", low):
         a.singletrack = True
     _places_and_shape(a, text, home, find)

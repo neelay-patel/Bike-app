@@ -570,7 +570,19 @@ def routes(ask: Ask, g: Graph, pois: list[dict], places: list[dict] | None = Non
             raise ValueError("A loop needs a distance or a place to go through.")
         cands = _loop_cands(ask, g, main, start, pois)
     cands.sort(key=lambda c: c["score"])
-    if ask.hills and heights is not None:
+    if ask.climb and heights is not None:
+        # A climbing target ("between 50-100m of elevation"): measure every candidate the way the route check
+        # does (under a second for ~50) and rank them again by how far outside the range they climb. When
+        # nothing good is in range (a 30 km loop from a suburban start may climb 120 m at least), the closest good one
+        # wins and says so, rather than a busy, doubled-back route that happens to fit.
+        lo, hi = ask.climb
+        for c in cands:
+            c["climb_m"] = _climb_per_km(c["path"].points, heights) * c["path"].m / 1000
+            up = c["climb_m"]
+            miss = (lo - up) if up < lo else (up - hi) if up > hi else 0.0
+            c["score"] += 5 * miss / max(hi, 100) if miss else -0.3
+        cands.sort(key=lambda c: c["score"])
+    elif ask.hills and heights is not None:
         # Flat or hilly: measure the climbing of the best dozen and rank them again.
         for c in cands[:12]:
             c["climb"] = _climb_per_km(c["path"].points, heights)
@@ -640,7 +652,13 @@ def _option(ask: Ask, g: Graph, c: dict, places: list[dict] | None) -> Option:
         why.append("back a different way")
     if c["twice"] > 0.05:
         why.append(f"{c['twice'] * 100:.0f}% ridden twice")
-    if c.get("climb") is not None:
+    if c.get("climb_m") is not None:
+        lo, hi = ask.climb
+        up = round(c["climb_m"])
+        want = f"under {hi:.0f} m" if lo == 0 else f"{lo:.0f}–{hi:.0f} m"
+        why.append(f"about {up} m of climbing, as asked" if lo <= c["climb_m"] <= hi
+                   else f"about {up} m of climbing: the closest to {want} we found")
+    elif c.get("climb") is not None:
         why.append("picked for flat roads" if ask.hills == "flat" else "picked for climbing")
     pts = [(la, lo, 0.0) for la, lo in path.points]
     return Option(route=Route(name=name[:1].upper() + name[1:], points=pts, source="generated"), path=path, km=round(path.m / 1000, 1),
