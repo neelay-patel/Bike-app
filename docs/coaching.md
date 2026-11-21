@@ -128,7 +128,8 @@ moved, load), which feed the plan. Needs a goal: on 18 Nov Neelay had none set, 
   other riders keep `SOURCE_POLICY`. The facts packet leaves out the GPS track and name; recovery data stays out at
   first.
 
-**Order when building resumes:**
+**Order when building resumes:** superseded 21 Nov 2026 by `docs/train-tab.md` (the Train tab's build plan); kept
+for the history:
 1. Engine: Effort ↔ planned session matching, each Effort's contribution (markers, load), the facts packet.
 2. AI layer (backend module): facts packet in, fixed-format reply out, number check, saved results, policy gate with
    the personal-use setting, cost log. First use: the effort story (needs an Anthropic API key in the backend's

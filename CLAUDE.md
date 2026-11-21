@@ -110,8 +110,8 @@ On Neelay's iPhone, all pushed to origin/main:
 2. **Live with Kova and the cleaner screens**, and adjust from real use: do indoor cards share well at their size.
 3. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
-4. **Coaching refinement, AI assisted** (on the list 21 Nov 2026; `docs/coaching.md` sections 6-7): the engine
-   calculates, an AI coach explains and refines. His goal: keep up with the fast group, ready by 1 May 2027.
+4. **The Train tab** (Plan + an AI-assisted coach in one; build plan `docs/train-tab.md`, mock-up linked below):
+   the engine calculates, the coach speaks up on its own. His goal: keep up with the fast group by 1 May 2027.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).
 6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, delete account,
    host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
@@ -122,3 +122,4 @@ On Neelay's iPhone, all pushed to origin/main:
 - Ride Trends dashboard: https://claude.ai/artifact/Tu5CgKUFQ84t6EsheDeLey
 - Goal setting flow (mock-up, approved 15 Nov 2026): https://claude.ai/artifact/JCQyTJQ5XDZi9gvpCkXXcB
 - Name and icon mock-ups (19-20 Nov 2026): https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9
+- Train tab mock-up (21 Nov 2026): https://claude.ai/artifact/PqSSKTSmCHpzt5V63k8io2

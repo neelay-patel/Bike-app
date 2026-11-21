@@ -99,7 +99,8 @@ Our own drawing style, not a copy of any existing card game's art.
 3. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
    milestones are kept). Badges, holo cards and the rider card are the pieces to build on. Idea from Neelay's son:
    "meta" (most effective tactic available) for the one thing to work on next.
-4. **Coaching refinement, AI assisted** (Neelay put it on the list 21 Nov 2026; `docs/coaching.md` sections 6-7).
+4. **Coaching refinement, AI assisted: the Train tab** (Neelay put it on the list 21 Nov 2026; build plan in
+   `docs/train-tab.md`, background in `docs/coaching.md` sections 6-7).
    The engine calculates (load, zones, plan rules, progress); an AI coach explains, reviews the week and refines the
    plan within the engine's limits, on Neelay's own data under the personal-use setting. Order: match efforts to the
    plan, the AI layer (retelling efforts from the engine's numbers; needs an Anthropic API key in the backend's
