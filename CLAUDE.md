@@ -94,26 +94,28 @@ scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a logi
 - Scugog loop, 19 Oct 2026: 104.3 km, 850 m (Garmin barometric; the GPX track says 633 m), 4:25 moving, avg HR 142,
   max 170, 2,463 kcal.
 
-## Where things stand (20 Nov 2026; detail in `docs/repo-map.md`)
+## Where things stand (21 Nov 2026; detail in `docs/repo-map.md`)
 On Neelay's iPhone, all pushed to origin/main:
 - **Data:** Garmin (personal key), Apple Health (rides, recovery), KICKR power via the Watch, Zwift via Garmin. New
   rides arrive on their own: the server polls Garmin every 15 min; the app sends Watch rides and asks for a check
   each time it opens. Needs the home Wi-Fi until the backend is hosted; the Mac's server is a login service.
-- **Kova:** name, "the climb" icon, opening screen, About Kova (Kilometres. Output. VO₂. Ascent.).
-- **Efforts:** new efforts lead as their full ride card (tap for the ride, with Share and What you did), this month
-  in one line, then the collection of mini cards by month. Indoor counts, split out.
-- **You:** rider card, the four headline numbers (known quirks left as they are, `docs/decisions.md`), fitness and
-  recovery, badges, bests, tallies, home loop. **Plan:** training plan, calendar feed, Zwift export.
-- **Routes:** check a GPX, tune it, describe a ride, send to the Edge.
+- **Kova:** name, "the climb" icon, opening screen (KOVA's letters rise in after the climb), About Kova.
+- **Efforts:** new efforts lead as their full ride card, this month in one line, then the collection by month.
+- **Train** (replaced Plan, 21 Nov; `docs/train-tab.md` steps 1-3 built): every ride classified by what it
+  contained and counted against the week's sessions whatever the day; Today picks the session or rest (why, how it
+  should feel, what's next); after each ride one constructive thing to try; the week as counted; the goal; the plan
+  ahead (calendar feed, Zwift export). Indoors or out is always the rider's choice. Words: `docs/train-words.md`.
+- **You:** rider card, the four headline numbers, fitness and recovery, badges, bests, tallies, home loop.
+- **Routes:** check a GPX, tune it, the Route Generator (describe a ride, now with a climbing target), send to Edge.
 
 ## Next steps (detail: `docs/roadmap.md`)
-1. **Reinstall the app by 28 Nov 2026** (free 7-day profile, renewed 21 Nov), or switch to the paid developer
-   account Neelay is considering (one-year builds, TestFlight).
-2. **Live with Kova and the cleaner screens**, and adjust from real use: do indoor cards share well at their size.
-3. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
+1. **Reinstall the app by 28 Nov 2026** (free 7-day profile). The paid developer account is waiting on Apple support.
+2. **Live with Train** (first session day Mon 23 Nov) and adjust the counting, picking and words from real use.
+3. **Train steps 4-7** (`docs/train-tab.md`): the coach speaks up (notifications), the AI coach (needs an Anthropic
+   API key in the backend's environment), changing the plan by talking, sending sessions to the bike; and the Method
+   (the research behind each rule, a coach's review). His goal: keep up with the fast group by 1 May 2027.
+4. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
-4. **The Train tab** (Plan + an AI-assisted coach in one; build plan `docs/train-tab.md`, mock-up linked below):
-   the engine calculates, the coach speaks up on its own. His goal: keep up with the fast group by 1 May 2027.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).
 6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, delete account,
    host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
