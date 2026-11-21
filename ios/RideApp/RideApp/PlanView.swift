@@ -12,9 +12,19 @@ struct PlanView: View {
     @State private var editingDays = false
     @State private var editingFTP = false
     @State private var calendarMessage: String?
+    /// Opened from the Train tab ("The plan ahead"): inside its navigation, with a back button.
+    var embedded = false
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content.toolbar(.visible, for: .navigationBar).navigationTitle("The plan ahead")
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            NavigationStack { content.toolbar(.hidden, for: .navigationBar) }
+        }
+    }
+
+    private var content: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
@@ -40,7 +50,6 @@ struct PlanView: View {
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
             .background(Theme.ground.ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
             .sheet(isPresented: $settingGoal) { GoalFlow() }
             .sheet(isPresented: $editingDays) { if let plan = model.plan { DaysSheet(plan: plan) } }
@@ -48,7 +57,6 @@ struct PlanView: View {
             .alert("Training calendar", isPresented: Binding(get: { calendarMessage != nil }, set: { if !$0 { calendarMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(calendarMessage ?? "") }
-        }
     }
 
     private var header: some View {
@@ -306,7 +314,7 @@ struct SessionCard: View {
     }
 }
 
-private struct StatusChip: View {
+struct StatusChip: View {
     let status: String
 
     var body: some View {
@@ -314,6 +322,7 @@ private struct StatusChip: View {
         case "done": ("Done", Theme.cobalt)
         case "missed": ("Missed", Theme.heart)
         case "today": ("Today", Color(hex: 0x7A5410))
+        case "open": ("To do", Theme.inkMuted)
         default: ("", .clear)
         }
         if !text.isEmpty {

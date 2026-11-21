@@ -70,7 +70,14 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - Each ride's **contribution** (from step 1): load, and which goal markers it fed (a new best 20 min, a best minute).
 - API: `GET /v1/train/today`, `GET /v1/train/week?start=`.
 
-### 3. App: the Train tab, with rule-based words
+### 3. App: the Train tab, with rule-based words (built 21 Nov 2026)
+- Built: `ios/RideApp/RideApp/TrainView.swift`. The Train tab replaces Plan: Today (the coach's line; the session
+  big with How it should feel and Why, or Rest, or Ride's in), What's next (with sessions moved), the latest ride's
+  note in brief, This week, the goal with its numbers; the calendar icon opens the plan ahead (the old Plan screen,
+  `PlanView(embedded: true)`). The ride note (What you did, Counted as with Change, What it means, What's next, One
+  thing to try) and the week as counted (each session with the ride that counted and why; open ones open their
+  detail). Checked in the Simulator against a copy of Neelay's data. Not yet: a ride's screen in Efforts saying what
+  it counted as.
 - Replaces the Plan tab. Today (session day and rest day), the "then" line, the goal bar, The plan ahead (reusing
   `MonthCalendar`), The week matched, session detail (reusing `SessionDetail`, `IntervalChart`). Rule-based text
   for now, so it works before any AI, and keeps working without it.

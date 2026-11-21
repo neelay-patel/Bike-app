@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published var recovery: RecoverySummary?
     @Published var goal: GoalView?
     @Published var plan: TrainingPlan?
+    /// The Train tab's today (GET /v1/train/today).
+    @Published var today: TrainToday?
     /// Every effort's card (by year, holo for bests, gaps for missed weeks), the badges and the rider card's numbers.
     @Published var collection: CollectionSummary?
     /// The rider's bike (from the avatar spec), remembered for the tab icon at launch.
@@ -107,6 +109,7 @@ final class AppModel: ObservableObject {
             async let rc = try? api.recovery()
             async let g = try? api.currentGoal()
             async let pl = try? api.plan()
+            async let td = try? api.trainToday()
             async let me = try? api.me()
             async let col = try? api.collection()
             (connections, rides) = try await (c, r)
@@ -114,6 +117,7 @@ final class AppModel: ObservableObject {
             recovery = await rc
             goal = (await g) ?? nil
             plan = (await pl) ?? nil
+            today = await td
             if let col = await col { collection = col }
             if let me = await me { bike = BikeSpec(avatar: me.avatar) }
             loadedAt = Date()
@@ -222,7 +226,7 @@ struct ContentView: View {
             RidesView().tabItem {
                 Label { Text("Efforts") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
             }.tag(0)
-            PlanView().tabItem { Label("Plan", systemImage: "calendar") }.tag(1)
+            TrainView().tabItem { Label("Train", systemImage: "figure.indoor.cycle") }.tag(1)
             RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)

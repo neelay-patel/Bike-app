@@ -752,6 +752,7 @@ class Backend:
         four = hl.four(c["feats"], c["today"], goal, self.me(user_id).get("ftp"))
         markers = [{"id": m["id"], "name": m["label"], "meaning": m["plain"], "unit": m["unit"],
                     "current": m["current"], "target": m.get("target"),
+                    "baseline": (goal.get("targets", {}).get(m["id"]) or {}).get("baseline"),
                     "reached": bool(m["current"] and m.get("target") and m["current"] >= m["target"])}
                    for m in four["metrics"] if m.get("focus")]
         ready = date.fromisoformat(goal["ready_by"]) if goal.get("ready_by") else None
@@ -854,16 +855,20 @@ class Backend:
         contrib = feedback.contribution(f, earlier, ftp)
         tips = feedback.pointers(f.get("work") or {}, cls, ftp, intent) if f.get("work") else []
         goal = self._goal_markers(user_id, c)
-        means = [b["text"] for b in contrib["bests"]]
-        for m in (goal or {}).get("markers", []):
-            hit = next((b for b in contrib["bests"] if (m["id"] == "punch" and b["id"] == "60") or
-                        (m["id"] == "sustained" and b["id"] == "1200")), None)
-            if hit and m.get("target"):
-                if m["reached"]:
-                    means.append(f"{m['name']} ({m['meaning'][0].lower() + m['meaning'][1:].split(':')[0]}) is "
-                                 f"{m['current']} {m['unit']}, past the {m['target']} {m['unit']} you were aiming for.")
-                else:
-                    means.append(f"{m['name']} is now {m['current']} {m['unit']}, on the way to {m['target']} {m['unit']}.")
+        # A new best that's one of the goal's numbers is said once, with what it means for the goal.
+        markers = {"60": "punch", "1200": "sustained"}
+        by_id = {m["id"]: m for m in (goal or {}).get("markers", [])}
+        means = []
+        for b in contrib["bests"]:
+            m = by_id.get(markers.get(b["id"], ""))
+            if m and m.get("target") and m.get("current"):
+                what = m["meaning"].split(":")[1].strip().rstrip(".") if ":" in m["meaning"] else ""
+                lead = f"{b['text']} That's your {m['name'].lower()}" + (f" ({what})" if what else "")
+                means.append(f"{lead}, and it's already past the {m['target']} {m['unit']} you were aiming for."
+                             if m["reached"] else
+                             f"{lead}: {m['current']} {m['unit']} now, on the way to {m['target']} {m['unit']}.")
+            else:
+                means.append(b["text"])
         if _today is None:
             _today = self.train_today(user_id) if d == c["today"] else None
         nxt = None

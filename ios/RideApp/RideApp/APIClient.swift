@@ -324,6 +324,124 @@ struct TrainingPlan: Decodable {
     var sessions: [PlanSession] { weeks.flatMap(\.sessions) }
 }
 
+// MARK: - Train (docs/train-tab.md): today, the week as counted, and a note for each ride
+
+/// GET /v1/train/today. state: session | rest | done | no_plan.
+struct TrainToday: Decodable {
+    let state: String
+    let date: String?
+    let week: Int?
+    let weeks: Int?
+    let phase: String?
+    let greeting: String?
+    let session: PlanSession?
+    let why: String?
+    let feel: String?
+    let then: String?
+    let moved: [Moved]?
+    let readiness: String?
+    let goal: TrainGoal?
+    let latest: TrainNote?
+
+    struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
+}
+
+struct TrainGoal: Decodable {
+    let title: String?
+    let words: String?
+    let readyBy: String?
+    let weeksLeft: Int?
+    let markers: [Marker]
+
+    struct Marker: Decodable, Identifiable {
+        let id: String
+        let name: String
+        let meaning: String
+        let unit: String
+        let current: Double?
+        let target: Double?
+        let baseline: Double?
+        let reached: Bool
+
+        /// How far from where the goal started to its aim, 0...1.
+        var progress: Double {
+            guard let c = current, let t = target else { return 0 }
+            if reached { return 1 }
+            let b = baseline ?? c
+            return t > b ? max(0, min(1, (c - b) / (t - b))) : 0
+        }
+    }
+}
+
+/// GET /v1/train/rides/{id}: what you did, counted as, what it means, what's next, one thing to try.
+struct TrainNote: Decodable, Identifiable {
+    var id: String { rideId }
+    let rideId: String
+    let date: String
+    let indoor: Bool?
+    let did: Did
+    let kind: String?
+    let kindTitle: String?
+    let reason: String?
+    let counted: Counted?
+    let means: [String]
+    let next: String?
+    let tips: [Tip]
+
+    struct Did: Decodable {
+        let km: Double
+        let minutes: Int
+        let ascentM: Double?
+        let avgPower: Double?
+        let avgHr: Double?
+        let bestMinute: Double?
+    }
+
+    struct Counted: Decodable {
+        let sessionId: String
+        let title: String
+        let kind: String
+        let plannedFor: String?
+        let reason: String?
+        let byHand: Bool
+    }
+
+    struct Tip: Decodable, Identifiable, Hashable { let id: String; let title: String; let text: String }
+
+    var day: Date? { GoalText.date(date) }
+}
+
+/// GET /v1/train/week: a plan week with what counted as each session, the week's rides, and (this week) the
+/// days the open sessions are now expected on.
+struct TrainWeek: Decodable {
+    let weekStart: String
+    let phase: String
+    let index: Int
+    let sessions: [PlanSession]
+    let rides: [WeekRide]
+    let extra: [Extra]
+    let done: Int
+    let total: Int
+    let schedule: [String: String]
+    let moved: [TrainToday.Moved]
+
+    struct WeekRide: Decodable, Identifiable {
+        var id: String { rideId }
+        let rideId: String
+        let date: String
+        let minutes: Int
+        let indoor: Bool?
+        let kindTitle: String?
+    }
+
+    struct Extra: Decodable, Identifiable {
+        var id: String { rideId }
+        let rideId: String
+        let kindTitle: String?
+        let reason: String?
+    }
+}
+
 struct PlanSession: Decodable, Identifiable, Hashable {
     static func == (a: PlanSession, b: PlanSession) -> Bool { a.id == b.id && a.status == b.status }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -338,9 +456,19 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let offBike: Bool
     let seconds: Double
     let steps: [PlanStep]
-    let status: String          // done | missed | today | upcoming
+    let status: String          // done | open (earlier this week, still to do) | missed | today | upcoming
     let summary: String?
     let load: Double?
+    /// The ride that counted as this session, by what it contained, whatever the day (Train, step 1).
+    let counted: Counted?
+
+    struct Counted: Decodable, Hashable {
+        let rideId: String
+        let date: String
+        let reason: String?
+        let kindTitle: String?
+        let byHand: Bool?
+    }
 
     var day: Date? { GoalText.date(date) }
 }
@@ -949,6 +1077,26 @@ struct APIClient {
     func planSettings(days: [String], times: [String: String], weeklyHours: Double) async throws -> TrainingPlan {
         let body = try JSONSerialization.data(withJSONObject: ["days": days, "times": times, "weekly_hours": weeklyHours])
         return try Self.decoder.decode(TrainingPlan.self, from: await send(request("PUT", "v1/plan/settings", body: body)))
+    }
+
+    // MARK: Train (rideengine/analysis/train.py, today.py, feedback.py)
+
+    func trainToday() async throws -> TrainToday { try await get("v1/train/today") }
+
+    func trainWeek(start: String? = nil) async throws -> TrainWeek {
+        try await get("v1/train/week", query: start.map { [URLQueryItem(name: "start", value: $0)] } ?? [])
+    }
+
+    func rideNote(_ rideId: String) async throws -> TrainNote { try await get("v1/train/rides/\(rideId)") }
+
+    /// Count a ride as a session by hand (nil: as none), or hand it back to automatic counting.
+    func countRide(_ rideId: String, as sessionId: String?, automatic: Bool = false) async throws {
+        if automatic {
+            _ = try await send(request("DELETE", "v1/plan/rides/\(rideId)/counts-as"))
+        } else {
+            let body = try JSONSerialization.data(withJSONObject: ["session_id": sessionId as Any? ?? NSNull()])
+            _ = try await send(request("PUT", "v1/plan/rides/\(rideId)/counts-as", body: body))
+        }
     }
 
     func setDone(_ sessionId: String, _ done: Bool) async throws {
