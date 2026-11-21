@@ -84,6 +84,30 @@ Our own drawing style, not a copy of any existing card game's art.
 
 ## What only Neelay can unblock
 - ~~Run the app on the iPhone and connect Apple Health~~ (done 14 Nov 2026).
-- Link Zwift to Garmin Connect when Zwift starts.
-- Ride the KICKR (week of 16 Nov 2026) for power.
+- ~~Link Zwift to Garmin Connect when Zwift starts~~ (done; Zwift arrives via Garmin, checked 19 Nov 2026).
+- ~~Ride the KICKR (week of 16 Nov 2026) for power~~ (done 17 Nov 2026; power arrives via the Watch).
 - Read or skim the Garmin and Wahoo API terms (AI and sharing), so `SOURCE_POLICY` can be filled in.
+
+
+## Next steps in detail (20 Nov 2026)
+1. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile). Then Sign in with Apple (paid
+   developer account) in place of the dev token.
+2. **Live with Kova, the cleaner Efforts and You** (18-20 Nov) and adjust from real use: is the full-size card too
+   much on a day with nothing new; does the collection make history feel close at hand; do indoor cards (shorter
+   than 9:16) share well, or should they be padded to 9:16 for Instagram. Small leftovers: a few places still say
+   "Ride" (the Apple Health permission text, "Background App Refresh on for Ride" on Sources).
+3. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
+   milestones are kept). Badges, holo cards and the rider card are the pieces to build on. Idea from Neelay's son:
+   "meta" (most effective tactic available) for the one thing to work on next.
+4. **Engine and AI** (`docs/coaching.md` section 7): agreed in principle, parked until Neelay decides. Order: match
+   efforts to the plan, the AI layer (retelling efforts from the engine's numbers; needs an Anthropic API key in the
+   backend's environment), re-planning, conversation. His goal: keep up with the fast group, ready by 1 May 2027.
+5. **Routes, next:** Garmin Courses API for one-tap sending (with the Starter tier); scenery scoring; starts at a café
+   or car park rather than a town centre; move a one-way's destination in tuning; people to ride with
+   (`docs/routes.md`).
+6. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
+   (every ride's per-second samples are stored twice as JSON; `GET /v1/rides` takes ~1.7 s, the app's blank first
+   second or two), delete account, Sign in with Apple, host the backend (also ends the home Wi-Fi limit), Garmin
+   Starter tier (OAuth + push webhook, apply early), privacy policy, a trademark check on Kova, TestFlight.
+7. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's
+   terms in full and fill in `SOURCE_POLICY`.
