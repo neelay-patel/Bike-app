@@ -78,6 +78,11 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
   thing to try) and the week as counted (each session with the ride that counted and why; open ones open their
   detail). Checked in the Simulator against a copy of Neelay's data. Not yet: a ride's screen in Efforts saying what
   it counted as.
+- Design pass (21 Nov 2026, Neelay: "optimising and impact"): one dark hero per day with its key numbers in the
+  dot-matrix type (session: minutes, the main set, watts; ride's in: km, climbing, best minute, counted as, one
+  thing to try, replacing the separate "after your ride" card); the session's shape in the summit's yellow; feel and
+  why as one line each; "indoors or out" as a chip with the advice behind it; the week as a seven-day strip; the
+  goal's numbers in Doto with an "aim met" badge.
 - Replaces the Plan tab. Today (session day and rest day), the "then" line, the goal bar, The plan ahead (reusing
   `MonthCalendar`), The week matched, session detail (reusing `SessionDetail`, `IntervalChart`). Rule-based text
   for now, so it works before any AI, and keeps working without it.

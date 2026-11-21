@@ -343,14 +343,28 @@ struct TrainToday: Decodable {
     let moved: [Moved]?
 
     enum CodingKeys: String, CodingKey {
-        case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest
+        case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
         case where_ = "where"
     }
     let readiness: String?
     let goal: TrainGoal?
     let latest: TrainNote?
+    /// This week, day by day, for the strip on Today.
+    let days: [Day]?
+    let done: Int?
+    let total: Int?
 
     struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
+
+    struct Day: Decodable, Identifiable {
+        var id: String { date }
+        let date: String
+        let state: String          // rode | session | rest
+        let title: String?
+        let today: Bool
+
+        var letter: String { GoalText.date(date)?.formatted(.dateTime.weekday(.narrow)) ?? "" }
+    }
 }
 
 struct TrainGoal: Decodable {

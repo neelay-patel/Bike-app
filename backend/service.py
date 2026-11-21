@@ -806,7 +806,29 @@ class Backend:
                             key=lambda r: r["date"], reverse=True)
         if rides_back:
             latest = self.train_ride_note(user_id, rides_back[0]["ride_id"], _today=t)
+        if t["then"].startswith("A new week starts tomorrow"):      # name the new week's first session
+            nxt = next((w for w in view["weeks"] if date.fromisoformat(w["week_start"]) > c["today"]), None)
+            first = min((s for s in nxt["sessions"] if not s["off_bike"]), key=lambda s: s["date"], default=None) if nxt else None
+            if first:
+                t["then"] = f"A new week starts tomorrow, with {td.short(first)}."
+        # The week, day by day, for the strip on Today: ridden, a session expected, or rest.
+        ws = date.fromisoformat(week["week_start"])
+        titles = {s["id"]: s["title"] for s in week["sessions"]}
+        rode = {}
+        for r in week.get("rides", []):
+            if (r.get("minutes") or 0) >= 15:
+                rode.setdefault(r["date"], r.get("kind_title") or "Ride")
+        expected = {}
+        for sid, d in t["schedule"].items():
+            expected.setdefault(d, titles.get(sid, ""))
+        days = []
+        for k in range(7):
+            d = (ws + timedelta(days=k)).isoformat()
+            state = "rode" if d in rode else "session" if d in expected else "rest"
+            days.append({"date": d, "state": state, "title": rode.get(d) or expected.get(d),
+                         "today": d == c["today"].isoformat()})
         return {"date": c["today"].isoformat(), "week": week["index"], "weeks": len(view["weeks"]),
+                "days": days, "done": week["done"], "total": week["total"],
                 "phase": week["phase"], "state": t["state"], "greeting": td.greeting(recent, c["today"], readiness, t["state"]),
                 "session": session, "why": t["why"], "feel": feel, "where": td.WHERE.get(session["kind"]) if session else None,
                 "then": t["then"], "moved": t["moved"],

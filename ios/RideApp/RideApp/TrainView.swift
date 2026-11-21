@@ -1,10 +1,10 @@
 import SwiftUI
 
-// The Train tab (docs/train-tab.md, step 3): the plan and the coach in one. Today leads: the next session big
-// (or rest, with the same weight), why, how it should feel, and a sentence about what's next. The words follow
-// docs/train-words.md: every card says whether it's a fact (What you did), how a ride was filed (Counted as),
-// what it means for the goal (What it means), the next step (What's next) or coaching (One thing to try).
-// Rule-based words for now; the AI coach writes in the same format later (step 5).
+// The Train tab (docs/train-tab.md, step 3): the plan and the coach in one. Today leads with one hero for the
+// day (the session, rest, or the ride you've just done), its key numbers in the dot-matrix hero type, then what's
+// next, the week as a strip, and the goal. The words follow docs/train-words.md: every card says whether it's a
+// fact, how a ride was filed, what it means for the goal, the next step, or coaching. Rule-based words for now;
+// the AI coach writes in the same format later (step 5). Design pass 21 Nov 2026: fewer words, more impact.
 
 private let summit = Theme.stripes[3]
 
@@ -20,11 +20,13 @@ struct TrainView: View {
                     StatusLine()
                     if let t = model.today, t.state != "no_plan" {
                         if let g = t.greeting { CoachLine(text: g) }
-                        TodayCard(today: t, plan: model.plan)
+                        TodayHero(today: t, plan: model.plan)
                         if let then = t.then, !then.isEmpty { NextCard(text: then, moved: t.moved ?? []) }
-                        if let note = t.latest { LatestRideCard(note: note) }
-                        NavigationLink { TrainWeekView() } label: { WeekRow(plan: model.plan) }
-                            .buttonStyle(.plain)
+                        if t.state != "done", let note = t.latest { LatestRideCard(note: note) }
+                        if let days = t.days, !days.isEmpty {
+                            NavigationLink { TrainWeekView() } label: { WeekStrip(days: days, done: t.done, total: t.total, phase: t.phase) }
+                                .buttonStyle(.plain)
+                        }
                         if let goal = t.goal { GoalCard(goal: goal) }
                         Text("Training guidance from your own data, not medical advice.")
                             .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
@@ -71,14 +73,14 @@ struct TrainView: View {
     }
 }
 
-/// The coach's opening line, beside the Kova mark.
+/// The coach's opening line, beside the Kova mark: in ink, so it reads as the coach speaking.
 struct CoachLine: View {
     let text: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CoachMark()
-            Text(text).font(Theme.text(16)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(Theme.text(16)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
     }
@@ -97,7 +99,7 @@ struct CoachMark: View {
     }
 }
 
-/// A small label over a block of words, in the words guide's order.
+/// A small label over a line of words, in the words guide's order.
 private struct Labelled: View {
     let label: String
     let text: String
@@ -112,36 +114,69 @@ private struct Labelled: View {
     }
 }
 
+/// A key number in the dot-matrix hero type, with its label under it.
+private struct HeroNumber: View {
+    let value: String
+    let label: String
+    var color: Color = .white
+    var labelColor: Color = Theme.panelLabel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(Theme.hero(30)).foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.55)
+            MonoLabel(label, color: labelColor).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Today
 
-struct TodayCard: View {
+struct TodayHero: View {
     let today: TrainToday
     let plan: TrainingPlan?
+    @State private var showWhere = false
 
     var body: some View {
         switch today.state {
         case "session": if let s = today.session { session(s) }
-        case "done": done
-        default: rest
+        case "done":
+            if let note = today.latest { DoneHero(note: note, why: today.why) } else { rest(done: true) }
+        default: rest(done: false)
         }
     }
 
     private func session(_ s: PlanSession) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            MonoLabel("Today · \(PlanText.duration(s.seconds)) · indoors or out", color: Theme.panelLabel)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(s.title).font(Theme.heading(52)).foregroundStyle(.white)
-                if let line = TrainText.line(s) {
-                    Text(line).font(Theme.text(15)).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                MonoLabel("Today", color: Theme.panelLabel)
+                Spacer()
+                if today.where_ != nil {
+                    Button { withAnimation { showWhere.toggle() } } label: {
+                        HStack(spacing: 4) {
+                            Text("Indoors or out").font(Theme.mono(11)).tracking(11 * 0.12)
+                            Image(systemName: showWhere ? "chevron.up" : "info.circle").font(.system(size: 11))
+                        }
+                        .foregroundStyle(Theme.panelLabel).padding(.horizontal, 10).padding(.vertical, 5)
+                        .overlay(Capsule().stroke(Theme.panelLine))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            if !s.steps.isEmpty { IntervalChart(steps: s.steps).frame(height: 64) }
-            Rectangle().fill(Theme.panelLine).frame(height: 1)
-            if let feel = today.feel { Labelled(label: "How it should feel", text: feel, labelColor: summit, textColor: .white.opacity(0.88)) }
-            if let why = today.why, !why.isEmpty { Labelled(label: "Why", text: why, labelColor: summit, textColor: .white.opacity(0.88)) }
-            if let where_ = today.where_ {   // indoors or out is the rider's choice: advice only
-                Text(where_).font(Theme.text(13)).foregroundStyle(Theme.panelLabel).fixedSize(horizontal: false, vertical: true)
+            Text(s.title).font(Theme.heading(56)).foregroundStyle(.white).padding(.top, -6)
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(Array(TrainText.numbers(s).enumerated()), id: \.offset) { _, n in
+                    HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white)
+                }
             }
+            if !s.steps.isEmpty { SessionShapeChart(steps: s.steps).frame(height: 56) }
+            if showWhere, let w = today.where_ {
+                Text(w).font(Theme.text(13)).foregroundStyle(Theme.panelLabel).fixedSize(horizontal: false, vertical: true)
+            }
+            Rectangle().fill(Theme.panelLine).frame(height: 1)
+            if let feel = today.feel { line("Feel", TrainText.feelWords(feel)) }
+            if let why = today.why, !why.isEmpty { line("Why", why) }
             NavigationLink { SessionDetail(session: s, plan: plan) } label: {
                 HStack(spacing: 6) {
                     Text("The session, step by step").font(Theme.text(14, .medium))
@@ -154,29 +189,105 @@ struct TodayCard: View {
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private var rest: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            MonoLabel("Today · rest day", color: Theme.cobalt)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Rest").font(Theme.heading(52)).foregroundStyle(Theme.ink)
-                Text("No riding today. Rest is a session too.").font(Theme.text(15)).foregroundStyle(Theme.ink)
+    /// One compact line: a yellow label, then the words.
+    private func line(_ label: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            MonoLabel(label, color: summit).frame(width: 40, alignment: .leading)
+            Text(text).font(Theme.text(15)).foregroundStyle(.white.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func rest(done: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonoLabel(done ? "Today · done" : "Today · rest day", color: Theme.cobalt)
+            Text(done ? "Ride's in" : "Rest").font(Theme.heading(56)).foregroundStyle(Theme.ink)
+            if !done {
+                Text("No riding today. Rest is a session too.").font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
             }
-            if let why = today.why, !why.isEmpty { Labelled(label: "Why", text: why, labelColor: Theme.cobalt, textColor: Theme.ink) }
+            if let why = today.why, !why.isEmpty {
+                Text(why).font(Theme.text(15)).foregroundStyle(Theme.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.cobaltSoft, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
+}
 
-    private var done: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            MonoLabel("Today · done", color: Theme.cobalt)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Ride's in").font(Theme.heading(52)).foregroundStyle(Theme.ink)
-                if let why = today.why { Text(why).font(Theme.text(15)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true) }
+/// When you've ridden today, the ride itself is the hero: what it was, its numbers, what it counted as, and the
+/// one thing to try. Opens the full note.
+private struct DoneHero: View {
+    let note: TrainNote
+    let why: String?
+
+    var body: some View {
+        NavigationLink { RideNoteView(rideId: note.rideId, initial: note) } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    MonoLabel("Today · ride's in", color: Theme.panelLabel)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.panelLabel)
+                }
+                Text(TrainText.noteTitle(note)).font(Theme.heading(44)).foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(TrainText.numbers(note).enumerated()), id: \.offset) { _, n in
+                        HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white)
+                    }
+                }
+                Rectangle().fill(Theme.panelLine).frame(height: 1)
+                if let c = note.counted {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        MonoLabel("Counted as", color: summit)
+                        Text(c.title + (c.plannedFor.map { " · planned \($0)" } ?? ""))
+                            .font(Theme.text(15, .medium)).foregroundStyle(.white)
+                    }
+                }
+                if let tip = note.tips.first {
+                    HStack(spacing: 8) {
+                        MonoLabel("Try", color: Theme.inkSoft)
+                        Text(tip.title).font(Theme.text(14, .semibold)).foregroundStyle(Theme.ink)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.sand, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
+            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(Rectangle())
         }
-        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.cobaltSoft, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .buttonStyle(.plain)
+    }
+}
+
+/// The session's shape in the brand's colours: the work in the summit's yellow, easy riding in soft greys, as
+/// wide as each step is long and as tall as it is hard.
+struct SessionShapeChart: View {
+    let steps: [PlanStep]
+
+    var body: some View {
+        let flat = steps.flatMap(\.flat)
+        let total = max(1, flat.reduce(0) { $0 + ($1.seconds ?? 0) })
+        GeometryReader { geo in
+            HStack(alignment: .bottom, spacing: 1) {
+                ForEach(Array(flat.enumerated()), id: \.offset) { _, s in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(color(s.zone))
+                        .frame(width: max(1, geo.size.width * CGFloat((s.seconds ?? 0) / total) - 1),
+                               height: max(6, geo.size.height * CGFloat(min(1, PlanText.intensity(s) / 1.3))))
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func color(_ z: String?) -> Color {
+        switch z {
+        case "SS", "Z4", "Z5", "Z6", "Z7": summit
+        case "Z3": Color.white.opacity(0.45)
+        default: Theme.panelLine
+        }
     }
 }
 
@@ -186,7 +297,7 @@ struct NextCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Labelled(label: "What's next", text: text)
+            Labelled(label: "What's next", text: text, textColor: Theme.ink)
             if !moved.isEmpty {
                 Text("Moved to fit the week: " + moved.map { m in
                     "\(m.title) to \(GoalText.date(m.to)?.formatted(.dateTime.weekday(.wide)) ?? m.to)"
@@ -198,7 +309,7 @@ struct NextCard: View {
     }
 }
 
-/// The latest ride's note in brief, opening the full note.
+/// A recent ride's note in brief (a day or two ago), opening the full note.
 struct LatestRideCard: View {
     let note: TrainNote
 
@@ -206,24 +317,19 @@ struct LatestRideCard: View {
         NavigationLink { RideNoteView(rideId: note.rideId, initial: note) } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    MonoLabel("After your ride · \(note.day?.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? note.date)")
+                    MonoLabel("Your last ride · \(note.day?.formatted(.dateTime.weekday(.abbreviated)) ?? note.date)")
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.label)
                 }
-                if let c = note.counted {
-                    Text("Counted as \(c.title)").font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
-                } else if let k = note.kindTitle {
-                    Text(k).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
-                }
-                if let first = note.means.first {
-                    Text(first).font(Theme.text(14)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
-                }
+                Text(note.counted.map { "Counted as \($0.title)" } ?? note.kindTitle ?? "Your ride")
+                    .font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
                 if let tip = note.tips.first {
-                    HStack(spacing: 6) {
-                        MonoLabel("One thing to try", color: Theme.inkSoft)
-                        Text(tip.title).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink)
+                    HStack(spacing: 8) {
+                        MonoLabel("Try", color: Theme.inkSoft)
+                        Text(tip.title).font(Theme.text(14, .semibold)).foregroundStyle(Theme.ink)
+                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .padding(.horizontal, 12).padding(.vertical, 9)
                     .background(Theme.sand, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
@@ -233,19 +339,45 @@ struct LatestRideCard: View {
     }
 }
 
-private struct WeekRow: View {
-    let plan: TrainingPlan?
+/// The week as seven days: ridden (filled), a session expected (ring), rest (a dash), today outlined.
+struct WeekStrip: View {
+    let days: [TrainToday.Day]
+    let done: Int?
+    let total: Int?
+    let phase: String?
 
     var body: some View {
-        let week = plan?.thisWeek.flatMap { w in plan?.weeks.first { $0.index == w } }
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                MonoLabel("This week" + (week.map { " · \(PlanText.phase($0.phase))" } ?? ""))
-                Text(week.map { "\($0.done) of \($0.total) done, any order" } ?? "See how your rides counted")
-                    .font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                MonoLabel("This week" + (phase.map { " · \(PlanText.phase($0))" } ?? ""))
+                Spacer()
+                if let done, let total {
+                    Text("\(done) of \(total) done").font(Theme.text(14, .semibold)).foregroundStyle(Theme.ink)
+                }
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.label)
             }
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.label)
+            HStack(spacing: 0) {
+                ForEach(days) { d in
+                    VStack(spacing: 6) {
+                        Text(d.letter).font(Theme.mono(11)).foregroundStyle(d.today ? Theme.ink : Theme.label)
+                        ZStack {
+                            if d.today {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.ink, lineWidth: 1.5)
+                                    .frame(width: 38, height: 38)
+                            }
+                            switch d.state {
+                            case "rode": Circle().fill(Theme.cobalt).frame(width: 18, height: 18)
+                            case "session": Circle().stroke(Theme.cobalt, lineWidth: 2).frame(width: 16, height: 16)
+                            default: Capsule().fill(Theme.label.opacity(0.5)).frame(width: 12, height: 3)
+                            }
+                        }
+                        .frame(height: 40)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(d.letter): \(d.state == "rode" ? "ridden" : d.state == "session" ? (d.title ?? "session") : "rest")")
+                }
+            }
         }
         .padding(16).surfaceCard(radius: 22).contentShape(Rectangle())
     }
@@ -255,48 +387,109 @@ struct GoalCard: View {
     let goal: TrainGoal
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
                 MonoLabel("Your goal")
                 Spacer()
                 if let w = goal.weeksLeft, let r = goal.readyBy.flatMap(GoalText.date) {
-                    MonoLabel("\(w) weeks to \(r.formatted(.dateTime.day().month(.abbreviated)))")
+                    MonoLabel("\(w) weeks · \(r.formatted(.dateTime.day().month(.abbreviated)))")
                 }
             }
-            if let t = goal.title { Text(t).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink) }
-            ForEach(goal.markers) { m in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(m.name).font(Theme.text(14, .semibold)).foregroundStyle(Theme.ink)
-                        Spacer()
-                        Text(markerFigures(m)).font(Theme.mono(12)).foregroundStyle(m.reached ? Theme.cobalt : Theme.inkMuted)
-                    }
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Theme.surfaceSelected)
-                            Capsule().fill(Theme.cobalt).frame(width: max(8, geo.size.width * m.progress))
-                        }
-                    }
-                    .frame(height: 8)
-                    Text(m.reached ? "\(m.meaning.components(separatedBy: ":").first ?? m.meaning). Past your aim already."
-                                   : m.meaning.components(separatedBy: ":").first ?? m.meaning)
-                        .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-            }
+            if let t = goal.title { Text(t).font(Theme.heading(30)).foregroundStyle(Theme.ink).padding(.top, -4) }
+            ForEach(goal.markers) { m in marker(m) }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
     }
 
-    private func markerFigures(_ m: TrainGoal.Marker) -> String {
-        let cur = m.current.map { "\(Int($0)) \(m.unit)" } ?? "—"
-        let aim = m.target.map { "aim \(Int($0))" } ?? ""
-        return [cur, aim].filter { !$0.isEmpty }.joined(separator: " · ") + (m.reached ? " ✓" : "")
+    private func marker(_ m: TrainGoal.Marker) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(m.name).font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+                    Text(m.meaning.components(separatedBy: ":").first ?? m.meaning)
+                        .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text(m.current.map { "\(Int($0))" } ?? "—").font(Theme.hero(28)).foregroundStyle(Theme.ink)
+                    Text(m.unit).font(Theme.text(13, .medium)).foregroundStyle(Theme.inkSoft)
+                }
+            }
+            HStack(spacing: 10) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.surfaceSelected)
+                        Capsule().fill(m.reached ? summit : Theme.cobalt).frame(width: max(8, geo.size.width * m.progress))
+                    }
+                }
+                .frame(height: 8)
+                if m.reached {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                        Text("Aim \(m.target.map { "\(Int($0))" } ?? "") met").font(Theme.mono(11))
+                    }
+                    .foregroundStyle(Theme.ink).padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(summit, in: Capsule())
+                } else if let t = m.target {
+                    Text("Aim \(Int(t))").font(Theme.mono(11)).foregroundStyle(Theme.inkMuted)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
 enum TrainText {
-    /// A session in one plain line, from its main set: "6 × 1 min hard / 2 min easy, inside 60 min".
+    struct Number { let value: String; let label: String; var accent = false }
+
+    /// A session's key numbers: how long, the main set, and how hard (watts, else heart rate, else feel).
+    static func numbers(_ s: PlanSession) -> [Number] {
+        var out = [Number(value: "\(Int((s.seconds / 60).rounded()))", label: "min")]
+        if let set = s.steps.first(where: { $0.set != nil }), let n = set.repeat,
+           let work = set.steps?.first, let secs = work.seconds {
+            let each = secs < 60 ? "\(Int(secs))" : "\(Int(secs / 60))"
+            let unit = secs < 60 ? "sec" : "min"
+            out.append(Number(value: "\(n)×\(each)", label: "\(unit) \(work.zone == "SS" || work.zone == "Z4" ? "steady" : "hard")"))
+            if let w = work.target?.watts {
+                let mid = Int((Double(w[0] + w[1]) / 2 / 5).rounded()) * 5
+                out.append(Number(value: "\(mid)", label: "watts", accent: true))
+            } else if let hr = work.target?.hr {
+                out.append(Number(value: "\(hr[0])", label: "bpm +", accent: true))
+            }
+        } else if let main = s.steps.flatMap(\.flat).max(by: { ($0.seconds ?? 0) < ($1.seconds ?? 0) }) {
+            if let w = main.target?.watts { out.append(Number(value: "\(w[1])", label: "watts max", accent: true)) }
+            if let rpe = main.target?.rpe { out.append(Number(value: "\(rpe)/10", label: "effort")) }
+        }
+        return out
+    }
+
+    /// A ride's key numbers: distance, climbing (or time), and its best minute (or average power or heart rate).
+    static func numbers(_ n: TrainNote) -> [Number] {
+        var out = [Number(value: Format.number(n.did.km, decimals: 1), label: "km")]
+        if let a = n.did.ascentM, a >= 1 { out.append(Number(value: "\(Int(a))", label: "m up")) }
+        else { out.append(Number(value: "\(n.did.minutes)", label: "min")) }
+        if let b = n.did.bestMinute {
+            out.append(Number(value: "\(Int(b))", label: "W best min", accent: n.means.first?.hasPrefix("Best minute") == true))
+        } else if let p = n.did.avgPower { out.append(Number(value: "\(Int(p))", label: "W avg")) }
+        else if let h = n.did.avgHr { out.append(Number(value: "\(Int(h))", label: "bpm avg")) }
+        return out
+    }
+
+    static func noteTitle(_ n: TrainNote) -> String {
+        if let best = n.means.first, best.hasPrefix("Best minute") { return "Your best minute yet" }
+        if let best = n.means.first, best.contains("your best yet") {
+            return best.components(separatedBy: ":").first.map { "\($0) yet" } ?? best
+        }
+        if let c = n.counted { return c.title }
+        return n.kindTitle ?? "Your ride"
+    }
+
+    /// How it should feel, without the watts (those are in the numbers above it).
+    static func feelWords(_ feel: String) -> String {
+        feel.replacingOccurrences(of: #" \(about [^)]*\)"#, with: "", options: .regularExpression)
+    }
+
+    /// A session in one plain line, from its main set.
     static func line(_ s: PlanSession) -> String? {
         if let set = s.steps.first(where: { $0.set != nil })?.set {
             return "\(set), inside \(PlanText.duration(s.seconds))."
