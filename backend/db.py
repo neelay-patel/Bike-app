@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS plan_done (
     PRIMARY KEY (user_id, session_id)
 );
 
+-- A ride the rider moved by hand: it counts as this session (session_id), or as none (NULL). Rides without a
+-- row here are counted automatically, by what they contained (rideengine/analysis/train.py).
+CREATE TABLE IF NOT EXISTS plan_matches (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    ride_id       TEXT NOT NULL,
+    session_id    TEXT,
+    at            REAL NOT NULL,
+    PRIMARY KEY (user_id, ride_id)
+);
+
 -- Recovery and fitness readings (VO2 max, HRV, resting heart rate, Cardio Recovery). Never shared.
 CREATE TABLE IF NOT EXISTS metrics (
     user_id       INTEGER NOT NULL REFERENCES users(id),

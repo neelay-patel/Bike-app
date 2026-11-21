@@ -29,7 +29,8 @@ rider's words, progress read from normal riding, an AI coach that explains while
 - `rideengine/analysis/`: `basics`, `climbs`, `fitness`, `records` (tallies, streaks, bests, ride notes), `features`
   (per-ride extract, versioned), `repeats` (routes, home loop, climbs as segments), `wellness` (`docs/recovery.md`),
   `effort` (sessions and phases), `headline` (the four numbers), `goals`, `plan` (training plan, .ics, .zwo),
-  `collection` (badges, ratings, binder), `simpower` (SIMULATED, prototyping only).
+  `train` (what kind of training a ride was, which session it counts as), `collection` (badges, ratings, binder),
+  `simpower` (SIMULATED, prototyping only).
 - `rideengine/routes/` (`docs/routes.md`): GPX routes, our OSM map, the route check, FIT courses, our router, tuning,
   routes from a description. `rideengine/card/`: the ride card (`ride_card.py`), avatar, rider card.
 - `backend/`: FastAPI service (SQLite in dev): `service.py`, `connectors/` (one per provider), `insights.py`

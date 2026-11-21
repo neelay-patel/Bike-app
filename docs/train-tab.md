@@ -30,7 +30,7 @@ Today always shows the best next session from what's left, recovery and the days
 ## The order of work
 Each step ends on Neelay's phone and in tests (synthetic always; his own data when `data/` is there).
 
-### 1. Engine: what each ride was, and which session it counts as
+### 1. Engine: what each ride was, and which session it counts as (built 21 Nov 2026)
 - `rideengine/analysis/train.py` (new). **Classify a ride** from `effort.phases()` (blocks, their length and
   intensity against FTP or heart-rate zones): surges, sweet spot, threshold, endurance, easy, group ride (varied
   intensity, Zwift or outdoors), race-like, or mixed. With a confidence.
@@ -39,7 +39,14 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
   Replaces `plan.status()` (same day, 60% of the time).
 - Each ride's **contribution**: load, and which goal markers it fed (a new best 20 min, a best minute).
 - Stored per ride and recomputed when the plan or the ride changes (like `features`).
-- Check on his real week 1 (16-22 Nov): Tue → sweet spot, Wed → endurance, Thu → group ride, Sat → surges.
+- Built: `rideengine/analysis/train.py` (`work` stored in features v10, `classify`, `match_week`), the plan view's
+  `counted`, `rides` and `extra` per week and the `open` status (earlier this week, still to do), and
+  `PUT`/`DELETE /v1/plan/rides/{ride_id}/counts-as` to move a ride (table `plan_matches`). Contribution (load,
+  markers fed) moves to step 2.
+- His real week 1 (16-22 Nov, FTP 147 W), as the engine read it: Tue 8 hard efforts of 40 s to 2 min → surges;
+  Wed a 6-block ERG workout at ~129 W → sweet spot; Thu 42 minutes at ~151 W → threshold, counted as the group
+  ride; Sat 85 min mostly steady with climbs → counted as endurance. (The mock-up had Tue and Sat the other way
+  round; the engine is right.) A test checks this when `data/` is present.
 
 ### 2. Engine: today's session, rest, and adapting
 - **Pick today:** from the week's open sessions, the best next one given: what's done, the last few days (no hard
@@ -50,7 +57,8 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - **Limits** the AI can never cross: weekly load within the phase's range, no more than two hard days in a row of
   any kind, an easier week every fourth (kept from `plan.build_plan`).
 - A **change log** (what changed, when, why), shown as one line where it matters.
-- API: `GET /v1/train/today`, `GET /v1/train/week?start=`, `PATCH /v1/train/match` (move a ride).
+- Each ride's **contribution** (from step 1): load, and which goal markers it fed (a new best 20 min, a best minute).
+- API: `GET /v1/train/today`, `GET /v1/train/week?start=`.
 
 ### 3. App: the Train tab, with rule-based words
 - Replaces the Plan tab. Today (session day and rest day), the "then" line, the goal bar, The plan ahead (reusing

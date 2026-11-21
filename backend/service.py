@@ -633,21 +633,23 @@ class Backend:
         if plan is None:
             return None
         c = self._plan_context(user_id)
-        by_day: dict[str, list] = {}
-        for f in c["feats"]:
-            by_day.setdefault(datetime.fromtimestamp(f["start"], c["tz"]).astimezone(c["tz"]).date().isoformat(), []).append(f)
         with self.lock:
             done = {r["session_id"] for r in self.db.execute("SELECT session_id FROM plan_done WHERE user_id = ?", (user_id,))}
+            moved = {r["ride_id"]: r["session_id"] for r in self.db.execute(
+                "SELECT ride_id, session_id FROM plan_matches WHERE user_id = ?", (user_id,))}
         today = c["today"]
         weeks = []
         for w in plan["weeks"]:
+            counted = self._count_week(c, w, moved)
             sessions = []
             for s in w["sessions"]:
                 t = p.targets(s, c["ftp"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
-                t["status"] = p.status(s, by_day.get(s["date"], []), today, done)
+                t["status"] = self._session_status(s, counted, done, w, today)
+                if s["id"] in counted["counted"]:
+                    t["counted"] = counted["counted"][s["id"]]
                 t["summary"] = p.describe(t) if s["steps"] else s["purpose"]
                 sessions.append(t)
-            weeks.append({**w, "sessions": sessions,
+            weeks.append({**w, "sessions": sessions, "rides": counted["rides"], "extra": counted["extra"],
                           "done": sum(1 for s in sessions if s["status"] == "done"), "total": len(sessions)})
         this_week = next((w for w in weeks if w["week_start"] <= today.isoformat() <
                           (date.fromisoformat(w["week_start"]) + timedelta(days=7)).isoformat()), None)
@@ -658,6 +660,67 @@ class Backend:
                 "zones": {z: {"name": v["name"], "pct_ftp": [round(v["ftp"][0] * 100), round(v["ftp"][1] * 100)]}
                           for z, v in p.ZONES.items()},
                 "this_week": this_week["index"] if this_week else None, "weeks": weeks}
+
+    def _count_week(self, c: dict, week: dict, moved: dict) -> dict:
+        """Which of the week's rides counts as which session, by what each ride contained, whatever the day
+        (rideengine/analysis/train.py). Rides moved by hand (`moved`: ride_id -> session_id or None) stay put."""
+        from rideengine.analysis import train
+        start = date.fromisoformat(week["week_start"])
+        end = start + timedelta(days=7)
+        ftp = c["ftp"]["watts"]
+        rides = []
+        for f in c["feats"]:
+            d = datetime.fromtimestamp(f["start"], c["tz"]).astimezone(c["tz"]).date()
+            if not (start <= d < end) or d > c["today"]:
+                continue
+            if f.get("work"):
+                cls = train.classify(f["work"], ftp, c["max_hr"], c["resting_hr"])
+            else:   # features still being refreshed: judge on time alone
+                minutes = round((f.get("moving_s") or 0) / 60)
+                cls = {"kind": "mixed" if minutes >= train.MIN_MINUTES else None, "confidence": 0.3,
+                       "reason": f"{minutes} minutes of riding.", "facts": {"minutes": minutes}}
+            rides.append({"ride_id": f["ride_id"], "start": f["start"], "date": d.isoformat(),
+                          "minutes": cls["facts"].get("minutes") or round((f.get("moving_s") or 0) / 60),
+                          "indoor": f.get("indoor"), "class": cls,
+                          "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None})
+        m = train.match_week(week["sessions"], rides, {r: s for r, s in moved.items()})
+        by_ride = {r["ride_id"]: r for r in rides}
+        counted = {sid: {**x, "date": by_ride[x["ride_id"]]["date"], "start": by_ride[x["ride_id"]]["start"],
+                         "kind": by_ride[x["ride_id"]]["class"]["kind"],
+                         "kind_title": by_ride[x["ride_id"]]["kind_title"]}
+                   for sid, x in m["counted"].items()}
+        return {"counted": counted, "rides": rides,
+                "extra": [{"ride_id": r, "kind_title": by_ride[r]["kind_title"], "reason": by_ride[r]["class"]["reason"]}
+                          for r in m["extra"]]}
+
+    @staticmethod
+    def _session_status(s: dict, counted: dict, done: set, week: dict, today: date) -> str:
+        """done (a ride counted as it, or ticked by hand) | today | open (earlier this week, still to do: any
+        day of the week counts) | missed (the week is over) | upcoming."""
+        if s["id"] in done or s["id"] in counted["counted"]:
+            return "done"
+        d = date.fromisoformat(s["date"])
+        if date.fromisoformat(week["week_start"]) + timedelta(days=7) <= today:
+            return "missed"
+        if d == today:
+            return "today"
+        return "open" if d < today else "upcoming"
+
+    def count_ride_as(self, user_id: int, ride_id: str, session_id: Optional[str], automatic: bool = False) -> bool:
+        """The rider moves a ride: it counts as `session_id`, or as nothing (None). `automatic` hands it back
+        to the engine."""
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM rides WHERE user_id = ? AND ride_id = ?", (user_id, ride_id)).fetchone() is None:
+                return False
+        if session_id is not None and self.plan_session(user_id, session_id) is None:
+            return False
+        with self.lock:
+            if automatic:
+                self.db.execute("DELETE FROM plan_matches WHERE user_id = ? AND ride_id = ?", (user_id, ride_id))
+            else:
+                self.db.execute("INSERT OR REPLACE INTO plan_matches (user_id, ride_id, session_id, at) VALUES (?, ?, ?, ?)",
+                                (user_id, ride_id, session_id, db.now()))
+        return True
 
     def plan_session(self, user_id: int, session_id: str) -> Optional[dict]:
         view = self.plan_view(user_id)

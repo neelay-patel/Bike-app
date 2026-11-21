@@ -200,7 +200,8 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
     @app.get("/v1/plan")
     def plan(uid: int = Depends(user)):
         """The training plan for the active goal: weeks of structured sessions with targets (watts when FTP
-        is known, heart rate always) and each session's status (done, missed, today, upcoming)."""
+        is known, heart rate always) and each session's status (done, open, missed, today, upcoming); a session is done when a ride that
+        week counts as it, by what the ride contained, whatever the day ("counted" says which and why)."""
         v = be.plan_view(uid)
         if v is None:
             raise HTTPException(404, "No plan: set a goal first")
@@ -234,6 +235,21 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         if not be.mark_done(uid, session_id, False):
             raise HTTPException(404, "No such session")
         return {"id": session_id, "done": False}
+
+    @app.put("/v1/plan/rides/{ride_id}/counts-as")
+    def ride_counts_as(ride_id: str, body: dict = Body(...), uid: int = Depends(user)):
+        """{"session_id": "..."} counts the ride as that session; {"session_id": null} as none. Rides are
+        otherwise counted automatically, by what they contained (rideengine/analysis/train.py)."""
+        if not be.count_ride_as(uid, ride_id, body.get("session_id")):
+            raise HTTPException(404, "No such ride or session")
+        return {"ride_id": ride_id, "session_id": body.get("session_id")}
+
+    @app.delete("/v1/plan/rides/{ride_id}/counts-as")
+    def ride_counts_auto(ride_id: str, uid: int = Depends(user)):
+        """Back to automatic counting for this ride."""
+        if not be.count_ride_as(uid, ride_id, None, automatic=True):
+            raise HTTPException(404, "No such ride")
+        return {"ride_id": ride_id, "automatic": True}
 
     @app.get("/v1/plan/sessions/{session_id}/zwift")
     def session_zwo(session_id: str, uid: int = Depends(user)):
