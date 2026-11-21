@@ -89,19 +89,21 @@ Our own drawing style, not a copy of any existing card game's art.
 - Read or skim the Garmin and Wahoo API terms (AI and sharing), so `SOURCE_POLICY` can be filled in.
 
 
-## Next steps in detail (20 Nov 2026)
-1. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile). Then Sign in with Apple (paid
-   developer account) in place of the dev token.
+## Next steps in detail (21 Nov 2026)
+1. **Reinstall the app by 28 Nov 2026** (free Personal Team, 7-day profile; renewed 21 Nov). Neelay is considering
+   the paid Apple Developer Program (individual): one-year builds, TestFlight, then Sign in with Apple in place of
+   the dev token.
 2. **Live with Kova, the cleaner Efforts and You** (18-20 Nov) and adjust from real use: is the full-size card too
    much on a day with nothing new; does the collection make history feel close at hand; do indoor cards (shorter
-   than 9:16) share well, or should they be padded to 9:16 for Instagram. Small leftovers: a few places still say
-   "Ride" (the Apple Health permission text, "Background App Refresh on for Ride" on Sources).
+   than 9:16) share well, or should they be padded to 9:16 for Instagram.
 3. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
    milestones are kept). Badges, holo cards and the rider card are the pieces to build on. Idea from Neelay's son:
    "meta" (most effective tactic available) for the one thing to work on next.
-4. **Engine and AI** (`docs/coaching.md` section 7): agreed in principle, parked until Neelay decides. Order: match
-   efforts to the plan, the AI layer (retelling efforts from the engine's numbers; needs an Anthropic API key in the
-   backend's environment), re-planning, conversation. His goal: keep up with the fast group, ready by 1 May 2027.
+4. **Coaching refinement, AI assisted** (Neelay put it on the list 21 Nov 2026; `docs/coaching.md` sections 6-7).
+   The engine calculates (load, zones, plan rules, progress); an AI coach explains, reviews the week and refines the
+   plan within the engine's limits, on Neelay's own data under the personal-use setting. Order: match efforts to the
+   plan, the AI layer (retelling efforts from the engine's numbers; needs an Anthropic API key in the backend's
+   environment), re-planning, conversation. His goal: keep up with the fast group, ready by 1 May 2027.
 5. **Routes, next:** Garmin Courses API for one-tap sending (with the Starter tier); scenery scoring; starts at a café
    or car park rather than a town centre; move a one-way's destination in tuning; people to ride with
    (`docs/routes.md`).

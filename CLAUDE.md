@@ -105,12 +105,13 @@ On Neelay's iPhone, all pushed to origin/main:
 - **Routes:** check a GPX, tune it, describe a ride, send to the Edge.
 
 ## Next steps (detail: `docs/roadmap.md`)
-1. **Reinstall the app around 21 Nov 2026** (free Personal Team, 7-day profile).
+1. **Reinstall the app by 28 Nov 2026** (free 7-day profile, renewed 21 Nov), or switch to the paid developer
+   account Neelay is considering (one-year builds, TestFlight).
 2. **Live with Kova and the cleaner screens**, and adjust from real use: do indoor cards share well at their size.
 3. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
-4. **Engine and AI** (`docs/coaching.md` section 7), parked until Neelay decides. His goal: keep up with the fast
-   group, ready by 1 May 2027.
+4. **Coaching refinement, AI assisted** (on the list 21 Nov 2026; `docs/coaching.md` sections 6-7): the engine
+   calculates, an AI coach explains and refines. His goal: keep up with the fast group, ready by 1 May 2027.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).
 6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, delete account,
    host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
