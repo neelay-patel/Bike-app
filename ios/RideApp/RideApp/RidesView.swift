@@ -46,13 +46,7 @@ struct RidesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if !efforts.isEmpty { MonoLabel("\(efforts.count) efforts on record") }
-                        Text("Efforts").font(Theme.heading(44)).foregroundStyle(Theme.ink)
-                    }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 8)
-
+                    // No big title (20 Nov 2026): the content starts at the top; the tab bar says where you are.
                     StatusLine()
                     if !hero.isEmpty {
                         EffortHero(rides: hero, isNew: !fresh.isEmpty,

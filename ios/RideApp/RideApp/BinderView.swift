@@ -236,7 +236,7 @@ struct MiniCard: View {
     }
 }
 
-/// An indoor card's picture, on wine where the outdoor ones are on blue: the ride game's virtual route
+/// An indoor card's picture, on pale blue where the outdoor ones are on deep cobalt: the ride game's virtual route
 /// (Zwift sends made-up GPS) with its world's name, else the session's shape over time (power, else heart
 /// rate), else just the indoor icon. The small icon sits in the black strip, by the time.
 private struct IndoorPicture: View {
@@ -244,27 +244,27 @@ private struct IndoorPicture: View {
 
     var body: some View {
         ZStack {
-            Theme.heart
+            Theme.cobaltSoft   // pale blue: calm, and the outdoor cards' cobalt family (wine felt harsh, 20 Nov)
             if !card.shape.isEmpty {
                 RouteShape(points: card.shape)
-                    .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .stroke(Theme.cobalt, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
                     .padding(.horizontal, 12).padding(.top, 20).padding(.bottom, 9)  // clear of the world's name
             } else if let trace = card.trace, trace.count > 1 {
                 ZStack {
                     TraceShape(values: trace, closed: true)
-                        .fill(LinearGradient(colors: [.white.opacity(0.38), .white.opacity(0.04)],
+                        .fill(LinearGradient(colors: [Theme.cobalt.opacity(0.32), Theme.cobalt.opacity(0.04)],
                                              startPoint: .top, endPoint: .bottom))
                     TraceShape(values: trace)
-                        .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
+                        .stroke(Theme.cobalt, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
                 }
                 .padding(.top, 20).padding(.bottom, 4)
             } else {
-                Image(systemName: MiniCard.indoorSymbol).font(.system(size: 24)).foregroundStyle(.white.opacity(0.85))
+                Image(systemName: MiniCard.indoorSymbol).font(.system(size: 24)).foregroundStyle(Theme.cobalt)
             }
         }
         .overlay(alignment: .topLeading) {
             if let label {
-                Text(label).font(Theme.mono(7)).tracking(0.8).foregroundStyle(.white.opacity(0.8))
+                Text(label).font(Theme.mono(7)).tracking(0.8).foregroundStyle(Theme.cobalt)
                     .lineLimit(1).padding(.horizontal, 6).padding(.top, 7)
             }
         }

@@ -21,6 +21,8 @@ struct SettingsView: View {
 
                     HomeSetting()
 
+                    AboutKovaRow()
+
                     MonoLabel("Development server").padding(.horizontal, 4).padding(.top, 12)
                     VStack(alignment: .leading, spacing: 0) {
                         field("Server", text: $server, prompt: "http://your-mac.local:8000", url: true)

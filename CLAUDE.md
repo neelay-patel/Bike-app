@@ -130,7 +130,7 @@ Built and on Neelay's iPhone (all pushed to origin/main):
   (swipeable, Share, "What you did"), this month in one slim line, then "Your collection" of every effort's mini card
   by month (holo for bests, empty slots for missed weeks; older years folded; or a list).
 - **Ride card** (redone 19 Nov): dot-matrix numbers on graphite with the colour ribbon, the map on top outdoors, the
-  indoor icon indoors. The collection's small cards match (route on blue; indoors on wine with Zwift's virtual route and world, else the session's power or heart-rate shape, `features.trace`; km or time in dot-matrix,
+  indoor icon indoors. The collection's small cards match (route on blue; indoors on pale blue (cobaltSoft, 20 Nov; wine felt harsh) with Zwift's virtual route and world, else the session's power or heart-rate shape, `features.trace`; km or time in dot-matrix,
   ribbon, name and date). The ride screen no longer repeats the card's numbers: "What you did" has a titled Power (or
   Heart rate) chart with the session's phases, then the Elevation profile for outdoor rides.
 - **You tab** (redesigned 18 Nov): the rider card (top trumps) first with Share, avatar and your bike; then the four
@@ -140,6 +140,9 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 - **Motion** (19 Nov, `Motion.swift`): dot-matrix numbers count up (headline numbers, tallies, month strip); a new
   effort's card springs in with a sheen; when new rides arrive, the all-time tallies slide up from the bottom and count
   on. "New" is tracked by start time, not ride id (ids change when the server re-merges a Watch ride with Garmin's).
+- **Cleaner screens** (20 Nov): no big title on any tab (content starts at the top; Plan keeps its week and goal
+  line, Sources its settings gear); no buttons under the Efforts hero card (tap it for the ride, which has Share and
+  What you did).
 - **Status line** (18 Nov): one line under each title: checking for new rides, out of reach (grey, with when data last
   loaded), or a real problem in red that says what to do. A cancelled request is never shown.
 - **Routes:** the Route Enhancer: check a GPX (surfaces, singletrack, busy roads, rest stops, time, cue sheet), our own Ontario map, send to
@@ -154,7 +157,7 @@ Built and on Neelay's iPhone (all pushed to origin/main):
 ## Next steps
 1. **Live with the new Efforts, ride card and You** (18-19 Nov) and adjust from real use: is the full-size card too
    much on a day with nothing new (could shrink it then); does the collection make history feel close at hand; do
-   indoor cards (shorter than 9:16) share well, or should they be padded to 9:16 for Instagram. **App name and icon** (19 Nov): the app is **Kova** on the phone (Finnish: hard, strong; quick searches found no app of that name; Kado and Orka were tried first). Icon: "the climb", five columns of white dots rising to a yellow summit on graphite, no ribbon, drawn by `swift scripts/make_icon.swift ios/RideApp/RideApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png --no-ribbon`. Mock-ups: https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9. The bundle id and project are still RideApp. Check the trademark before going public.
+   indoor cards (shorter than 9:16) share well, or should they be padded to 9:16 for Instagram. **App name and icon** (19 Nov): the app is **Kova** on the phone (Finnish: hard, strong; quick searches found no app of that name; Kado and Orka were tried first). Icon: "the climb", five columns of white dots rising to a yellow summit on graphite, no ribbon, drawn by `swift scripts/make_icon.swift ios/RideApp/RideApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png --no-ribbon`. KOVA also stands for **Kilometres. Output. VO₂. Ascent.** (20 Nov; Ascent in the summit dot's yellow; Ascend was tried and dropped). About Kova reads "Kova is Finnish for strong. It also stands for the four things we will help you build:" with Ascent: "Rise to the climb." In the app (`Kova.swift`): the opening screen over the app at launch (the climb builds column by column, one yellow dot sliding up to the top of each new column, leaving white behind, then KOVA and the meaning, held about 4 s, tap to skip; it fades itself out (a removal transition from App state jumped in one frame); graphite launch screen via `LaunchBackground` in `Config/Info.plist`, so no white flash) and Settings > About Kova. Mock-ups: https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9. The bundle id and project are still RideApp. Check the trademark before going public.
 2. **A fun engagement model**, then bring prizes back into it (`PrizeShelf` in `YouView.swift` and the server's
    milestones are kept). Badges, holo cards and the rider card are the pieces to build on.
 3. **Zwift via Garmin works** (checked 19 Nov): arrives as "Zwift (via Garmin)" with its climbing and virtual route

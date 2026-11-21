@@ -9,18 +9,16 @@ struct ConnectionsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            MonoLabel("Where your rides come from")
-                            Text("Sources").font(Theme.heading(44)).foregroundStyle(Theme.ink)
-                        }
+                    // No big title (20 Nov 2026); the settings gear keeps its place on the right.
+                    HStack(alignment: .center) {
+                        MonoLabel("Where your rides come from")
                         Spacer()
                         Button { showSettings = true } label: {
                             Image(systemName: "gearshape").font(.system(size: 20)).frame(width: 44, height: 44)
                         }
                         .accessibilityLabel("Settings")
                     }
-                    .padding(.horizontal, 4).padding(.top, 8)
+                    .padding(.horizontal, 4)
                     StatusLine()
                     AppleHealthCard()
                     MonoLabel("Accounts").padding(.horizontal, 4).padding(.top, 8)

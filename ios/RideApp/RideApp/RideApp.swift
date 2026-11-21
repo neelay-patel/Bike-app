@@ -26,11 +26,20 @@ struct RideApp: App {
         }
     }
 
+    /// The opening screen (Kova's mark and meaning) over the app while it loads, once per launch.
+    @State private var opening = true
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(model)
-                .environmentObject(health)
+            ZStack {
+                ContentView()
+                    .environmentObject(model)
+                    .environmentObject(health)
+                if opening {
+                    KovaOpening { opening = false }   // it fades itself out first, then goes
+                        .zIndex(1)
+                }
+            }
         }
     }
 }

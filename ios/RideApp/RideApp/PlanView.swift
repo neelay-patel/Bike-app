@@ -59,8 +59,7 @@ struct PlanView: View {
                 } else {
                     MonoLabel("Your training")
                 }
-                Text("Plan").font(Theme.heading(44)).foregroundStyle(Theme.ink)
-                if let g = model.goal {
+                if let g = model.goal {   // no big "Plan" title (20 Nov 2026): the week and the goal lead
                     Text(g.goal.title + (g.goal.readyBy.flatMap(GoalText.date).map { " · ready by \($0.formatted(.dateTime.day().month(.wide)))" } ?? ""))
                         .font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
                 }

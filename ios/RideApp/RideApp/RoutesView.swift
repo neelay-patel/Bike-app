@@ -41,12 +41,7 @@ struct RoutesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        MonoLabel("Plan a ride")
-                        Text("Routes").font(Theme.heading(44)).foregroundStyle(Theme.ink)
-                    }
-                    .padding(.horizontal, 4).padding(.top, 8)
-
+                    // No big title (20 Nov 2026): describing a ride leads.
                     PlanBox { made in
                         Task { await load() }
                         _ = made

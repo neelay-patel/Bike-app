@@ -31,8 +31,6 @@ struct EffortHero: View {
     @StateObject private var cards = CardStore()
     @State private var page = 0
     @State private var bounce = 0
-    @State private var confirmShare = false
-    @State private var shareImage: UIImage?
 
     private var ride: RideSummary { rides[min(page, rides.count - 1)] }
 
@@ -78,34 +76,11 @@ struct EffortHero: View {
                 .id(ride.rideId)
                 .transition(.opacity)
             }
-            HStack(spacing: 8) {
-                Button {
-                    if ride.use["share"]?.allowed ?? false { Task { await share() } } else { confirmShare = true }
-                } label: {
-                    Label("Share card", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(PrimaryButton())
-                .disabled(!cards.renderer(ride.rideId).isLoaded)
-                NavigationLink { RideDetailView(ride: ride) } label: {
-                    Label("What you did", systemImage: "waveform.path.ecg")
-                }
-                .buttonStyle(SecondaryButton())
-                Spacer(minLength: 0)
-            }
+            // No buttons under the card (20 Nov 2026): tapping it opens the ride, which has Share and What you did.
         }
         .animation(.easeInOut(duration: 0.2), value: page)
         .onAppear { if isNew { bounce += 1 } }
         .onChange(of: rides.map(\.rideId)) { _, _ in page = 0 }
-        .confirmationDialog("Share this card?", isPresented: $confirmShare, titleVisibility: .visible) {
-            Button("Share anyway") { Task { await share() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            let names = (ride.use["share"]?.blockedBy ?? []).map(Format.sourceName)
-            Text("This ride uses data from \(names.isEmpty ? "a source" : names.joined(separator: " and ")), whose terms on showing data to other people haven't been reviewed yet. Fine to keep for yourself; check before posting.")
-        }
-        .sheet(isPresented: Binding(get: { shareImage != nil }, set: { if !$0 { shareImage = nil } })) {
-            if let shareImage { ShareSheet(items: [shareImage]).presentationDetents([.medium, .large]) }
-        }
     }
 
     private var title: String {
@@ -137,10 +112,6 @@ struct EffortHero: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityHidden(true)
-    }
-
-    private func share() async {
-        shareImage = await cards.renderer(ride.rideId).image()
     }
 }
 
