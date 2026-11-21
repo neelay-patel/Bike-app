@@ -49,36 +49,23 @@ struct KovaMark: View {
     }
 }
 
-/// "KILOMETRES. OUTPUT. VO₂." then "ASCENT." in yellow, on its own line.
-struct KovaMeaningLine: View {
-    var color: Color = Theme.panelLabel
-    var size: CGFloat = 11
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text("KILOMETRES. OUTPUT. VO₂.").foregroundStyle(color)
-            Text("ASCENT.").foregroundStyle(summit)
-        }
-        .font(Theme.mono(size)).tracking(size * 0.16)
-        .multilineTextAlignment(.center)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Kilometres, output, VO2, ascent")
-    }
-}
-
-/// The opening screen: the climb builds column by column, then the name and what it stands for, held long
-/// enough to read (about 4 s; Neelay found 2 s too quick), then it fades into the app. A tap skips it.
-/// On graphite, like the launch screen underneath, so there's no flash.
+/// The opening screen: the climb builds column by column, then the name arrives letter by letter, each one
+/// rising and sharpening out of a soft blur, held long enough to take in (about 4 s in all; Neelay found 2 s
+/// too quick), then it fades into the app. A tap skips it. On graphite, like the launch screen underneath,
+/// so there's no flash. (The KILOMETRES. OUTPUT. VO₂. ASCENT. line under the name was dropped 21 Nov 2026;
+/// the meaning lives in Settings › About Kova.)
 struct KovaOpening: View {
     let done: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = 0
-    @State private var named = false
+    @State private var letters = 0          // how many of K, O, V, A are in
     @State private var finished = false
     @State private var leaving = false
     @State private var gone = false
 
-    /// Leaving in two steps so it doesn't feel sudden: the mark and words lift and fade first, then the
+    private static let name = Array("KOVA")
+
+    /// Leaving in two steps so it doesn't feel sudden: the mark and name lift and fade first, then the
     /// graphite fades slowly to show the app, with the status bar coming back as it goes. The fade is done
     /// here, on the view's own opacity: a removal transition from the App's state jumped in one frame.
     /// `done` removes the screen once it's invisible.
@@ -99,12 +86,17 @@ struct KovaOpening: View {
             Theme.panel.ignoresSafeArea().opacity(gone ? 0 : 1)
             VStack(spacing: 30) {
                 KovaMark(size: 112, shown: shown)
-                VStack(spacing: 22) {
-                    Text("KOVA").font(Theme.hero(80)).foregroundStyle(.white)
-                    KovaMeaningLine()
+                HStack(spacing: 0) {
+                    ForEach(Array(Self.name.enumerated()), id: \.offset) { i, ch in
+                        let on = i < letters
+                        Text(String(ch))
+                            .font(Theme.hero(80)).foregroundStyle(.white)
+                            .opacity(on ? 1 : 0)
+                            .blur(radius: on ? 0 : 10)
+                            .offset(y: on ? 0 : 14)
+                            .scaleEffect(on ? 1 : 0.92, anchor: .bottom)
+                    }
                 }
-                .opacity(named ? 1 : 0)
-                .offset(y: named ? 0 : 8)
             }
             .scaleEffect(leaving ? 1.06 : 1)
             .opacity(leaving ? 0 : 1)
@@ -120,7 +112,7 @@ struct KovaOpening: View {
         .task {
             if reduceMotion {
                 shown = 5
-                named = true
+                letters = Self.name.count
                 try? await Task.sleep(for: .milliseconds(2500))
             } else {
                 try? await Task.sleep(for: .milliseconds(350))   // let iOS's own launch zoom finish first
@@ -128,9 +120,12 @@ struct KovaOpening: View {
                     try? await Task.sleep(for: .milliseconds(320))   // slower, so the yellow dot's climb reads
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) { shown = col }
                 }
-                try? await Task.sleep(for: .milliseconds(250))
-                withAnimation(.easeOut(duration: 0.6)) { named = true }
-                try? await Task.sleep(for: .milliseconds(2400))
+                try? await Task.sleep(for: .milliseconds(380))   // the summit dot settles first
+                for i in 1...Self.name.count {
+                    withAnimation(.easeOut(duration: 0.7)) { letters = i }
+                    try? await Task.sleep(for: .milliseconds(110))
+                }
+                try? await Task.sleep(for: .milliseconds(1900))
             }
             finish()
         }

@@ -50,7 +50,8 @@ in CLAUDE.md; this is the background, for when a rule is questioned or a change 
   summit on graphite. Tried on the colour ribbon, then the ribbon was dropped. Mock-ups:
   https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9.
 - **The opening screen**: one yellow dot slides up the climb (redrawing the yellow per column didn't read as
-  movement), then KOVA and the meaning, about 4 s (2 s was too quick), tap to skip. It fades itself out on its own
+  movement), then KOVA letter by letter, each rising and sharpening out of a blur, about 4 s in all (2 s was too
+  quick), tap to skip. The meaning line under the name was dropped on 21 Nov 2026; it stays in About Kova. It fades itself out on its own
   opacity: a removal transition from the App's state jumped in one frame.
 - **Cleaner screens** (20 Nov 2026): no big titles on the tabs and no buttons under the Efforts hero card, so content
   starts higher. The ride screen keeps Share and What you did.
