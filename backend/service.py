@@ -17,7 +17,7 @@ from typing import Optional
 
 from rideengine.analysis.basics import summary
 from rideengine.analysis import effort as effort_mod
-from rideengine.clean import SESSION_GAP_S, hidden_reasons
+from rideengine.clean import SESSION_GAP_S, _size, hidden_reasons
 from rideengine.importers.recording_json import recording_from_dict, recording_to_dict
 from rideengine.merge import build_rides
 from rideengine.model import Recording, Ride
@@ -280,7 +280,7 @@ class Backend:
             rows = self.db.execute(
                 "SELECT provider, external_id, start_t, end_t, raw_path, data FROM recordings WHERE user_id = ? "
                 "AND end_t >= ? AND start_t <= ?", (user_id, ride.start - 60, ride.end + 60)).fetchall()
-            gone = [r for r in rows if json.loads(r["data"]).get("origin") in origins]
+            gone = [r for r in rows if json.loads(db.unpack(r["data"])).get("origin") in origins]
             for r in gone:
                 self.db.execute("DELETE FROM recordings WHERE user_id = ? AND provider = ? AND external_id = ?",
                                 (user_id, r["provider"], r["external_id"]))
@@ -320,7 +320,7 @@ class Backend:
                 "DO UPDATE SET source = excluded.source, start_t = excluded.start_t, end_t = excluded.end_t, "
                 "raw_path = excluded.raw_path, data = excluded.data, received_at = excluded.received_at",
                 (user_id, provider, external_id, rec.source, rec.start, rec.end, path,
-                 json.dumps(recording_to_dict(rec)), db.now()))
+                 db.pack(json.dumps(recording_to_dict(rec))), db.now()))
             if old:  # a re-upload may have moved in time
                 self.remerge(user_id, old["start_t"], old["end_t"])
             self.remerge(user_id, rec.start, rec.end)
@@ -340,13 +340,15 @@ class Backend:
                 if (nlo, nhi) == (lo, hi):
                     break
                 lo, hi = nlo, nhi
-            rides = build_rides([recording_from_dict(json.loads(r["data"])) for r in rows])
+            rides = build_rides([recording_from_dict(json.loads(db.unpack(r["data"]))) for r in rows])
             removed = [r["ride_id"] for r in self.db.execute(
                 "SELECT ride_id FROM rides WHERE user_id = ? AND end_t >= ? AND start_t <= ?", (user_id, lo, hi))]
             self.db.execute("DELETE FROM rides WHERE user_id = ? AND end_t >= ? AND start_t <= ?", (user_id, lo, hi))
             for r in rides:
-                self.db.execute("INSERT OR REPLACE INTO rides (user_id, ride_id, start_t, end_t, data) "
-                                "VALUES (?, ?, ?, ?, ?)", (user_id, str(int(r.start)), r.start, r.end, r.to_json()))
+                rid = str(int(r.start))
+                self.db.execute("INSERT OR REPLACE INTO rides (user_id, ride_id, start_t, end_t, data, brief) "
+                                "VALUES (?, ?, ?, ?, ?, ?)", (user_id, rid, r.start, r.end, db.pack(r.to_json()),
+                                                              json.dumps(brief(rid, r))))
             self.insights.rides_changed(user_id, removed, rides)
         return rides
 
@@ -365,19 +367,30 @@ class Backend:
     def rides(self, user_id: int, include_hidden: bool = False) -> list[dict]:
         """Rides newest first. False starts and empty recordings are left out unless asked for;
         with include_hidden each ride says why it would be hidden ("hidden": reason or None)."""
+        # From each ride's stored brief, never its samples: unpacking every ride's samples took 1.6 s of the
+        # list's 1.7 s (20 Nov 2026). A ride stored before briefs existed gets one now.
         with self.lock:
-            rows = self.db.execute("SELECT ride_id, data FROM rides WHERE user_id = ? ORDER BY start_t DESC",
+            rows = self.db.execute("SELECT ride_id, brief FROM rides WHERE user_id = ? ORDER BY start_t DESC",
                                    (user_id,)).fetchall()
-        rides = [Ride.from_json(r["data"]) for r in rows]
-        hide = hidden_reasons(rides)
-        efforts = effort_mod.group(rides)
+            briefs = []
+            for r in rows:
+                b = json.loads(r["brief"]) if r["brief"] else None
+                if b is None or b.get("v") != BRIEF_VERSION:
+                    ride = self.ride(user_id, r["ride_id"])
+                    b = brief(r["ride_id"], ride)
+                    self.db.execute("UPDATE rides SET brief = ? WHERE user_id = ? AND ride_id = ?",
+                                    (json.dumps(b), user_id, r["ride_id"]))
+                briefs.append(b)
+        shapes = [_Shape(b["shape"]) for b in briefs]
+        hide = hidden_reasons(shapes)
+        efforts = effort_mod.group(shapes)
         effort_of = {k: rows[e["main"]]["ride_id"] for e in efforts for k in e["parts"] + e["folded"]}
         notes = self.insights.notes(user_id)
         out = []
-        for i, (row, ride) in enumerate(zip(rows, rides)):
+        for i, (row, b) in enumerate(zip(rows, briefs)):
             if i in hide and not include_hidden:
                 continue
-            d = describe(row["ride_id"], ride)
+            d = {k: v for k, v in b.items() if k not in ("v", "shape")}
             d["hidden"] = hide.get(i)
             d["notes"] = notes.get(row["ride_id"], [])
             d["effort"] = effort_of.get(i, row["ride_id"])   # the effort (outing) this ride is part of
@@ -400,7 +413,7 @@ class Backend:
                 f"SELECT ride_id, data FROM rides WHERE user_id = ? AND ride_id IN ({','.join('?' * len(near))})",
                 (user_id, *near))}
         ids = [i for i in near if i in data]
-        rides = [Ride.from_json(data[i]) for i in ids]
+        rides = [Ride.from_json(db.unpack(data[i])) for i in ids]
         e = next(x for x in effort_mod.group(rides) if ids.index(ride_id) in x["parts"] + x["folded"])
         parts = []
         for k in e["parts"]:
@@ -426,11 +439,39 @@ class Backend:
                     u: {"allowed": all(p["use"][u]["allowed"] for p in parts),
                         "blocked_by": sorted({b for p in parts for b in p["use"][u]["blocked_by"]})} for u in ("ai", "share")}}
 
+    def compact(self) -> dict:
+        """Compress rides and recordings stored as plain JSON (before 20 Nov 2026) and give every ride its brief,
+        checking each compressed row reads back the same. In one transaction: all or nothing."""
+        n = {"recordings": 0, "rides": 0}
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                for r in self.db.execute("SELECT rowid, data FROM recordings").fetchall():
+                    if isinstance(r["data"], str):
+                        packed = db.pack(r["data"])
+                        assert db.unpack(packed) == r["data"]
+                        self.db.execute("UPDATE recordings SET data = ? WHERE rowid = ?", (packed, r["rowid"]))
+                        n["recordings"] += 1
+                for r in self.db.execute("SELECT rowid, ride_id, data FROM rides").fetchall():
+                    text = db.unpack(r["data"])
+                    packed = db.pack(text)
+                    assert db.unpack(packed) == text
+                    b = brief(r["ride_id"], Ride.from_json(text))
+                    self.db.execute("UPDATE rides SET data = ?, brief = ? WHERE rowid = ?",
+                                    (packed, json.dumps(b), r["rowid"]))
+                    n["rides"] += 1
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+            self.db.execute("VACUUM")   # give the freed space back to the disk
+        return n
+
     def visible_rides(self, user_id: int) -> list[Ride]:
         with self.lock:
             rows = self.db.execute("SELECT data FROM rides WHERE user_id = ? ORDER BY start_t",
                                    (user_id,)).fetchall()
-        rides = [Ride.from_json(r["data"]) for r in rows]
+        rides = [Ride.from_json(db.unpack(r["data"])) for r in rows]
         hide = hidden_reasons(rides)
         return [r for i, r in enumerate(rides) if i not in hide]
 
@@ -1312,7 +1353,7 @@ class Backend:
         with self.lock:
             row = self.db.execute("SELECT data FROM rides WHERE user_id = ? AND ride_id = ?",
                                   (user_id, ride_id)).fetchone()
-        return Ride.from_json(row["data"]) if row else None
+        return Ride.from_json(db.unpack(row["data"])) if row else None
 
     def ride_id_for(self, user_id: int, start: float, end: float) -> Optional[str]:
         """The merged ride a recording ended up in (the one it overlaps most)."""
@@ -1336,6 +1377,26 @@ def _shape(points: list, n: int = 64) -> list[list[float]]:
     span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1e-9
     ox, oy = (span - (max(xs) - min(xs))) / 2, (span - (max(ys) - min(ys))) / 2
     return [[round((x - min(xs) + ox) / span, 3), round((y - min(ys) + oy) / span, 3)] for x, y in xy]
+
+
+BRIEF_VERSION = 1   # bump when describe() or summary() change what they return: briefs are then redone
+
+
+class _Shape:
+    """Just enough of a ride for hidden_reasons() and effort grouping, from its brief."""
+
+    def __init__(self, s: dict):
+        self.start, self.end, self.indoor = s["start"], s["end"], s["indoor"]
+        self.totals = {"distance_m": s["km"] * 1000, "moving_s": s["moving_s"]}
+        self.samples: list = []
+
+
+def brief(ride_id: str, ride: Ride) -> dict:
+    """What the ride list needs, stored with each ride: describe(), and the ride's shape for hiding false
+    starts and grouping efforts (the same km and moving time hidden_reasons() works out from the samples)."""
+    km, moving = _size(ride)
+    return {**describe(ride_id, ride), "v": BRIEF_VERSION,
+            "shape": {"start": ride.start, "end": ride.end, "indoor": ride.indoor, "km": km, "moving_s": moving}}
 
 
 def describe(ride_id: str, ride: Ride) -> dict:

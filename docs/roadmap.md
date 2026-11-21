@@ -106,7 +106,7 @@ Our own drawing style, not a copy of any existing card game's art.
    or car park rather than a town centre; move a one-way's destination in tuning; people to ride with
    (`docs/routes.md`).
 6. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
-   (every ride's per-second samples are stored twice as JSON; `GET /v1/rides` takes ~1.7 s, the app's blank first
+   (done 20 Nov: compressed storage and a brief per ride; was 1.7 s for `GET /v1/rides`, the app's blank first
    second or two), delete account, Sign in with Apple, host the backend (also ends the home Wi-Fi limit), Garmin
    Starter tier (OAuth + push webhook, apply early), privacy policy, a trademark check on Kova, TestFlight.
 7. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's

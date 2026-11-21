@@ -33,7 +33,8 @@ rider's words, progress read from normal riding, an AI coach that explains while
 - `rideengine/routes/` (`docs/routes.md`): GPX routes, our OSM map, the route check, FIT courses, our router, tuning,
   routes from a description. `rideengine/card/`: the ride card (`ride_card.py`), avatar, rider card.
 - `backend/`: FastAPI service (SQLite in dev): `service.py`, `connectors/` (one per provider), `insights.py`
-  (`docs/insights.md`), `app.py` (HTTP API), `crypto.py`. Dev data in `data/backend/`.
+  (`docs/insights.md`), `app.py` (HTTP API), `crypto.py`. Dev data in `data/backend/`. Rides' and recordings' JSON is stored compressed (`db.pack`/`unpack`); each
+  ride also has a small `brief` the ride list reads (bump `service.BRIEF_VERSION` if `describe()` changes).
 - `ios/RideApp/`: the iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`). Tabs: Efforts, Plan, Routes, You,
   Sources. `Kova.swift` (mark, opening screen, About), `Theme.swift` (copies `design/tokens.json`; a test checks),
   `Motion.swift`. Setup: `ios/README.md`. App icon: `swift scripts/make_icon.swift <AppIcon.png> --no-ribbon`.
@@ -79,6 +80,7 @@ python -m backend rebuild-insights --user 1         # rework routes, climbs, not
 python -m backend set-tz --user 1 America/Toronto
 python -m backend build-map data/osm/ontario-latest.osm.pbf   # our own map for the route check (Geofabrik extract)
 python -m backend card --user 1 <ride_id>
+python -m backend compact                           # compress stored rides and recordings (backs up the database first)
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
 scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a login service (launchd); log in
                                                     # data/backend/server.log. After a backend change: restart
@@ -110,8 +112,8 @@ On Neelay's iPhone, all pushed to origin/main:
 4. **Engine and AI** (`docs/coaching.md` section 7), parked until Neelay decides. His goal: keep up with the fast
    group, ready by 1 May 2027.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).
-6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, slim the store
-   (`GET /v1/rides` ~1.7 s), host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
+6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, delete account,
+   host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
 7. **More sources:** Wahoo, Whoop, Oura, Google Health, Hammerhead; read each provider's terms, fill `SOURCE_POLICY`.
 
 ## Linked work in claude.ai (Project "Cycling app")

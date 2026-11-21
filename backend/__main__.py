@@ -14,6 +14,7 @@
   python -m backend card --user 1 <ride_id> [--name "Durham Forest"] [--headline "..."] [--place "Uxbridge,44.10,-79.12"]
                                                       # towns are found automatically unless --place / --no-places
                                                       # collectible ride card (HTML) in data/cards/
+  python -m backend compact                           # compress stored rides and recordings (backs up first)
   python -m backend serve                             # HTTP API on http://127.0.0.1:8000 (docs at /docs)
 """
 from __future__ import annotations
@@ -73,6 +74,7 @@ def main(argv=None) -> int:
     bm.add_argument("pbf", help="e.g. data/osm/ontario-latest.osm.pbf from download.geofabrik.de")
     rc = sub.add_parser("recheck-courses", help="check every saved route again (after a change to the route check)")
     rc.add_argument("--user", type=int, required=True)
+    sub.add_parser("compact", help="compress stored rides and recordings (backs the database up first)")
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
@@ -158,6 +160,16 @@ def main(argv=None) -> int:
         elif a.cmd == "delete-ride":
             n = be.delete_ride(a.user, a.ride_id)
             print(f"no ride {a.ride_id}" if n is None else f"ride {a.ride_id} deleted ({n} recordings)")
+        elif a.cmd == "compact":
+            import sqlite3
+            path = be.settings.database
+            backup = path + ".before-compact"
+            with sqlite3.connect(backup) as dest:
+                be.db.backup(dest)
+            before = os.path.getsize(path)
+            n = be.compact()
+            print(f"backed up to {backup}; compressed {n['recordings']} recordings and {n['rides']} rides; "
+                  f"database {before / 1e6:.0f} MB -> {os.path.getsize(path) / 1e6:.0f} MB")
         elif a.cmd == "rebuild":
             print(f"{be.rebuild_all(a.user)} rides rebuilt")
         elif a.cmd == "rides":

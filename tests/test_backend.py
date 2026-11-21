@@ -472,3 +472,42 @@ def test_new_garmin_rides_arrive_without_tapping_sync(env):
         time.sleep(0.05)
     be._stop.set()
     assert 444 in garmin.downloads
+
+
+def test_rides_and_recordings_are_stored_compressed_and_the_list_reads_briefs(env):
+    """Rides' and recordings' JSON is stored compressed; plain rows from before still read, and `compact`
+    converts them; the ride list comes from each ride's brief and matches working it out from the samples."""
+    from backend import db as dbm
+    from backend.service import describe
+    from rideengine.clean import hidden_reasons
+    from rideengine.model import Ride
+    be, uid, client, garmin = env
+    client.put("/v1/connections/garmin_personal?since=2026-01-01", json={"api_key": API_KEY})
+    client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
+    assert all(isinstance(r[0], bytes) for r in be.db.execute("SELECT data FROM recordings"))
+    assert all(isinstance(r[0], bytes) and r[1] for r in be.db.execute("SELECT data, brief FROM rides"))
+
+    # The list from briefs = the list worked out from every ride's samples, as before.
+    listed = be.rides(uid, include_hidden=True)
+    rows = be.db.execute("SELECT ride_id, data FROM rides WHERE user_id = ? ORDER BY start_t DESC", (uid,)).fetchall()
+    full = [Ride.from_json(dbm.unpack(r["data"])) for r in rows]
+    hide = hidden_reasons(full)
+    for i, (row, ride, d) in enumerate(zip(rows, full, listed)):
+        assert {k: v for k, v in d.items() if k not in ("hidden", "notes", "effort")} == \
+            json.loads(json.dumps(describe(row["ride_id"], ride)))
+        assert d["hidden"] == hide.get(i)
+
+    # Rows stored as plain JSON before compression still read, and get a brief when listed.
+    for r in be.db.execute("SELECT rowid, data FROM rides").fetchall():
+        be.db.execute("UPDATE rides SET data = ?, brief = NULL WHERE rowid = ?", (dbm.unpack(r[1]), r[0]))
+    for r in be.db.execute("SELECT rowid, data FROM recordings").fetchall():
+        be.db.execute("UPDATE recordings SET data = ? WHERE rowid = ?", (dbm.unpack(r[1]), r[0]))
+    assert be.rides(uid, include_hidden=True) == listed
+    assert be.ride(uid, listed[0]["ride_id"]) is not None
+
+    # compact converts them all, and nothing changes in what the API returns.
+    n = be.compact()
+    assert n == {"recordings": 3, "rides": 2}
+    assert all(isinstance(r[0], bytes) for r in be.db.execute("SELECT data FROM recordings"))
+    assert be.rides(uid, include_hidden=True) == listed
+    assert be.compact() == {"recordings": 0, "rides": 2}   # a second run finds nothing left to compress

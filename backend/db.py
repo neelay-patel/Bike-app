@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+import zlib
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -30,7 +31,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     start_t       REAL NOT NULL,
     end_t         REAL NOT NULL,
     raw_path      TEXT,                 -- original file as received, kept for re-processing
-    data          TEXT NOT NULL,        -- Recording as JSON
+    data          TEXT NOT NULL,        -- Recording as JSON, compressed (pack/unpack below)
     received_at   REAL NOT NULL,
     PRIMARY KEY (user_id, provider, external_id)
 );
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS rides (
     ride_id       TEXT NOT NULL,        -- int(start) of the merged ride, as in the CLI store
     start_t       REAL NOT NULL,
     end_t         REAL NOT NULL,
-    data          TEXT NOT NULL,        -- Ride as JSON
+    data          TEXT NOT NULL,        -- Ride as JSON, compressed (pack/unpack below)
     PRIMARY KEY (user_id, ride_id)
 );
 CREATE INDEX IF NOT EXISTS rides_time ON rides (user_id, start_t, end_t);
@@ -189,6 +190,7 @@ MIGRATIONS = [
     ("users", "calendar_token", "TEXT"),  # secret in the training calendar feed's address
     ("courses", "plan", "TEXT"),
     ("users", "home", "TEXT"),          # home the rider set, JSON {"lat", "lon", "label"}; else from their rides        # generated routes: what was asked and why this one, JSON
+    ("rides", "brief", "TEXT"),         # the ride without its samples (service.brief): what the ride list needs
 ]
 
 
@@ -203,6 +205,16 @@ def connect(path: str) -> sqlite3.Connection:
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     return conn
+
+
+# Rides' and recordings' JSON (every sample, every field named) is stored compressed: about a sixth of the size.
+# Rows written before 20 Nov 2026 are plain text; unpack reads both, `python -m backend compact` converts them.
+def pack(text: str) -> bytes:
+    return zlib.compress(text.encode("utf-8"), 6)
+
+
+def unpack(value) -> str:
+    return zlib.decompress(value).decode("utf-8") if isinstance(value, (bytes, memoryview)) else value
 
 
 def now() -> float:

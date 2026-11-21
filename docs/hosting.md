@@ -30,8 +30,9 @@ forwarding. Those would put ride, health and home data on the open internet, pro
 - Turn on the Sign in with Apple capability for the app id.
 
 ### 2. Get ready before moving (on the Mac, no hosting needed)
-- **Slim the store** (CLAUDE.md next steps): every ride's per-second samples are stored twice as JSON (the recording
-  and the merged ride). Store merged samples once, compactly. That shrinks what has to move and what a disk costs.
+- ~~**Slim the store**~~ (done 20 Nov 2026): rides' and recordings' JSON is stored compressed (`db.pack`), 292 MB
+  to 65 MB for 198 rides, and the ride list reads a small stored brief per ride instead of every ride's samples
+  (1.7 s to under 0.01 s). The originals in `raw/` stay as they are.
 - **Delete account**: one call that removes the rider, every connection, recording, ride, course and file. Apple
   expects in-app account deletion for apps where you create an account.
 - **Settings from the environment only**: database, raw files location, secret key, public URL and the Garmin keys
