@@ -45,6 +45,10 @@ line), **HOW IT SHOULD FEEL** (feel words first, then the numbers), **WHY** (the
   Thursday." Never "You missed…".
 - **Short:** one idea per sentence, two sentences per block at most. "You" for the rider; the coach says "I" only
   when it decided something.
+- **Indoors or out is the rider's choice** (Neelay, 21 Nov 2026). Never assume where a session is ridden: no
+  "indoor" in session names, no trainer icon. Where to ride is advice ("Indoors or out. The trainer makes the
+  efforts easy to hit; outside, pick a quiet road…"), and outdoor rides without a power meter are ridden and judged
+  by feel and heart rate.
 - **Privacy on the lock screen:** notifications never show HRV, resting heart rate or other recovery numbers;
   "your recovery looks normal" is enough. Inside the app, the rider sees their own.
 

@@ -29,6 +29,12 @@ in CLAUDE.md; this is the background, for when a rule is questioned or a change 
   shape). First on wine (19 Nov), changed to pale blue with cobalt lines (20 Nov): wine felt aggressive or negative,
   and a whole new colour would have been out of place.
 
+## Training (the Train tab, `docs/train-tab.md`)
+- **Indoors or out is always the rider's choice** (21 Nov 2026). The plan's season only suggests the trainer in
+  winter; sessions are named neutrally (Group ride, not Zwift group ride), Today says "indoors or out" with advice on
+  where each suits, the tab icon is rising bars (not a trainer), Zwift export is offered for any structured session,
+  and outdoor rides without power count by heart rate (long steady stretches at a sweet-spot or threshold heart rate).
+
 ## The four headline numbers (You)
 - Reviewed 19 Nov 2026; Neelay chose to **leave them as they are** for now, with these known quirks:
   sustained power only moves on a new best 20 minutes in 120 days; efficiency's baseline came from one ride, so

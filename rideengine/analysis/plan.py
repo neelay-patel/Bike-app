@@ -5,7 +5,8 @@ docs/coaching.md. Rule-based and stdlib only:
 - a workout library: warm-up, the main set (how many, how long, how hard, recovery between), cool-down,
   progressing over the weeks;
 - build_plan: from now to the goal's date, in phases (base, build, sharpen, taper), an easier week every
-  fourth, on the rider's own days and times, indoor or outdoor by their season;
+  fourth, on the rider's own days and times; indoors or out is the rider's choice (`indoor` marks the trainer
+  season, a suggestion only);
 - to_ics (calendar feed) and to_zwo (Zwift workout file: Zwift then sets the KICKR's resistance).
 
 FTP: the rider's own number if they give one, else 95% of their best 20-minute power from recent rides,
@@ -115,11 +116,13 @@ def workout(kind: str, level: float, minutes: int, indoor: bool) -> dict:
               "steps": [_warm(15), rep_set(n, step("Sprint", 0.25, "Z7"), step("Recover", 4.75, "Z1"),
                                            f"{n} × 15 s all out / 5 min easy"), _cool(10)]}
     elif kind == "group":
-        w |= {"title": "Group ride" if not indoor else "Zwift group ride",
-              "purpose": "Practise holding the wheel at the group's pace, and answering the surges.",
+        # Indoors or out is the rider's call (21 Nov 2026): `indoor` only says the season suits the trainer.
+        w |= {"title": "Group ride",
+              "purpose": "Practise holding the wheel at the group's pace, and answering the surges: a club ride "
+                         "outside, or a Zwift group ride.",
               "steps": [_warm(10), step("Ride with the group", minutes - 15, "Z3"), step("Cool down", 5, "Z1")]}
     elif kind == "long":
-        w |= {"title": "Long ride" if not indoor else "Long indoor ride",
+        w |= {"title": "Long ride",
               "purpose": "Time in the saddle at a pace you could chat at.",
               "steps": [_warm(10), step("Steady endurance", minutes - 15, "Z2"), step("Cool down", 5, "Z1")]}
     elif kind == "endurance":
@@ -396,7 +399,7 @@ def to_ics(sessions: list[dict], tz: tzinfo | None, name: str = "Kova training")
         start = datetime.combine(d, time(hh, mm), tzinfo=tz).astimezone(timezone.utc) if tz else \
             datetime.combine(d, time(hh, mm)).astimezone(timezone.utc)
         end = start + timedelta(seconds=s["seconds"])
-        where = "Off the bike" if s["off_bike"] else ("Indoors" if s["indoor"] else "Outdoors")
+        where = "Off the bike" if s["off_bike"] else "Indoors or out"
         body = f"{s['purpose']}\n\n{describe(s)}" if s["steps"] else s["purpose"]
         out += ["BEGIN:VEVENT", f"UID:{s['id']}@ride-training", f"DTSTAMP:{now}",
                 f"DTSTART:{start.strftime('%Y%m%dT%H%M%SZ')}", f"DTEND:{end.strftime('%Y%m%dT%H%M%SZ')}",

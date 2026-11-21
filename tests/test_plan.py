@@ -32,7 +32,7 @@ def test_sessions_on_the_riders_days_and_times():
     assert {datetime.fromisoformat(s["date"]).strftime("%a") for s in bike} == set(DAYS)
     longest = max(bike, key=lambda s: s["seconds"])
     assert longest["date"] == "2026-11-22" and longest["kind"] == "group" and longest["time"] == "07:45"
-    assert longest["indoor"] and "Zwift" in longest["title"]               # November is indoor season
+    assert longest["indoor"] and longest["title"] == "Group ride"     # the trainer's season; still the rider's choice
     assert any(s["kind"] == "strength" and s["off_bike"] for s in first)
     assert bike[0]["kind"] == "surges"                                    # the key session first
 

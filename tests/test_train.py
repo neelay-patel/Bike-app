@@ -66,8 +66,13 @@ def test_heart_rate_only_rides():
     assert w["basis"] == "heart_rate" and w["p30"] == [] and w["minutes"] == 80
     assert train.classify(w, FTP, 180, 50)["kind"] == "endurance"
     assert train.classify(train.work(hr_ride(200, 135)), FTP, 180, 50)["kind"] == "long"
-    hard = train.classify(train.work(hr_ride(60, 170)), FTP, 180, 50)
+    hard = train.classify(train.work(hr_ride(60, 178)), FTP, 180, 50)
     assert hard["kind"] == "mixed" and "without power" in hard["reason"]
+    # Outdoors without a power meter, long steady stretches still show by heart rate (indoors or out is the
+    # rider's choice, so outdoor rides must be able to count as these sessions too).
+    thr = train.classify(train.work(hr_ride(60, 165)), FTP, 180, 50)
+    assert thr["kind"] == "threshold" and "judged by heart rate" in thr["reason"]
+    assert train.classify(train.work(hr_ride(60, 155)), FTP, 180, 50)["kind"] == "steady"
     # No max or resting heart rate known: still a ride, just can't say what kind.
     assert train.classify(w, None, None, None)["kind"] == "mixed"
 

@@ -644,6 +644,11 @@ class Backend:
             sessions = []
             for s in w["sessions"]:
                 t = p.targets(s, c["ftp"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
+                # Plans made before 21 Nov 2026 named winter sessions for the trainer; indoors or out is the
+                # rider's choice.
+                t["title"] = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}.get(t["title"], t["title"])
+                if t["kind"] == "group" and "Zwift" not in t["purpose"]:
+                    t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
                 t["status"] = self._session_status(s, counted, done, w, today)
                 if s["id"] in counted["counted"]:
                     t["counted"] = counted["counted"][s["id"]]
@@ -803,7 +808,8 @@ class Backend:
             latest = self.train_ride_note(user_id, rides_back[0]["ride_id"], _today=t)
         return {"date": c["today"].isoformat(), "week": week["index"], "weeks": len(view["weeks"]),
                 "phase": week["phase"], "state": t["state"], "greeting": td.greeting(recent, c["today"], readiness, t["state"]),
-                "session": session, "why": t["why"], "feel": feel, "then": t["then"], "moved": t["moved"],
+                "session": session, "why": t["why"], "feel": feel, "where": td.WHERE.get(session["kind"]) if session else None,
+                "then": t["then"], "moved": t["moved"],
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
     def train_week(self, user_id: int, start: Optional[str] = None) -> Optional[dict]:

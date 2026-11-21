@@ -15,7 +15,7 @@ def week(statuses=None):
     plan = [("surges", 0, 3600, "Surges", [{"set": "6 × 1 min hard / 2 min easy"}]),
             ("steady", 1, 3600, "Sweet spot", [{"set": "3 × 12 min sweet spot / 5 min easy"}]),
             ("endurance", 2, 4500, "Endurance", []),
-            ("group", 4, 3600, "Zwift group ride", []),
+            ("group", 4, 3600, "Group ride", []),
             ("strength", 5, 1200, "Strength and mobility", [])]
     out = []
     for kind, day, secs, title, steps in plan:

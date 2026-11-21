@@ -226,7 +226,9 @@ struct ContentView: View {
             RidesView().tabItem {
                 Label { Text("Efforts") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
             }.tag(0)
-            TrainView().tabItem { Label("Train", systemImage: "figure.indoor.cycle") }.tag(1)
+            // Not a trainer or a road bike: indoors or out is the rider's choice (21 Nov 2026). Rising bars, like
+            // the climb in Kova's mark.
+            TrainView().tabItem { Label("Train", systemImage: "chart.bar.xaxis.ascending") }.tag(1)
             RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)

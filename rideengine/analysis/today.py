@@ -31,6 +31,14 @@ WHY = {"surges": "When the group speeds up, efforts like these keep you on the w
        "endurance": "Easy hours build the engine everything else sits on.",
        "long": "Time in the saddle builds the endurance for longer, faster rides.",
        "easy": "It keeps your legs turning while you recover."}
+# Where to ride it: indoors or out is always the rider's choice (Neelay, 21 Nov 2026); this is advice, never a rule.
+WHERE = {k: "Indoors or out. The trainer makes the efforts easy to hit; outside, pick a quiet road or a steady "
+            "climb, and without a power meter ride it by feel." for k in
+         ("surges", "steady", "threshold", "over_unders", "vo2", "sprint")}
+WHERE |= {"group": "A club ride outside, or a Zwift group ride.",
+          "endurance": "Indoors or out. Outside is the better place for easy hours when the weather allows.",
+          "long": "Indoors or out. Outside is the better place for long hours when the weather allows.",
+          "easy": "Indoors or out: whichever is easiest today."}
 # How each session should feel (docs/train-words.md, the glossary): feel words first; watts are added by the caller.
 FEEL = {"surges": "Hard parts 8–9 out of 10, too hard to talk; everything else easy.",
         "steady": "7 out of 10: comfortably hard, short sentences only.",

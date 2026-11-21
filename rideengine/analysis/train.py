@@ -33,6 +33,9 @@ EASY_AP = 0.65
 ENDURANCE_AP = 0.86
 LONG_MIN = 150
 MIN_MINUTES = 15         # shorter rides don't count as a session
+HR_SS = (0.76, 0.86)     # heart-rate reserve bands for steady work on rides without power ...
+HR_THR = (0.86, 0.93)
+HR_STEADY_MIN = 20       # ... held for at least this long
 
 TITLES = {"surges": "Surges", "steady": "Sweet spot", "threshold": "Threshold", "vo2": "VO2 max",
           "sprint": "Sprints", "over_unders": "Over-unders", "group": "Group ride", "endurance": "Endurance",
@@ -47,7 +50,9 @@ COMPAT = {
     "endurance": {"long": 0.8, "easy": 0.6, "group": 0.3},
     "long": {"endurance": 1.0, "group": 0.3},
     "easy": {"endurance": 0.5},
-    "mixed": {"group": 0.8, "surges": 0.5, "endurance": 0.4, "long": 0.4},
+    # Hard riding without power to show its pattern (mostly outdoor rides with heart rate only): it can stand in
+    # for the group ride or the surges, since indoors or out is the rider's choice.
+    "mixed": {"group": 0.8, "surges": 0.6, "endurance": 0.4, "long": 0.4},
 }
 COUNTS = 0.4             # below this a ride doesn't count as the session
 
@@ -241,6 +246,21 @@ def _by_heart_rate(w: dict, max_hr: float | None, rest_hr: float | None, minutes
     if share < 0.5 and minutes < 75:
         return {"kind": "easy", "confidence": 0.6, "facts": facts,
                 "reason": f"{minutes} minutes at an easy heart rate, {round(avg)} on average."}
+    # Steady work by heart rate: 5-minute rolling heart-rate reserve in the sweet spot or threshold band. Heart
+    # rate lags short efforts, so only long steady stretches are judged this way.
+    hs5 = _rolling(w.get("h30", []), 15)
+    def band(lo, hi):
+        return sum(1 for v in hs5 if v is not None and lo <= (v - rest_hr) / (max_hr - rest_hr) < hi) * STEP_S / 60
+    ss_min, thr_min = band(*HR_SS), band(*HR_THR)
+    facts |= {"sweet_spot_min": round(ss_min), "threshold_min": round(thr_min)}
+    if minutes < LONG_MIN and thr_min >= HR_STEADY_MIN:
+        return {"kind": "threshold", "confidence": 0.5, "facts": facts,
+                "reason": f"{round(thr_min)} minutes at a hard, steady heart rate, close to what you could hold for "
+                          f"an hour (judged by heart rate: no power on this ride)."}
+    if minutes < LONG_MIN and ss_min >= HR_STEADY_MIN:
+        return {"kind": "steady", "confidence": 0.5, "facts": facts,
+                "reason": f"{round(ss_min)} minutes at a steady, comfortably hard heart rate: sweet spot by feel "
+                          f"(judged by heart rate: no power on this ride)."}
     if minutes >= LONG_MIN and share < 0.85:
         return {"kind": "long", "confidence": 0.7, "facts": facts,
                 "reason": f"{minutes} minutes in the saddle, heart rate {round(avg)} on average."}

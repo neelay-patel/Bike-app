@@ -303,7 +303,7 @@ struct SessionCard: View {
                 Spacer()
                 StatusChip(status: session.status)
             }
-            Text("\(PlanText.duration(session.seconds)) · \(session.offBike ? "off the bike" : session.indoor ? "indoors" : "outdoors")"
+            Text("\(PlanText.duration(session.seconds)) · \(session.offBike ? "off the bike" : "indoors or out")"
                  + (session.steps.first(where: { $0.set != nil })?.set.map { " · \($0)" } ?? ""))
                 .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
             if !session.steps.isEmpty {
@@ -421,14 +421,14 @@ struct SessionDetail: View {
                     }
                     .buttonStyle(SecondaryButton())
                     Spacer()
-                    if !session.steps.isEmpty && session.indoor {
+                    if !session.steps.isEmpty && session.steps.contains(where: { $0.set != nil }) {
                         Button("Export for Zwift") { Task { await export() } }.buttonStyle(SecondaryButton())
                     }
                 }
                 if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
                 Text("Zwift: put the file in Documents/Zwift/Workouts and Zwift sets your KICKR's resistance for each step.")
                     .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
-                    .opacity(session.indoor && !session.steps.isEmpty ? 1 : 0)
+                    .opacity(session.steps.contains(where: { $0.set != nil }) ? 1 : 0)
             }
             .padding(16)
         }

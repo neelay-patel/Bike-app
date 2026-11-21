@@ -337,8 +337,15 @@ struct TrainToday: Decodable {
     let session: PlanSession?
     let why: String?
     let feel: String?
+    /// Where to ride it: advice only, since indoors or out is the rider's choice.
+    let where_: String?
     let then: String?
     let moved: [Moved]?
+
+    enum CodingKeys: String, CodingKey {
+        case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest
+        case where_ = "where"
+    }
     let readiness: String?
     let goal: TrainGoal?
     let latest: TrainNote?

@@ -128,7 +128,7 @@ struct TodayCard: View {
 
     private func session(_ s: PlanSession) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            MonoLabel("Today · \(PlanText.duration(s.seconds)) · \(s.indoor ? "indoors" : "outdoors")", color: Theme.panelLabel)
+            MonoLabel("Today · \(PlanText.duration(s.seconds)) · indoors or out", color: Theme.panelLabel)
             VStack(alignment: .leading, spacing: 6) {
                 Text(s.title).font(Theme.heading(52)).foregroundStyle(.white)
                 if let line = TrainText.line(s) {
@@ -139,6 +139,9 @@ struct TodayCard: View {
             Rectangle().fill(Theme.panelLine).frame(height: 1)
             if let feel = today.feel { Labelled(label: "How it should feel", text: feel, labelColor: summit, textColor: .white.opacity(0.88)) }
             if let why = today.why, !why.isEmpty { Labelled(label: "Why", text: why, labelColor: summit, textColor: .white.opacity(0.88)) }
+            if let where_ = today.where_ {   // indoors or out is the rider's choice: advice only
+                Text(where_).font(Theme.text(13)).foregroundStyle(Theme.panelLabel).fixedSize(horizontal: false, vertical: true)
+            }
             NavigationLink { SessionDetail(session: s, plan: plan) } label: {
                 HStack(spacing: 6) {
                     Text("The session, step by step").font(Theme.text(14, .medium))
