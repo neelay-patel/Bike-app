@@ -80,6 +80,7 @@ python -m backend rebuild --user 1                  # re-merge stored rides afte
 python -m backend you --user 1                      # same, from the backend (GET /v1/you)
 python -m backend rebuild-insights --user 1         # rework routes, climbs, notes (keeps custom names)
 python -m backend set-tz --user 1 America/Toronto
+python -m backend ai --user 1 on|off|status         # the AI coach (personal use; key in ~/.config/kova/), spend
 python -m backend build-map data/osm/ontario-latest.osm.pbf   # our own map for the route check (Geofabrik extract)
 python -m backend card --user 1 <ride_id>
 python -m backend compact                           # compress stored rides and recordings (backs up the database first)
@@ -112,9 +113,9 @@ On Neelay's iPhone, all pushed to origin/main:
 ## Next steps (detail: `docs/roadmap.md`)
 1. **Reinstall the app by 28 Nov 2026** (free 7-day profile). The paid developer account is waiting on Apple support.
 2. **Live with Train** (first session day Mon 23 Nov) and adjust the counting, picking and words from real use.
-3. **Train steps 5-7** (`docs/train-tab.md`; step 4, the coach's notifications, built 21 Nov): the AI coach (needs
-   an Anthropic API key in the backend's environment), changing the plan by talking, sending sessions to the bike;
-   and the Method (the research behind each rule, a coach's review). Goal: keep up with the fast group by 1 May 2027.
+3. **Train steps 5-7** (`docs/train-tab.md`; notifications and the AI ride story built 21 Nov): the coach's
+   morning brief and Sunday review, changing the plan by talking, sending sessions to the bike; and the Method (the
+   research behind each rule, a coach's review). Goal: keep up with the fast group by 1 May 2027.
 4. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).

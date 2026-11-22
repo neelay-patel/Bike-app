@@ -57,6 +57,9 @@ def main(argv=None) -> int:
     tzp = sub.add_parser("set-tz", help="the rider's time zone, e.g. America/Toronto")
     tzp.add_argument("--user", type=int, required=True)
     tzp.add_argument("tz")
+    ai = sub.add_parser("ai", help="the AI coach for a rider's own data: on, off, or status (spend so far)")
+    ai.add_argument("--user", type=int, required=True)
+    ai.add_argument("state", choices=["on", "off", "status"])
     dl = sub.add_parser("delete-ride", help="delete a ride and its recordings (stays deleted)")
     dl.add_argument("--user", type=int, required=True)
     dl.add_argument("ride_id")
@@ -117,6 +120,14 @@ def main(argv=None) -> int:
             print(be.sync(a.user, "garmin_personal", a.since))
         elif a.cmd == "sync":
             print(be.sync(a.user, a.provider, a.since))
+        elif a.cmd == "ai":
+            from .coach import api_key
+            if a.state != "status":
+                be.coach.set_allowed(a.user, a.state == "on")
+            on = be.coach.allowed(a.user)
+            print(f"AI coach for user {a.user}: {'on' if on else 'off'}"
+                  + ("" if api_key() else " (no Anthropic API key found: ~/.config/kova/anthropic_api_key)"))
+            print(f"Spend so far: {be.coach.spend(a.user)}")
         elif a.cmd == "upload":
             for f in a.files:
                 rec = be.upload(a.user, "apple_health", open(f, "rb").read())

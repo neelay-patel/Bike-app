@@ -51,6 +51,8 @@ class Backend:
         self.lock = threading.RLock()
         self._stop = threading.Event()
         self.insights = Insights(self, background=background)
+        from .coach import Coach
+        self.coach = Coach(self.db, self.lock)   # the AI coach's words (backend/coach.py); tests swap its client
         self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
         self.graph_source = None  # roads to route on when tuning; None: our own map (tests swap it)
         self.heights = None       # ground heights for tuned routes; None: elevation tiles (tests swap it)
@@ -574,7 +576,7 @@ class Backend:
         me = self.me(user_id)
         rest = self.recovery(user_id)["resting_hr"].get("usual")
         max_hr = p.max_hr_estimate([f.get("max_hr") for f in recent])
-        return {"tz": tz, "today": today, "feats": vfeats, "starts": starts,
+        return {"user_id": user_id, "tz": tz, "today": today, "feats": vfeats, "starts": starts,
                 "ftp": p.ftp_estimate(me.get("ftp"), power), "hr_zones": p.hr_zones(max_hr, rest),
                 "max_hr": max_hr, "resting_hr": rest}
 
@@ -739,8 +741,10 @@ class Backend:
                 continue
             cls = (train.classify(f["work"], c["ftp"]["watts"], c["max_hr"], c["resting_hr"]) if f.get("work") else
                    {"kind": "mixed" if (f.get("moving_s") or 0) >= train.MIN_MINUTES * 60 else None, "facts": {}})
+            felt = self.ride_feel(c.get("user_id", 0), f["ride_id"]) if c.get("user_id") else None
             out.append({"ride_id": f["ride_id"], "date": d, "kind": cls["kind"],
-                        "minutes": round((f.get("moving_s") or 0) / 60)})
+                        "minutes": round((f.get("moving_s") or 0) / 60),
+                        "feel": (felt or {}).get("feel"), "hurts": bool((felt or {}).get("hurts"))})
         return out
 
     def _this_week(self, view: dict, today: date) -> Optional[dict]:
@@ -1022,13 +1026,73 @@ class Backend:
         nxt = None
         if _today and d >= c["today"] - timedelta(days=2):
             nxt = _today.get("then") if _today.get("state") in ("done", "rest") else None
-        return {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"),
-                "did": {"km": round(f.get("km") or 0, 1), "minutes": round((f.get("moving_s") or 0) / 60),
-                        "ascent_m": f.get("ascent_m"), "avg_power": f.get("power"), "avg_hr": f.get("avg_hr"),
-                        "best_minute": (f.get("power_curve") or {}).get("60")},
+        did = {"km": round(f.get("km") or 0, 1), "minutes": round((f.get("moving_s") or 0) / 60),
+               "ascent_m": f.get("ascent_m"), "avg_power": f.get("power"), "avg_hr": f.get("avg_hr"),
+               "best_minute": (f.get("power_curve") or {}).get("60")}
+        feel = self.ride_feel(user_id, ride_id)
+        note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "means": means, "load": contrib["load"],
-                "next": nxt, "try": tips[0] if tips else None, "tips": tips}
+                "next": nxt, "try": tips[0] if tips else None, "tips": tips, "feel": feel}
+        # The AI coach's words (backend/coach.py), from facts the engine made: only for riders with the
+        # personal-use setting on; the engine's words above stay as the fallback.
+        if self.coach.allowed(user_id):
+            facts = self._story_facts(c, f, d, note, goal)
+            note["story"] = self.coach.ride_story(user_id, ride_id, facts)
+        return note
+
+    def _story_facts(self, c: dict, f: dict, d: date, note: dict, goal: Optional[dict]) -> dict:
+        BUILDS = {"surges": "punch: answering accelerations and closing gaps",
+                  "vo2": "your top end", "sprint": "snap in a sprint",
+                  "steady": "the power you could hold for about an hour",
+                  "threshold": "the power you could hold for about an hour",
+                  "endurance": "the aerobic base everything else sits on", "long": "endurance for long rides",
+                  "easy": "recovery", "mixed": "a bit of everything, nothing in particular"}
+        """What the AI coach may know about a ride: no GPS, no place names, no recovery data. Everything here
+        is stable for the ride (nothing that changes day to day), so a saved story is only redone when it
+        changes."""
+        from rideengine.analysis import today as td
+        recent = []
+        for x in c["feats"]:
+            xd = datetime.fromtimestamp(x["start"], c["tz"]).astimezone(c["tz"]).date()
+            if d - timedelta(days=14) <= xd < d and (x.get("moving_s") or 0) >= 15 * 60:
+                recent.append({"day": td.WEEKDAY[xd.weekday()], "days_before": (d - xd).days,
+                               "minutes": round((x.get("moving_s") or 0) / 60), "indoor": bool(x.get("indoor"))})
+        did = {k: (round(v) if isinstance(v, float) and k != "km" else v) for k, v in note["did"].items() if v}
+        return {
+            "ride": {"weekday": td.WEEKDAY[d.weekday()], "indoor": bool(note["indoor"]), **did,
+                     "what_it_was": note["kind_title"], "how_we_know": note["reason"],
+                     "what_this_kind_of_riding_builds": BUILDS.get(note["kind"])},
+            "counted_as": ({"session": note["counted"]["title"], "planned_for": note["counted"]["planned_for"],
+                            "set_by_rider": note["counted"]["by_hand"]} if note["counted"] else None),
+            "new_bests": [b for b in note["means"]],
+            "goal": ({"title": goal["title"], "in_the_riders_words": goal.get("words"), "weeks_left": goal.get("weeks_left"),
+                      "numbers": [{k: m[k] for k in ("name", "meaning", "current", "target", "unit", "reached")}
+                                  for m in goal.get("markers", [])]} if goal else None),
+            "rides_in_the_two_weeks_before": recent,
+            "one_thing_to_try_shown_separately": note["tips"][0]["title"] if note["tips"] else None,
+            "how_it_felt": note["feel"],
+        }
+
+    def ride_feel(self, user_id: int, ride_id: str) -> Optional[dict]:
+        with self.lock:
+            row = self.db.execute("SELECT feel, hurts FROM ride_feel WHERE user_id = ? AND ride_id = ?",
+                                  (user_id, ride_id)).fetchone()
+        return {"feel": row["feel"], "hurts": bool(row["hurts"])} if row else None
+
+    FEELS = ("easy", "good", "hard", "wrecked")
+
+    def set_ride_feel(self, user_id: int, ride_id: str, feel: str, hurts: bool = False) -> bool:
+        """The one tap after a ride: easy | good | hard | wrecked, and whether something hurts. It shapes the
+        next days (rideengine/analysis/today.py) and what the coach says."""
+        if feel not in self.FEELS:
+            raise ValueError(f"feel must be one of {', '.join(self.FEELS)}")
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM rides WHERE user_id = ? AND ride_id = ?", (user_id, ride_id)).fetchone() is None:
+                return False
+            self.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at) VALUES (?, ?, ?, ?, ?)",
+                            (user_id, ride_id, feel, 1 if hurts else 0, db.now()))
+        return True
 
     def plan_session(self, user_id: int, session_id: str) -> Optional[dict]:
         view = self.plan_view(user_id)

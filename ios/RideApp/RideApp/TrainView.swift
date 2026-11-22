@@ -239,7 +239,8 @@ private struct DoneHero: View {
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.panelLabel)
                 }
-                Text(TrainText.noteTitle(note)).font(Theme.heading(44)).foregroundStyle(.white)
+                let title = TrainText.noteTitle(note)
+                Text(title).font(Theme.heading(title.count > 26 ? 34 : 44)).foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                 HStack(alignment: .top, spacing: 8) {
                     ForEach(Array(TrainText.numbers(note).enumerated()), id: \.offset) { _, n in
@@ -488,6 +489,7 @@ enum TrainText {
     }
 
     static func noteTitle(_ n: TrainNote) -> String {
+        if let s = n.story { return s.headline }
         if let best = n.means.first, best.hasPrefix("Best minute") { return "Your best minute yet" }
         if let best = n.means.first, best.contains("your best yet") {
             return best.components(separatedBy: ":").first.map { "\($0) yet" } ?? best
@@ -535,9 +537,14 @@ struct RideNoteView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     did(n)
                     counted(n)
-                    if !n.means.isEmpty { card { Labelled(label: "What it means", text: n.means.joined(separator: " ")) } }
+                    if let s = n.story {
+                        card { Labelled(label: "What it means", text: s.story) }
+                    } else if !n.means.isEmpty {
+                        card { Labelled(label: "What it means", text: n.means.joined(separator: " ")) }
+                    }
                     if let next = n.next, !next.isEmpty { card { Labelled(label: "What's next", text: next) } }
                     if let tip = n.tips.first { tips(n, first: tip) }
+                    feel(n)
                     if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
                 }
                 .padding(16)
@@ -558,7 +565,45 @@ struct RideNoteView: View {
         do { note = try await APIClient().rideNote(rideId) } catch { if note == nil && initial == nil { self.error = error.localizedDescription } }
     }
 
+    /// "How did it feel?": the one thing the data can't tell. It shapes the next days and what the coach says.
+    private func feel(_ n: TrainNote) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("How did it feel?").font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
+            HStack(spacing: 8) {
+                ForEach(["easy", "good", "hard", "wrecked"], id: \.self) { f in
+                    let on = n.feel?.feel == f
+                    Button { Task { await setFeel(f, hurts: n.feel?.hurts ?? false) } } label: {
+                        Text(f.capitalized).font(Theme.text(14, on ? .semibold : .medium))
+                            .foregroundStyle(Theme.ink).frame(maxWidth: .infinity, minHeight: 46)
+                            .background(on ? Theme.cobaltSoft : Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(on ? Theme.cobalt : Theme.line, lineWidth: on ? 1.5 : 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button {
+                Task { await setFeel(n.feel?.feel ?? "good", hurts: !(n.feel?.hurts ?? false)) }
+            } label: {
+                Label(n.feel?.hurts == true ? "Something hurts (tap to clear)" : "Something hurts",
+                      systemImage: n.feel?.hurts == true ? "checkmark.circle.fill" : "bandage")
+                    .font(Theme.text(13, .medium)).foregroundStyle(Theme.heart).frame(minHeight: 36)
+            }
+            .buttonStyle(.plain)
+            Text(n.feel == nil ? "Your answer shapes the next few days." : "Thanks: the next days take it into account.")
+                .font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+    }
+
+    private func setFeel(_ f: String, hurts: Bool) async {
+        do {
+            note = try await APIClient().setFeel(rideId, feel: f, hurts: hurts)
+            await model.refresh()
+        } catch { self.error = error.localizedDescription }
+    }
+
     private func title(_ n: TrainNote) -> String {
+        if let s = n.story { return s.headline }
         if let best = n.means.first, best.hasPrefix("Best minute") { return "Your best minute yet" }
         if let best = n.means.first, best.contains("your best yet") { return best.components(separatedBy: ":").first.map { "\($0) yet" } ?? best }
         if let c = n.counted { return c.title }

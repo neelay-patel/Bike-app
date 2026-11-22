@@ -85,6 +85,36 @@ CREATE TABLE IF NOT EXISTS plan_done (
     PRIMARY KEY (user_id, session_id)
 );
 
+-- The AI coach (backend/coach.py): its saved words, by the hash of the facts they were written from ...
+CREATE TABLE IF NOT EXISTS coach_texts (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    key           TEXT NOT NULL,        -- what it's for: ride:<ride_id>
+    input_hash    TEXT NOT NULL,
+    output        TEXT NOT NULL,        -- JSON {"ok", "headline", "story"} or {"ok": false, "why"}
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+-- ... and every call it made, with its tokens and cost.
+CREATE TABLE IF NOT EXISTS coach_usage (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    key           TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER,
+    cost_usd      REAL,
+    seconds       REAL,
+    ok            INTEGER,
+    at            REAL NOT NULL
+);
+-- How a ride felt, the one tap the rider gives after it (feeds the next days' plan).
+CREATE TABLE IF NOT EXISTS ride_feel (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    ride_id       TEXT NOT NULL,
+    feel          TEXT NOT NULL,        -- easy | good | hard | wrecked
+    hurts         INTEGER NOT NULL DEFAULT 0,
+    at            REAL NOT NULL,
+    PRIMARY KEY (user_id, ride_id)
+);
+
 -- A ride the rider moved by hand: it counts as this session (session_id), or as none (NULL). Rides without a
 -- row here are counted automatically, by what they contained (rideengine/analysis/train.py).
 CREATE TABLE IF NOT EXISTS plan_matches (
@@ -201,6 +231,7 @@ MIGRATIONS = [
     ("courses", "plan", "TEXT"),
     ("users", "home", "TEXT"),          # home the rider set, JSON {"lat", "lon", "label"}; else from their rides        # generated routes: what was asked and why this one, JSON
     ("rides", "brief", "TEXT"),         # the ride without its samples (service.brief): what the ride list needs
+    ("users", "ai_personal", "INTEGER DEFAULT 0"),  # personal-use AI: this rider's data may go to the AI coach
 ]
 
 

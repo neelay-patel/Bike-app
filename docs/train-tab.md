@@ -105,7 +105,17 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - **With the paid account:** push from the server (APNs), so every event arrives at once.
 - Settings: after every ride, morning brief, plan changes, Sunday review (all on by default).
 
-### 5. The AI coach: words on top of the engine
+### 5. The AI coach: words on top of the engine (first part built 21 Nov 2026)
+- Built: `backend/coach.py`. For each ride the engine's facts packet (no GPS, place names or recovery numbers;
+  nothing that changes day to day) goes to Claude Opus 5.5 (effort low, structured JSON, server-side refusal
+  fallback); it writes a headline and the WHAT IT MEANS story; the number check throws out any reply with a number
+  not in the facts; results are saved by input hash (`coach_texts`) and written in the background, so the screen
+  shows the engine's words first; every call is logged with its cost (`coach_usage`). Policy gate:
+  `python -m backend ai --user 1 on|off|status` (on for Neelay since 21 Nov). Key: `~/.config/kova/anthropic_api_key`.
+  "How did it feel?" (`PUT /v1/train/rides/{id}/feel`, table `ride_feel`): wrecked means easy or rest next,
+  something hurting means rest (and see a professional if it persists); the coach's story takes it in.
+  Measured on his rides: about 0.7-0.9 cents and 3 seconds a story. Not yet: the morning brief and Sunday review
+  in the coach's words.
 - `backend/coach.py` (new): the engine builds a **facts packet** (the ride's class and match, its numbers, recent
   weeks, the goal and markers, readiness as a word, never HRV values or GPS); the model writes in a fixed format; a
   **number check** rejects any figure not in the packet; results saved by input hash; a cost log; the rule-based
@@ -139,6 +149,18 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - A **Method** page in the app; "Why?" on a session links to its rule.
 - A qualified cycling coach reviews the rules before other riders use Train; again each year. New research changes
   the rules only through us; the AI may summarise it, never apply it.
+
+## AI across the app (analysis 21 Nov 2026; order agreed, starting 22 Nov)
+Same pipeline as the ride story (engine facts -> Claude writes -> number check, saved by hash, cost log, background,
+rule-based fallback, personal-use gate), generalised into a small "AI jobs" layer, with a 10-15 ride quality check
+before going wide. The AI never calculates, changes the plan unchecked, gives medical advice or invents numbers.
+1. The coach's morning brief and Sunday review; ride card stories and names (Efforts).
+2. Route Generator: the AI reads free-form descriptions into the router's request (the regex stays as fallback).
+3. "Ask your coach": answers from read-only tools over the rider's data; then changing the plan by talking (step 6).
+4. Goals by talking (the 15 Nov mock-up); this month's "meta"; then the effort retold, the AI settling rides the
+   rules are unsure of, a pre-ride route briefing, and recovery trends (only with Neelay's explicit OK: recovery
+   data was agreed to stay out of the AI at first).
+Rough cost for Neelay: $1-3 a month; a story for every past ride about $1-1.50 with the Batch API.
 
 ## What only Neelay can do
 - Create an Anthropic API key for the backend (step 5).

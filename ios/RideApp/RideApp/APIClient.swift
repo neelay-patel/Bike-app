@@ -408,6 +408,12 @@ struct TrainNote: Decodable, Identifiable {
     let means: [String]
     let next: String?
     let tips: [Tip]
+    /// The AI coach's words, from the engine's facts (only with the personal-use setting on).
+    let story: Story?
+    let feel: Feel?
+
+    struct Story: Decodable { let headline: String; let story: String }
+    struct Feel: Decodable { let feel: String; let hurts: Bool }
 
     struct Did: Decodable {
         let km: Double
@@ -1112,6 +1118,12 @@ struct APIClient {
     }
 
     func rideNote(_ rideId: String) async throws -> TrainNote { try await get("v1/train/rides/\(rideId)") }
+
+    /// The one tap after a ride: easy, good, hard or wrecked, and whether something hurts.
+    func setFeel(_ rideId: String, feel: String, hurts: Bool) async throws -> TrainNote {
+        let body = try JSONSerialization.data(withJSONObject: ["feel": feel, "hurts": hurts])
+        return try Self.decoder.decode(TrainNote.self, from: await send(request("PUT", "v1/train/rides/\(rideId)/feel", body: body)))
+    }
 
     /// Count a ride as a session by hand (nil: as none), or hand it back to automatic counting.
     func countRide(_ rideId: String, as sessionId: String?, automatic: Bool = false) async throws {

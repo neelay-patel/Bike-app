@@ -268,6 +268,18 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such ride")
         return n
 
+    @app.put("/v1/train/rides/{ride_id}/feel")
+    def ride_feel(ride_id: str, body: dict = Body(...), uid: int = Depends(user)):
+        """{"feel": "easy" | "good" | "hard" | "wrecked", "hurts": false}: the one tap after a ride. It shapes the
+        next days (something hurting: rest; wrecked: easy) and what the coach says."""
+        try:
+            ok = be.set_ride_feel(uid, ride_id, str(body.get("feel")), bool(body.get("hurts")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        if not ok:
+            raise HTTPException(404, "No such ride")
+        return be.train_ride_note(uid, ride_id)
+
     @app.put("/v1/plan/rides/{ride_id}/counts-as")
     def ride_counts_as(ride_id: str, body: dict = Body(...), uid: int = Depends(user)):
         """{"session_id": "..."} counts the ride as that session; {"session_id": null} as none. Rides are

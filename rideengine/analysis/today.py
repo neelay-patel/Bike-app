@@ -183,7 +183,25 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
             out["why"] += f" {off_bike[0]['title']} is still open: a good day for it."
         return finish(today + timedelta(days=1), None)
 
+    # How the last rides felt (the rider's one tap): something hurting means rest; wrecked means easy.
+    recent_days = {today - timedelta(days=1), today - timedelta(days=2)}
+    hurt = next((r for r in rides if r.get("hurts") and r["date"] in recent_days), None)
+    if hurt:
+        out["why"] = (f"You said something hurt after {WEEKDAY[hurt['date'].weekday()]}'s ride. Rest today; if it "
+                      f"still hurts in a day or two, see a physio or doctor before riding hard.")
+        return finish(today + timedelta(days=1), None)
+    wrecked = next((r for r in rides if r.get("feel") == "wrecked" and r["date"] in recent_days), None)
     easy_open = [s for s in open_ if not hard(s["kind"])]
+    if wrecked and readiness != "strained":
+        if easy_open:
+            pick = easy_open[0]
+            out.update(state="session", session_id=pick["id"],
+                       why=f"You said {WEEKDAY[wrecked['date'].weekday()]}'s ride left you wrecked, so today is easy. "
+                           f"The harder sessions move later in the week.")
+            return finish(today + timedelta(days=1), pick)
+        out["why"] = (f"You said {WEEKDAY[wrecked['date'].weekday()]}'s ride left you wrecked, so today is rest. "
+                      f"The harder sessions move later in the week.")
+        return finish(today + timedelta(days=1), None)
     if readiness == "strained":
         if easy_open:
             pick = easy_open[0]
