@@ -20,15 +20,24 @@ struct TrainView: View {
                     header
                     StatusLine()
                     if let t = model.today, t.state != "no_plan" {
-                        if let g = t.greeting { CoachLine(text: g) }
-                        TodayHero(today: t, plan: model.plan)
-                        if let then = t.then, !then.isEmpty { NextCard(text: then, moved: t.moved ?? []) }
-                        if t.state != "done", let note = t.latest { LatestRideCard(note: note) }
+                        if let g = t.greeting { CoachLine(text: g).arrive(0) }
+                        // Today, then a thread with a light running down it to what's next (21 Nov 2026).
+                        VStack(alignment: .leading, spacing: 0) {
+                            TodayHero(today: t, plan: model.plan).arrive(1)
+                            if let then = t.then, !then.isEmpty {
+                                FlowThread()
+                                    .padding(.leading, 24).padding(.vertical, 5)
+                                    .arrive(2)
+                                NextCard(text: then, moved: t.moved ?? []).arrive(2)
+                            }
+                        }
+                        if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
                         if let days = t.days, !days.isEmpty {
                             NavigationLink { TrainWeekView() } label: { WeekStrip(days: days, done: t.done, total: t.total, phase: t.phase) }
                                 .buttonStyle(.plain)
+                                .arrive(4)
                         }
-                        if let goal = t.goal { GoalCard(goal: goal) }
+                        if let goal = t.goal { GoalCard(goal: goal).arrive(5) }
                         Text("Training guidance from your own data, not medical advice.")
                             .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
                     } else if !model.isLoading {
@@ -178,8 +187,8 @@ struct TodayHero: View {
             }
             Text(s.title).font(Theme.heading(56)).foregroundStyle(.white).padding(.top, -6)
             HStack(alignment: .top, spacing: 8) {
-                ForEach(Array(TrainText.numbers(s).enumerated()), id: \.offset) { _, n in
-                    HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white)
+                ForEach(Array(TrainText.numbers(s).enumerated()), id: \.offset) { i, n in
+                    HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white).arrive(2 + i)
                 }
             }
             if !s.steps.isEmpty { SessionShapeChart(steps: s.steps).frame(height: 56) }
@@ -221,7 +230,19 @@ struct TodayHero: View {
             }
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.cobaltSoft, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // A rest day breathes: two soft circles swell and settle, slowly (four seconds in, four out).
+        .background(alignment: .topTrailing) {
+            ZStack {
+                Circle().fill(Theme.cobalt.opacity(0.10)).frame(width: 190, height: 190)
+                Circle().fill(Theme.cobalt.opacity(0.14)).frame(width: 120, height: 120)
+                Circle().fill(Theme.cobalt.opacity(0.18)).frame(width: 60, height: 60)
+            }
+            .breathing(!done, scale: 1.25, period: 8)
+            .offset(x: 56, y: -56)
+            .accessibilityHidden(true)
+        }
+        .background(Theme.cobaltSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
 
@@ -243,8 +264,8 @@ private struct DoneHero: View {
                 Text(title).font(Theme.heading(title.count > 26 ? 34 : 44)).foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                 HStack(alignment: .top, spacing: 8) {
-                    ForEach(Array(TrainText.numbers(note).enumerated()), id: \.offset) { _, n in
-                        HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white)
+                    ForEach(Array(TrainText.numbers(note).enumerated()), id: \.offset) { i, n in
+                        HeroNumber(value: n.value, label: n.label, color: n.accent ? summit : .white).arrive(2 + i)
                     }
                 }
                 Rectangle().fill(Theme.panelLine).frame(height: 1)
@@ -266,7 +287,9 @@ private struct DoneHero: View {
                 }
             }
             .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(Theme.panel)
+            .overlay(Sheen(run: true, delay: 0.9))   // the ride's in: a light passes once the card has landed
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -277,21 +300,25 @@ private struct DoneHero: View {
 /// wide as each step is long and as tall as it is hard.
 struct SessionShapeChart: View {
     let steps: [PlanStep]
+    @State private var grown = false
 
     var body: some View {
         let flat = steps.flatMap(\.flat)
         let total = max(1, flat.reduce(0) { $0 + ($1.seconds ?? 0) })
         GeometryReader { geo in
             HStack(alignment: .bottom, spacing: 1) {
-                ForEach(Array(flat.enumerated()), id: \.offset) { _, s in
+                ForEach(Array(flat.enumerated()), id: \.offset) { i, s in
                     RoundedRectangle(cornerRadius: 2)
                         .fill(color(s.zone))
                         .frame(width: max(1, geo.size.width * CGFloat((s.seconds ?? 0) / total) - 1),
                                height: max(6, geo.size.height * CGFloat(min(1, PlanText.intensity(s) / 1.3))))
+                        .modifier(GrowIn(index: i, count: flat.count, grown: grown))
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
         }
+        .onAppear { grown = true }
+        .onTabVisit { replay({ grown = false }, then: { grown = true }) }
         .accessibilityHidden(true)
     }
 
@@ -352,12 +379,22 @@ struct LatestRideCard: View {
     }
 }
 
-/// The week as seven days: ridden (filled), a session expected (ring), rest (a dash), today outlined.
+/// The week as seven days: ridden (filled), a session expected (ring), rest (a dash), today outlined. The first
+/// time you see it, a line runs from Monday to today and the days fill in behind it; the next session ripples.
 struct WeekStrip: View {
     let days: [TrainToday.Day]
     let done: Int?
     let total: Int?
     let phase: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+
+    private var todayIndex: Int? { days.firstIndex(where: \.today) }
+    /// The next session to ride: today's, if it's still to do, else the first one after today.
+    private var nextIndex: Int? {
+        guard let t = todayIndex else { return nil }
+        return days.indices.first { $0 >= t && days[$0].state == "session" }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -369,35 +406,75 @@ struct WeekStrip: View {
                 }
                 Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.label)
             }
-            HStack(spacing: 0) {
-                ForEach(days) { d in
-                    VStack(spacing: 6) {
+            VStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    ForEach(days) { d in
                         Text(d.letter).font(Theme.mono(11)).foregroundStyle(d.today ? Theme.ink : Theme.label)
-                        ZStack {
-                            if d.today {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.ink, lineWidth: 1.5)
-                                    .frame(width: 38, height: 38)
-                            }
-                            switch d.state {
-                            case "rode": Circle().fill(Theme.cobalt).frame(width: 18, height: 18)
-                            case "session": Circle().stroke(Theme.cobalt, lineWidth: 2).frame(width: 16, height: 16)
-                            default: Capsule().fill(Theme.label.opacity(0.5)).frame(width: 12, height: 3)
-                            }
-                        }
-                        .frame(height: 40)
+                            .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(d.letter): \(d.state == "rode" ? "ridden" : d.state == "session" ? (d.title ?? "session") : "rest")")
                 }
+                .accessibilityHidden(true)
+                HStack(spacing: 0) {
+                    ForEach(Array(days.enumerated()), id: \.element.id) { i, d in
+                        mark(d, i).frame(maxWidth: .infinity).frame(height: 40)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(d.letter): \(d.state == "rode" ? "ridden" : d.state == "session" ? (d.title ?? "session") : "rest")")
+                    }
+                }
+                .background { progressLine }
             }
         }
         .padding(16).surfaceCard(radius: 22).contentShape(Rectangle())
+        .onFirstSeen(play)
+        .onTabVisit { if !reduceMotion { replay({ shown = false }, then: play) } }
+    }
+
+    private func play() {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.3).delay(0.6)) { shown = true }
+    }
+
+    /// Monday to today: how far into the week you are.
+    private var progressLine: some View {
+        GeometryReader { g in
+            let col = g.size.width / CGFloat(max(days.count, 1))
+            let reach = col * CGFloat(todayIndex ?? 0)
+            Capsule().fill(Theme.cobalt.opacity(0.55))
+                .frame(width: max(0, reach), height: 3)
+                .scaleEffect(x: shown || reduceMotion ? 1 : 0.001, anchor: .leading)
+                .position(x: col / 2 + reach / 2, y: g.size.height / 2)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func mark(_ d: TrainToday.Day, _ i: Int) -> some View {
+        let on = shown || reduceMotion
+        // Each day fills in as the line passes it.
+        let delay = 0.6 + 1.3 * Double(i) / Double(max((todayIndex ?? days.count - 1), 1) + 1)
+        return ZStack {
+            if d.today {
+                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.surface)
+                    .frame(width: 38, height: 38)
+                RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.ink, lineWidth: 1.5)
+                    .frame(width: 38, height: 38)
+            }
+            if i == nextIndex && on { Ripple(size: 16) }
+            switch d.state {
+            case "rode": Circle().fill(Theme.cobalt).frame(width: 18, height: 18)
+            case "session": Circle().fill(Theme.surface).frame(width: 16, height: 16)
+                .overlay(Circle().stroke(Theme.cobalt, lineWidth: 2))
+            default: Capsule().fill(Theme.label.opacity(0.5)).frame(width: 12, height: 3)
+            }
+        }
+        .scaleEffect(on ? 1 : 0.4)
+        .opacity(on ? 1 : 0)
+        .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.62).delay(delay), value: shown)
     }
 }
 
 struct GoalCard: View {
     let goal: TrainGoal
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -409,12 +486,19 @@ struct GoalCard: View {
                 }
             }
             if let t = goal.title { Text(t).font(Theme.heading(30)).foregroundStyle(Theme.ink).padding(.top, -4) }
-            ForEach(goal.markers) { m in marker(m) }
+            ForEach(Array(goal.markers.enumerated()), id: \.element.id) { i, m in marker(m, order: i) }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+        .onFirstSeen { shown = true }
     }
 
-    private func marker(_ m: TrainGoal.Marker) -> some View {
+    private func marker(_ m: TrainGoal.Marker, order: Int) -> some View {
+        let on = shown || reduceMotion
+        let fill: Animation? = reduceMotion ? nil : .easeOut(duration: 1.2).delay(0.15 + Double(order) * 0.2)
+        return markerBody(m, on: on, fill: fill, order: order)
+    }
+
+    private func markerBody(_ m: TrainGoal.Marker, on: Bool, fill: Animation?, order: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -424,7 +508,12 @@ struct GoalCard: View {
                 }
                 Spacer(minLength: 8)
                 HStack(alignment: .lastTextBaseline, spacing: 3) {
-                    Text(m.current.map { "\(Int($0))" } ?? "—").font(Theme.hero(28)).foregroundStyle(Theme.ink)
+                    if let cur = m.current {
+                        CountingText(value: on ? cur : 0, format: { "\(Int($0))" })
+                            .font(Theme.hero(28)).foregroundStyle(Theme.ink).animation(fill, value: on)
+                    } else {
+                        Text("—").font(Theme.hero(28)).foregroundStyle(Theme.ink)
+                    }
                     Text(m.unit).font(Theme.text(13, .medium)).foregroundStyle(Theme.inkSoft)
                 }
             }
@@ -432,7 +521,8 @@ struct GoalCard: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.surfaceSelected)
-                        Capsule().fill(m.reached ? summit : Theme.cobalt).frame(width: max(8, geo.size.width * m.progress))
+                        Capsule().fill(m.reached ? summit : Theme.cobalt).frame(width: max(8, geo.size.width * (on ? m.progress : 0)))
+                            .animation(fill, value: on)
                     }
                 }
                 .frame(height: 8)
@@ -443,6 +533,9 @@ struct GoalCard: View {
                     }
                     .foregroundStyle(Theme.ink).padding(.horizontal, 8).padding(.vertical, 4)
                     .background(summit, in: Capsule())
+                    .scaleEffect(on ? 1 : 0.5).opacity(on ? 1 : 0)
+                    .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.55)
+                        .delay(1.2 + Double(order) * 0.2), value: on)
                 } else if let t = m.target {
                     Text("Aim \(Int(t))").font(Theme.mono(11)).foregroundStyle(Theme.inkMuted)
                 }

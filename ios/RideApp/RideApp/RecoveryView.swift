@@ -58,7 +58,7 @@ private struct MetricTile: View {
             Text(caption).font(Theme.text(12)).foregroundStyle(captionColor)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             if weekly.count > 1 {
-                Sparkline(values: weekly, higherIsBetter: trend.higherIsBetter)
+                Sparkline(values: weekly, higherIsBetter: trend.higherIsBetter).revealOnFirstSeen(duration: 0.9)
                     .frame(height: 28)
             }
         }
@@ -114,7 +114,7 @@ private struct RideRecoveryTile: View {
             Text(caption).font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             if recovery.series.count > 1 {
-                Sparkline(values: recovery.series.map(\.value), higherIsBetter: true).frame(height: 28)
+                Sparkline(values: recovery.series.map(\.value), higherIsBetter: true).frame(height: 28).revealOnFirstSeen(duration: 0.9)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -45,3 +45,19 @@ PostScript names for code: `InstrumentSerif-Regular`, `IBMPlexSans`, `IBMPlexSan
 
 ## Credits (CC BY / OFL require them)
 Place names: GeoNames (geonames.org), CC BY 4.0. Shown in the app's Settings → Credits.
+
+## Motion (21 Nov 2026; `ios/RideApp/RideApp/Motion.swift`)
+Motion helps you read the screen; it is never decoration. Most of it plays as things come into view, and again each
+time you open the tab (`tabVisit`); returning from a ride's screen doesn't replay it. Only
+signposts keep moving, and they move slowly. Reduce Motion stills everything.
+- **Arriving:** cards fade and rise in turn (`arrive`).
+- **Charts draw in left to right, the way you'd ride them:** session shapes and interval charts grow bar by bar.
+  Ride power and elevation, route surfaces and sparklines are revealed from left to right.
+- **Route lines trace themselves** from start to finish: route rows and collection cards (`DrawnRoute`).
+- **Numbers count up:** tallies, headline numbers, goal markers. A met aim pops in after its bar fills.
+- **Signposts that keep moving:**
+  - Train: a light runs from today down to what's next (`FlowThread`).
+  - The week's next session ripples (`Ripple`).
+  - A rest day breathes (eight-second swell).
+  - Sources: a connected source's live dot breathes.
+  - The Route Generator's wand twinkles while it works.

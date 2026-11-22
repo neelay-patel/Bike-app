@@ -215,7 +215,7 @@ private struct MetricRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                     let values = metric.history.map(\.value)
                     if values.count > 1 {
-                        Sparkline(values: values, higherIsBetter: true).frame(height: 36)
+                        Sparkline(values: values, higherIsBetter: true).frame(height: 36).revealOnFirstSeen(duration: 0.9)
                     }
                     if let detail = metric.detail {
                         Text(detail).font(Theme.text(12)).foregroundStyle(Theme.panelLabel)

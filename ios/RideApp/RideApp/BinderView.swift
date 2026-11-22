@@ -169,8 +169,7 @@ struct MiniCard: View {
                 if indoor {
                     IndoorPicture(card: card)
                 } else {
-                    RouteShape(points: card.shape)
-                        .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    DrawnRoute(points: card.shape, color: .white, lineWidth: 1.6, duration: 1.1)
                         .padding(9)
                         .background(Theme.cobalt)
                 }

@@ -351,22 +351,25 @@ private struct WeekSummary: View {
 /// The session's shape: each step a block, as wide as it is long and as tall as it is hard.
 struct IntervalChart: View {
     let steps: [PlanStep]
+    @State private var grown = false
 
     var body: some View {
         let flat = steps.flatMap(\.flat)
         let total = max(1, flat.reduce(0) { $0 + ($1.seconds ?? 0) })
         GeometryReader { geo in
             HStack(alignment: .bottom, spacing: 0) {
-                ForEach(Array(flat.enumerated()), id: \.offset) { _, s in
+                ForEach(Array(flat.enumerated()), id: \.offset) { i, s in
                     Rectangle()
                         .fill(PlanText.zoneColor(s.zone))
                         .frame(width: max(1, geo.size.width * CGFloat((s.seconds ?? 0) / total)),
                                height: geo.size.height * CGFloat(min(1, PlanText.intensity(s) / 1.5)))
+                        .modifier(GrowIn(index: i, count: flat.count, grown: grown))
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .onAppear { grown = true }
         .accessibilityHidden(true)
     }
 }

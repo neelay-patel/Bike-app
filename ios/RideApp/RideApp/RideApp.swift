@@ -241,6 +241,8 @@ struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = 0
+    /// How many times each tab has been opened: its cards arrive again, and its charts draw in again, each time.
+    @State private var visits: [Int: Int] = [:]
     @ObservedObject private var coach = CoachNotifier.shared
 
     var body: some View {
@@ -248,14 +250,19 @@ struct ContentView: View {
             // Your own bike: in its colours when you're on Efforts, an outline otherwise.
             RidesView().tabItem {
                 Label { Text("Efforts") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
-            }.tag(0)
+            }.tag(0).environment(\.tabVisit, visits[0] ?? 0)
             // Not a trainer or a road bike: indoors or out is the rider's choice (21 Nov 2026). Rising bars, like
             // the climb in Kova's mark.
             TrainView().tabItem { Label("Train", systemImage: "chart.bar.xaxis.ascending") }.tag(1)
+                .environment(\.tabVisit, visits[1] ?? 0)
             RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
+                .environment(\.tabVisit, visits[3] ?? 0)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
+                .environment(\.tabVisit, visits[2] ?? 0)
             ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)
+                .environment(\.tabVisit, visits[4] ?? 0)
         }
+        .onChange(of: tab) { _, t in visits[t, default: 0] += 1 }
         .tint(Theme.cobalt)
         .font(Theme.text())
         .foregroundStyle(Theme.ink)

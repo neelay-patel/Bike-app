@@ -27,6 +27,7 @@ private struct OnFirstSeen: ViewModifier {
 /// A band of light that passes once across a card when `run` turns true.
 struct Sheen: View {
     let run: Bool
+    var delay: Double = 0.3
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var x: CGFloat = -0.6
 
@@ -41,11 +42,12 @@ struct Sheen: View {
         .accessibilityHidden(true)
         .onAppear(perform: start)
         .onChange(of: run) { _, _ in start() }
+        .onTabVisit { replay({ x = -0.6 }, then: start) }
     }
 
     private func start() {
         guard run, !reduceMotion, x < 0 else { return }
-        withAnimation(.easeInOut(duration: 1.1).delay(0.3)) { x = 1.3 }
+        withAnimation(.easeInOut(duration: 1.2).delay(delay)) { x = 1.3 }
     }
 }
 
@@ -154,5 +156,235 @@ struct NewRideMoment: View {
         let added = kmLead ? "\(Format.number(addedKm, decimals: 1)) kilometres" : "\(Format.duration(hours: addedHours)) hours"
         let total = kmLead ? "\(Format.number(you.all.km, decimals: 0)) kilometres" : "\(Format.number(you.all.hours, decimals: 1)) hours"
         return "\(rides.count == 1 ? "New ride" : "\(rides.count) new rides") added: \(added). All time: \(total), \(you.all.rides) rides."
+    }
+}
+
+// MARK: - Bringing the tabs to life (21 Nov 2026)
+// Cards arrive in turn, charts draw themselves in the way you'd ride them (left to right), routes trace their
+// line, and a few calm loops say "this is live" or "this is next": a light running from today down to what's
+// next, a ripple on the week's next session, a slow swell on a rest day. All quiet, all once unless it's a
+// signpost, and all still when Reduce Motion is on.
+
+private struct TabVisitKey: EnvironmentKey { static let defaultValue = 0 }
+
+extension EnvironmentValues {
+    /// Goes up each time the tab is opened again (ContentView): what arrives or draws in does it again.
+    var tabVisit: Int {
+        get { self[TabVisitKey.self] }
+        set { self[TabVisitKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Runs `action` each time this view's tab is opened again (not the first time it appears: use onAppear).
+    func onTabVisit(_ action: @escaping () -> Void) -> some View { modifier(OnTabVisit(action: action)) }
+}
+
+private struct OnTabVisit: ViewModifier {
+    let action: () -> Void
+    @Environment(\.tabVisit) private var visit
+    func body(content: Content) -> some View { content.onChange(of: visit) { _, _ in action() } }
+}
+
+/// Sets `state` back without animating, then (a moment later) plays `again`: for replaying on a tab visit.
+@MainActor func replay(_ reset: @escaping () -> Void, then again: @escaping () -> Void) {
+    var t = Transaction()
+    t.disablesAnimations = true
+    withTransaction(t, reset)
+    Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(60))   // a frame or two with it reset, so the change shows
+        again()
+    }
+}
+
+extension View {
+    /// Fades and rises into place when it appears (and each time its tab opens), `order` beats after the first.
+    func arrive(_ order: Int = 0) -> some View { modifier(Arrive(order: order)) }
+
+    /// Reveals from left to right the first time it's seen (and `ready`, for charts whose data loads later).
+    func revealOnFirstSeen(ready: Bool = true, duration: Double = 1.1, delay: Double = 0.1) -> some View {
+        modifier(Reveal(ready: ready, duration: duration, delay: delay))
+    }
+
+    /// A slow, calm swell for as long as it's on screen.
+    func breathing(_ on: Bool = true, scale: CGFloat = 1.06, period: Double = 2.6) -> some View {
+        modifier(Breathing(on: on, scale: scale, period: period))
+    }
+}
+
+private struct Arrive: ViewModifier {
+    let order: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        let on = shown || reduceMotion
+        content
+            .opacity(on ? 1 : 0)
+            .offset(y: on ? 0 : 26)
+            .onAppear(perform: play)
+            .onTabVisit { if !reduceMotion { replay({ shown = false }, then: play) } }
+    }
+
+    private func play() {
+        guard !shown else { return }
+        withAnimation(.spring(response: 0.7, dampingFraction: 0.84).delay(0.05 + Double(min(order, 8)) * 0.1)) {
+            shown = true
+        }
+    }
+}
+
+private struct Reveal: ViewModifier {
+    let ready: Bool
+    let duration: Double
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var seen = false
+    @State private var p: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .mask(alignment: .leading) {
+                GeometryReader { g in Rectangle().frame(width: g.size.width * (reduceMotion ? 1 : p)) }
+            }
+            .onFirstSeen { seen = true; start() }
+            .onChange(of: ready) { _, _ in start() }
+    }
+
+    private func start() {
+        guard seen, ready, p == 0 else { return }
+        withAnimation(.easeInOut(duration: duration).delay(delay)) { p = 1 }
+    }
+}
+
+private struct Breathing: ViewModifier {
+    let on: Bool
+    let scale: CGFloat
+    let period: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if on && !reduceMotion {
+            content.phaseAnimator([false, true]) { v, up in
+                v.scaleEffect(up ? scale : 1).opacity(up ? 1 : 0.8)
+            } animation: { _ in .easeInOut(duration: period / 2) }
+        } else {
+            content
+        }
+    }
+}
+
+/// From today to what's next: a short dotted thread, and now and then a light runs down it.
+struct FlowThread: View {
+    var dots = 4
+    var color: Color = Theme.label
+    var light: Color = Theme.cobalt
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Value { var y: CGFloat = 0; var opacity: Double = 0; var scale: CGFloat = 0.6 }
+
+    var body: some View {
+        let step: CGFloat = 7
+        let travel = CGFloat(dots - 1) * step
+        ZStack(alignment: .top) {
+            VStack(spacing: step - 3) {
+                ForEach(0..<dots, id: \.self) { _ in Circle().fill(color.opacity(0.6)).frame(width: 3, height: 3) }
+            }
+            .padding(.top, 2.5)
+            if !reduceMotion {
+                Circle().fill(light).frame(width: 8, height: 8)
+                    .shadow(color: light.opacity(0.6), radius: 5)
+                    .keyframeAnimator(initialValue: Value(), repeating: true) { c, v in
+                        c.scaleEffect(v.scale).offset(y: v.y).opacity(v.opacity)
+                    } keyframes: { _ in
+                        KeyframeTrack(\.y) {
+                            LinearKeyframe(0, duration: 0.6)
+                            CubicKeyframe(travel, duration: 1.2)
+                            LinearKeyframe(travel, duration: 1.6)
+                        }
+                        KeyframeTrack(\.opacity) {
+                            LinearKeyframe(0, duration: 0.6)
+                            LinearKeyframe(1, duration: 0.3)
+                            LinearKeyframe(1, duration: 0.6)
+                            LinearKeyframe(0, duration: 0.5)
+                            LinearKeyframe(0, duration: 1.4)
+                        }
+                        KeyframeTrack(\.scale) {
+                            LinearKeyframe(0.6, duration: 0.6)
+                            SpringKeyframe(1, duration: 0.4)
+                            LinearKeyframe(1, duration: 0.8)
+                            LinearKeyframe(0.6, duration: 1.6)
+                        }
+                    }
+            }
+        }
+        .frame(width: 12, height: travel + 8, alignment: .top)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A ring that widens and fades, now and then: "this one's next".
+struct Ripple: View {
+    var color: Color = Theme.cobalt
+    var size: CGFloat = 16
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Value { var scale: CGFloat = 1; var opacity: Double = 0 }
+
+    var body: some View {
+        if !reduceMotion {
+            Circle().stroke(color, lineWidth: 2).frame(width: size, height: size)
+                .keyframeAnimator(initialValue: Value(), repeating: true) { c, v in
+                    c.scaleEffect(v.scale).opacity(v.opacity)
+                } keyframes: { _ in
+                    KeyframeTrack(\.scale) {
+                        LinearKeyframe(1, duration: 0.8)
+                        CubicKeyframe(2.7, duration: 1.5)
+                        LinearKeyframe(2.7, duration: 1.0)
+                    }
+                    KeyframeTrack(\.opacity) {
+                        LinearKeyframe(0, duration: 0.8)
+                        LinearKeyframe(0.9, duration: 0.05)
+                        CubicKeyframe(0, duration: 1.45)
+                        LinearKeyframe(0, duration: 1.0)
+                    }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// Bars that grow up from their baseline in turn, left to right, the first time they appear.
+struct GrowIn: ViewModifier {
+    let index: Int
+    let count: Int
+    let grown: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let on = grown || reduceMotion
+        content
+            .scaleEffect(x: 1, y: on ? 1 : 0.04, anchor: .bottom)
+            .opacity(on ? 1 : 0.3)
+            .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78)
+                .delay(0.15 + 0.7 * Double(index) / Double(max(count, 1))), value: grown)
+    }
+}
+
+/// A route's line drawing itself from start to finish, the first time it's seen.
+struct DrawnRoute: View {
+    let points: [[Double]]
+    var color: Color = Theme.cobalt
+    var lineWidth: CGFloat = 2
+    var duration: Double = 1.4
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drawn: CGFloat = 0
+
+    var body: some View {
+        RouteShape(points: points)
+            .trim(from: 0, to: reduceMotion ? 1 : drawn)
+            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+            .onFirstSeen { withAnimation(.easeInOut(duration: duration).delay(0.15)) { drawn = 1 } }
     }
 }

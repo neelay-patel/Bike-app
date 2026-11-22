@@ -29,7 +29,7 @@ private struct HomeLoopCard: View {
                 if let best = route.best?.kmh { stat(Format.number(best, decimals: 1), "km/h best") }
                 if let last = route.last?.kmh { stat(Format.number(last, decimals: 1), "km/h last") }
             }
-            Sparkline(values: route.laps.compactMap(\.kmh), higherIsBetter: true)
+            Sparkline(values: route.laps.compactMap(\.kmh), higherIsBetter: true).revealOnFirstSeen(duration: 1.0)
                 .frame(height: 44)
         }
         .padding(16)

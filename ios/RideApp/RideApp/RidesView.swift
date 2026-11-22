@@ -614,12 +614,13 @@ struct EffortPanel: View {
                     if let part, !part.phases.phases.isEmpty {
                         let watts = part.phases.basis == "power"
                         ChartTitle(watts ? "Power" : "Heart rate", unit: watts ? "watts" : "beats per minute")
-                        EffortChart(phases: part.phases).frame(height: 132)
+                        EffortChart(phases: part.phases).frame(height: 132).revealOnFirstSeen(duration: 1.3)
                         PhaseLegend(phases: part.phases.phases)
                     }
                     if outdoor {
                         ChartTitle("Elevation", unit: "metres above sea level, by km").padding(.top, 4)
                         ElevationProfile(profile: profile, totalKm: km).frame(height: 110)
+                            .revealOnFirstSeen(ready: profile != nil, duration: 1.3)
                     }
                     if let effort, !effort.lines.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {

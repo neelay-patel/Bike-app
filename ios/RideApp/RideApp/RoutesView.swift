@@ -188,8 +188,7 @@ struct CourseRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            RouteShape(points: course.shape)
-                .stroke(Theme.cobalt, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            DrawnRoute(points: course.shape)
                 .frame(width: 52, height: 52)
                 .padding(6)
                 .background(Theme.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -310,7 +309,7 @@ struct CourseDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .stroke(pickingStart ? Theme.cobalt : .clear, lineWidth: 3))
                     RoutePanel(report: r)
-                    SurfaceBar(report: r)
+                    SurfaceBar(report: r).revealOnFirstSeen(duration: 1.0)
                     section("What to know") {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(r.verdict, id: \.self) { VerdictLine(verdict: $0) }
@@ -856,7 +855,7 @@ struct RoutePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SurfaceProfile(report: report).frame(height: 128)
+            SurfaceProfile(report: report).frame(height: 128).revealOnFirstSeen(duration: 1.3)
             Rectangle().fill(Theme.panelLine).frame(height: 1)
             LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
                       alignment: .leading, spacing: 12) {
@@ -1046,6 +1045,7 @@ struct PlanBox: View {
             // Titled like the Route Enhancer below it, so it reads as a feature, not a disabled form (20 Nov 2026).
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: "wand.and.stars").foregroundStyle(Theme.cobalt)
+                    .symbolEffect(.variableColor.iterative, isActive: busy)
                 Text("Route Generator").font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
                 Spacer()
                 if !text.isEmpty || result != nil || !made.isEmpty {

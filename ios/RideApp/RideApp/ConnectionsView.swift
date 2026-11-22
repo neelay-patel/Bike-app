@@ -20,10 +20,10 @@ struct ConnectionsView: View {
                     }
                     .padding(.horizontal, 4)
                     StatusLine()
-                    AppleHealthCard()
+                    AppleHealthCard().arrive(0)
                     MonoLabel("Accounts").padding(.horizontal, 4).padding(.top, 8)
-                    ForEach(model.connections.filter { $0.auth != "device" }) { c in
-                        ProviderCard(connection: c)
+                    ForEach(Array(model.connections.filter { $0.auth != "device" }.enumerated()), id: \.element.id) { i, c in
+                        ProviderCard(connection: c).arrive(1 + i)
                     }
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
@@ -205,7 +205,15 @@ struct StateBadge: View {
         case "blocked": ("Not available yet", Theme.label)
         default: ("Not connected", Theme.label)
         }
-        MonoLabel(text, color: color)
+        HStack(spacing: 6) {
+            if state == "connected" {
+                // Live: rides arrive on their own.
+                Circle().fill(color).frame(width: 7, height: 7)
+                    .background(Ripple(color: color, size: 8))
+                    .accessibilityHidden(true)
+            }
+            MonoLabel(text, color: color)
+        }
     }
 }
 
