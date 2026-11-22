@@ -834,6 +834,126 @@ class Backend:
                 "then": t["then"], "moved": t["moved"],
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
+    BRIEF_AT = (7, 30)       # the morning brief, the rider's local time
+    REVIEW_AT = (18, 0)      # the Sunday review, from this time on Sunday
+
+    def train_inbox(self, user_id: int, now: Optional[datetime] = None) -> dict:
+        """The coach speaking up (docs/train-tab.md, step 4): messages for the phone to show as notifications.
+        Worked out fresh each time with stable ids, so the phone shows each once: after a ride (what it counted
+        as, a best, one thing to try), a plan change today, and the week's review on Sunday evening. The morning
+        brief comes as `scheduled` (its time and words), so the phone can schedule it itself. Lock-screen words
+        only: never recovery numbers."""
+        from rideengine.analysis import today as td
+        t = self.train_today(user_id)
+        if t.get("state") == "no_plan":
+            return {"items": [], "scheduled": []}
+        c = self._plan_context(user_id)
+        tz = c["tz"]
+        now = (now or datetime.now(tz)).astimezone(tz)
+        today = c["today"]
+        items = []
+
+        def at(d: date, hm: tuple) -> str:
+            return datetime.combine(d, datetime.min.time().replace(hour=hm[0], minute=hm[1])).replace(
+                tzinfo=now.tzinfo).isoformat()
+
+        # After each ride of today and yesterday (older news, like "your best yet", may no longer be true).
+        for r in sorted(self._recent_kinds(c, days=1), key=lambda r: r["date"], reverse=True):
+            if (r.get("minutes") or 0) < 15:
+                continue
+            n = self.train_ride_note(user_id, r["ride_id"], _today=t if r["date"] == today else {})
+            if n is None:
+                continue
+            best = next((m for m in n["means"] if "your best yet" in m), None)
+            if best:                    # "Best minute: 273 W, your best yet." -> "Your best minute yet: 273 W"
+                name, _, rest = best.partition(": ")
+                title = f"Your {name.lower()} yet: {rest.split(',')[0]}"
+            else:
+                title = f"Counted as {n['counted']['title']}" if n["counted"] else "Ride's in"
+            body = []
+            if best and n["counted"]:
+                body.append(f"Counted as your {n['counted']['title'].lower()} session.")
+            elif not n["counted"]:
+                body.append("Extra riding this week.")
+            if n["tips"]:
+                body.append(f"One thing to try: {n['tips'][0]['title'].lower()}.")
+            body.append("How did it feel?")
+            items.append({"id": f"ride:{r['ride_id']}", "kind": "ride", "title": title, "body": " ".join(body),
+                          "opens": {"screen": "ride", "ride_id": r["ride_id"]},
+                          "at": datetime.fromtimestamp(float(r["ride_id"]), tz).isoformat()})
+
+        # A plan change today: recovery says ease off, or today's planned session moved.
+        if now.time() >= datetime.min.time().replace(hour=self.BRIEF_AT[0], minute=self.BRIEF_AT[1]):
+            moved_off = [m for m in t.get("moved") or [] if m["from"] == today.isoformat()]
+            if t.get("readiness") == "strained" and t["state"] in ("session", "rest"):
+                title = "Easy today instead" if t["state"] == "session" else "Rest today instead"
+                items.append({"id": f"change:{today}", "kind": "change", "title": title,
+                              "body": "Your recovery is lower than usual this morning. " + (
+                                  f"Today: {td.short(t['session'])}." if t.get("session") else "The harder work moves later."),
+                              "opens": {"screen": "today"}, "at": at(today, self.BRIEF_AT)})
+            elif moved_off and t["state"] in ("session", "rest"):
+                m = moved_off[0]
+                when = td.WEEKDAY[date.fromisoformat(m["to"]).weekday()]
+                items.append({"id": f"change:{today}", "kind": "change", "title": f"{m['title']} moves to {when}",
+                              "body": (t.get("why") or "").split(":")[0].rstrip(".") + "." if t.get("why") else "",
+                              "opens": {"screen": "today"}, "at": at(today, self.BRIEF_AT)})
+
+        # The week's review, Sunday evening (or the Monday after, if the phone didn't wake).
+        ws = date.fromisoformat(t["days"][0]["date"]) if t.get("days") else None
+        last_sunday = today - timedelta(days=(today.weekday() + 1) % 7)
+        if today.weekday() == 6 and now.time() >= datetime.min.time().replace(hour=self.REVIEW_AT[0]):
+            review_week = ws
+        elif today.weekday() == 0:
+            review_week = last_sunday - timedelta(days=6)
+        else:
+            review_week = None
+        if review_week:
+            w = self.train_week(user_id, review_week.isoformat())
+            if w:
+                bests = sum(1 for r in w["rides"] if r.get("minutes", 0) >= 15 and any(
+                    "your best yet" in m for m in (self.train_ride_note(user_id, r["ride_id"], _today={}) or {}).get("means", [])))
+                body = [f"{w['done']} of {w['total']} sessions done."]
+                if bests:
+                    body.append(f"{bests} new best{'s' if bests > 1 else ''}.")
+                body.append("See how each ride counted, and what's next.")
+                items.append({"id": f"review:{review_week}", "kind": "review",
+                              "title": "Your week: all done" if w["done"] >= w["total"] else f"Your week: {w['done']} of {w['total']}",
+                              "body": " ".join(body), "opens": {"screen": "week", "week_start": review_week.isoformat()},
+                              "at": at(review_week + timedelta(days=6), self.REVIEW_AT)})
+
+        # The morning brief, for the phone to schedule: tomorrow (and today, if it's still early).
+        scheduled = []
+        days = [today] if now.time() < datetime.min.time().replace(hour=self.BRIEF_AT[0], minute=self.BRIEF_AT[1]) else []
+        days.append(today + timedelta(days=1))
+        week_days = {d["date"]: d for d in t.get("days") or []}
+        for d in days:
+            day = week_days.get(d.isoformat())
+            if d == today and t["state"] == "session" and t.get("session"):
+                title, body = f"{t['session']['title']} today", f"{td.short(t['session'])}. {td.WHY.get(t['session']['kind'], '')}"
+            elif d == today and t["state"] == "rest":
+                title, body = "Rest day", "No riding today: rest is when the fitness is built."
+            elif day and day["state"] == "session" and day.get("title"):
+                ses = next((s for s in (self._this_week(self.plan_view(user_id), c["today"]) or {}).get("sessions", [])
+                            if s["title"] == day["title"] and s.get("status") != "done"), None)
+                title = f"{day['title']} today"
+                body = f"{td.short(ses)}. {td.WHY.get(ses['kind'], '')}" if ses else "Open Kova for today's session."
+            elif day:
+                title, body = "Rest day", "No riding today: rest is when the fitness is built."
+            else:                       # a new week: its first session
+                view = self.plan_view(user_id)
+                nxt = next((w for w in view["weeks"] if w["week_start"] <= d.isoformat() <
+                            (date.fromisoformat(w["week_start"]) + timedelta(days=7)).isoformat()), None) if view else None
+                first = next((x for x in (nxt or {}).get("sessions", []) if x["date"] == d.isoformat() and not x["off_bike"]), None)
+                if first:
+                    title = f"{first['title']} today"
+                    body = f"A new week starts. {td.short(first)}. {td.WHY.get(first['kind'], '')}"
+                else:
+                    title, body = "A new week", "Rest today; the week's first session comes tomorrow."
+            scheduled.append({"id": f"brief:{d}", "kind": "brief", "title": title, "body": body.strip(),
+                              "opens": {"screen": "today"}, "at": at(d, self.BRIEF_AT)})
+        items.sort(key=lambda x: x["at"], reverse=True)
+        return {"items": items, "scheduled": scheduled}
+
     def train_week(self, user_id: int, start: Optional[str] = None) -> Optional[dict]:
         """A plan week with each session's status and the ride that counted, the week's rides with what kind of
         training each was, and (this week) the days the open sessions are now expected on."""

@@ -89,7 +89,14 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - Efforts: a ride's screen says what it counted as.
 - Then Neelay lives with it for a week or two before the AI goes on top.
 
-### 4. The coach speaks up: events and notifications
+### 4. The coach speaks up: events and notifications (built 21 Nov 2026)
+- Built: `GET /v1/train/inbox` (`service.train_inbox`): messages worked out fresh with stable ids (ride:<id>,
+  change:<date>, review:<week>) plus the morning brief as `scheduled` (07:30 local, the phone schedules it itself).
+  App: `CoachNotifications.swift` shows new messages as local notifications when Apple Health wakes Kova for a ride,
+  on background refresh (`com.neelaypatel.rideapp.coach`) or when it opens (then just marked seen); tapping opens
+  the ride's note, the week, or Today; Settings › When the coach speaks up turns each kind off. Ride messages cover
+  today and yesterday only (older "best yet" news may no longer be true). Checked in the Simulator (posting and
+  tapping); the background wake-up itself can only be seen on the phone. No change log stored yet.
 - Backend events: a ride arrives (Garmin poll or Apple Health upload), the morning (07:30 his time), Sunday evening.
   Each makes an **inbox item** (`GET /v1/train/inbox`): kind, title, text, the screen it opens, read or not.
 - **Until the paid developer account:** local notifications. The app wakes on Apple Health background delivery

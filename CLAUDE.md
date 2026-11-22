@@ -104,16 +104,17 @@ On Neelay's iPhone, all pushed to origin/main:
 - **Train** (replaced Plan, 21 Nov; `docs/train-tab.md` steps 1-3 built): every ride classified by what it
   contained and counted against the week's sessions whatever the day; Today picks the session or rest (why, how it
   should feel, what's next); after each ride one constructive thing to try; the week as counted; the goal; the plan
-  ahead (calendar feed, Zwift export). Indoors or out is always the rider's choice. Words: `docs/train-words.md`.
+  ahead (calendar feed, Zwift export). The coach's notifications (after a ride, 07:30 brief, plan changes, Sunday
+  review). Indoors or out is always the rider's choice. Words: `docs/train-words.md`.
 - **You:** rider card, the four headline numbers, fitness and recovery, badges, bests, tallies, home loop.
 - **Routes:** check a GPX, tune it, the Route Generator (describe a ride, now with a climbing target), send to Edge.
 
 ## Next steps (detail: `docs/roadmap.md`)
 1. **Reinstall the app by 28 Nov 2026** (free 7-day profile). The paid developer account is waiting on Apple support.
 2. **Live with Train** (first session day Mon 23 Nov) and adjust the counting, picking and words from real use.
-3. **Train steps 4-7** (`docs/train-tab.md`): the coach speaks up (notifications), the AI coach (needs an Anthropic
-   API key in the backend's environment), changing the plan by talking, sending sessions to the bike; and the Method
-   (the research behind each rule, a coach's review). His goal: keep up with the fast group by 1 May 2027.
+3. **Train steps 5-7** (`docs/train-tab.md`; step 4, the coach's notifications, built 21 Nov): the AI coach (needs
+   an Anthropic API key in the backend's environment), changing the plan by talking, sending sessions to the bike;
+   and the Method (the research behind each rule, a coach's review). Goal: keep up with the fast group by 1 May 2027.
 4. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).

@@ -243,6 +243,13 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         numbers; and the latest ride's note. state "no_plan" until a goal is set."""
         return be.train_today(uid)
 
+    @app.get("/v1/train/inbox")
+    def train_inbox(uid: int = Depends(user)):
+        """The coach's messages for notifications: {"items": [{id, kind (ride | change | review), title, body,
+        opens, at}], "scheduled": [the morning brief: {id, kind "brief", title, body, opens, at}]}. Ids are stable,
+        so the phone shows each message once; no recovery numbers in any of them (they reach the lock screen)."""
+        return be.train_inbox(uid)
+
     @app.get("/v1/train/week")
     def train_week(start: Optional[str] = None, uid: int = Depends(user)):
         """A plan week (this one, or the week starting `start`): sessions with what counted as each and why,

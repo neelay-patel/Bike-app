@@ -1104,6 +1104,9 @@ struct APIClient {
 
     func trainToday() async throws -> TrainToday { try await get("v1/train/today") }
 
+    /// The coach's messages for notifications (CoachNotifications.swift).
+    func trainInbox() async throws -> CoachInbox { try await get("v1/train/inbox") }
+
     func trainWeek(start: String? = nil) async throws -> TrainWeek {
         try await get("v1/train/week", query: start.map { [URLQueryItem(name: "start", value: $0)] } ?? [])
     }

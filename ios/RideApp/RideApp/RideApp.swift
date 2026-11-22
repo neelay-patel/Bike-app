@@ -13,6 +13,20 @@ struct RideApp: App {
             ServerConfig.serverURL = server
             ServerConfig.token = token
         }
+        // Dev only: RIDE_DEV_COACH_DEMO=<seconds> forgets the coach's ride and review messages, then after that
+        // many seconds (move Kova to the background first) checks the inbox as a background wake-up would, so
+        // they show as notifications.
+        if let wait = env["RIDE_DEV_COACH_DEMO"].flatMap(Double.init) {
+            Task { @MainActor in
+                let bg = UIApplication.shared.beginBackgroundTask()
+                try? await Task.sleep(for: .seconds(wait))
+                let shown = (UserDefaults.standard.stringArray(forKey: "coach.shown") ?? [])
+                    .filter { !$0.hasPrefix("ride:") && !$0.hasPrefix("review:") }
+                UserDefaults.standard.set(shown, forKey: "coach.shown")
+                await CoachNotifier.shared.refresh(appActive: false)
+                UIApplication.shared.endBackgroundTask(bg)
+            }
+        }
         // Dev only: RIDE_DEV_SEEN_UNTIL (seconds since 1970) shows the efforts after it as new.
         if let seen = env["RIDE_DEV_SEEN_UNTIL"].flatMap(Double.init) {
             UserDefaults.standard.set(seen, forKey: "efforts.seenUntil")
@@ -24,6 +38,8 @@ struct RideApp: App {
         Task { @MainActor in
             await HealthSync.shared.startBackgroundDelivery()
         }
+        // The coach's notifications: taps reach the app, even one that launched it (CoachNotifications.swift).
+        Task { @MainActor in CoachNotifier.shared.start() }
     }
 
     /// The opening screen (Kova's mark and meaning) over the app while it loads, once per launch.
@@ -40,6 +56,11 @@ struct RideApp: App {
                         .zIndex(1)
                 }
             }
+        }
+        // Now and then iOS wakes Kova in the background: check for the coach's messages.
+        .backgroundTask(.appRefresh(CoachNotifier.refreshTask)) {
+            await CoachNotifier.shared.refresh(appActive: false)
+            await CoachNotifier.shared.scheduleBackgroundRefresh()
         }
     }
 }
@@ -89,6 +110,7 @@ final class AppModel: ObservableObject {
         let fromGarmin = (try? await api.refreshSources()) ?? 0
         checking = false
         if fromWatch + fromGarmin > 0 { await refresh() }
+        await CoachNotifier.shared.refresh(appActive: true)   // the app is open: mark the coach's news as seen
     }
 
     func refresh() async {
@@ -219,6 +241,7 @@ struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab = 0
+    @ObservedObject private var coach = CoachNotifier.shared
 
     var body: some View {
         TabView(selection: $tab) {
@@ -240,6 +263,10 @@ struct ContentView: View {
         .task { await model.catchUp() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.catchUp() } }   // back from the background: new rides
+            if phase == .background { coach.scheduleBackgroundRefresh() }
+        }
+        .onChange(of: coach.route) { _, route in
+            if route != nil { tab = 1 }                  // a tapped coach notification opens Train
         }
         .onOpenURL { url in
             // A GPX shared from Ride with GPS, Komoot or Files: check it in Routes.

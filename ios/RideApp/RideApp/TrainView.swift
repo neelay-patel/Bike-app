@@ -10,6 +10,7 @@ private let summit = Theme.stripes[3]
 
 struct TrainView: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var coach = CoachNotifier.shared
     @State private var settingGoal = false
 
     var body: some View {
@@ -49,6 +50,17 @@ struct TrainView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
             .sheet(isPresented: $settingGoal) { GoalFlow() }
+            .task { await coach.askPermissionOnce() }
+            // A tapped coach notification: the ride's note, or the week; "today" is Train itself.
+            .navigationDestination(item: Binding(get: { coach.route == .today ? nil : coach.route },
+                                                 set: { coach.route = $0 })) { route in
+                switch route {
+                case .ride(let id): RideNoteView(rideId: id)
+                case .week(let start): TrainWeekView(start: start)
+                case .today: EmptyView()
+                }
+            }
+            .onChange(of: coach.route) { _, r in if r == .today { coach.route = nil } }
         }
     }
 

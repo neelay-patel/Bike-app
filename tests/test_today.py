@@ -157,3 +157,19 @@ def test_train_endpoints(env):
         n = client.get(f"/v1/train/rides/{rid}").json()
         assert {"did", "kind", "counted", "means", "next", "try"} <= set(n)
     assert client.get("/v1/train/rides/nope").status_code == 404
+
+
+def test_coach_inbox(env):
+    be, uid, client, _ = env
+    assert client.get("/v1/train/inbox").json() == {"items": [], "scheduled": []}   # no plan, nothing to say
+    client.post("/v1/sync/garmin_personal")
+    client.put("/v1/goals/current", json={"objective": "faster", "aspiration": "keep_up_group"})
+    box = client.get("/v1/train/inbox").json()
+    assert set(box) == {"items", "scheduled"}
+    brief = box["scheduled"][-1]
+    assert brief["kind"] == "brief" and brief["id"].startswith("brief:") and brief["opens"] == {"screen": "today"}
+    assert brief["at"][11:16] == "07:30" and brief["title"]
+    # Messages reach the lock screen: never recovery numbers.
+    for m in box["items"] + box["scheduled"]:
+        words = (m["title"] + " " + m["body"]).lower()
+        assert "hrv" not in words and "bpm" not in words and "resting heart" not in words

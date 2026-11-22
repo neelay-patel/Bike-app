@@ -21,6 +21,8 @@ struct SettingsView: View {
 
                     HomeSetting()
 
+                    CoachSettingsCard()
+
                     AboutKovaRow()
 
                     MonoLabel("Development server").padding(.horizontal, 4).padding(.top, 12)

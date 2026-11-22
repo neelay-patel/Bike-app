@@ -1,3 +1,4 @@
+import UIKit
 import Foundation
 import HealthKit
 
@@ -119,6 +120,8 @@ final class HealthSync: ObservableObject {
             guard error == nil else { completion(); return }
             Task { @MainActor in
                 await HealthSync.shared.syncNew()
+                // Woken for a new ride: the coach may have something to say about it.
+                await CoachNotifier.shared.refresh(appActive: UIApplication.shared.applicationState == .active)
                 completion()
             }
         }

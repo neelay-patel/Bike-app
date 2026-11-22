@@ -65,6 +65,15 @@
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
+	<!-- The coach's messages (CoachNotifications.swift): iOS wakes Kova now and then to check for them. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.neelaypatel.rideapp.coach</string>
+	</array>
 	<!-- Graphite, like Kova's opening screen (Kova.swift), so the app opens without a white flash. -->
 	<key>UILaunchScreen</key>
 	<dict>
