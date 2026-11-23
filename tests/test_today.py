@@ -240,7 +240,38 @@ def test_jobs_are_judged_against_the_weeks_plan():
     from rideengine.analysis import plan as p
     week = {"sessions": [{"id": "a", **p.workout("surges", 0.0, 55, True)},
                          {"id": "b", **p.workout("steady", 0.0, 55, True)},
-                         {"id": "c", **p.workout("group", 0.0, 120, True)}]}
+                         {"id": "c", **p.workout("long", 0.0, 120, True)}]}
     want, long_min = Backend._job_wants(week)
     assert want == {"punch": 7.5, "hold": 20.0} and long_min == 120
     assert Backend._job_wants(None) == ({}, None)
+
+
+def test_sessions_grow_from_the_evidence():
+    """Done in full and felt fine: the next session of that job steps up, and says why; hard holds it; wrecked
+    steps it back. Never past the phase's cap."""
+    from rideengine.analysis import plan as p
+    def week(ws, day):
+        return {"week_start": ws, "phase": "build",
+                "sessions": [{"id": f"{day}-s", "date": day, "time": "07:00", **p.workout("surges", 0.0, 55, True)}]}
+    score, last = {}, {}
+    w1 = week("2026-11-23", "2026-11-23")
+    w1 = {**w1, "sessions": [Backend._grow(s, "build", score, last) for s in w1["sessions"]]}
+    assert p.job_minutes(w1["sessions"][0]) == {"punch": 7.5} and "grew" not in w1["sessions"][0]
+    counted = {"counted": {"2026-11-23-s": {"ride_id": "r1", "date": "2026-11-23"}}, "progress": {}}
+    Backend._learn(w1, counted, set(), {"r1": ("easy", False)}, date(2026, 11, 30), score, last)
+    assert score == {"punch": 1}
+    g = Backend._grow(week("2026-11-30", "2026-11-30")["sessions"][0], "build", score, last)
+    assert p.job_minutes(g) == {"punch": 9.0} and g["level"] == 0.25
+    assert g["grew"] == ("A step up: 9 min of hard efforts, from 7.5 min, because you did Monday's surges in full "
+                         "and felt easy.")
+    # Felt hard: held. Wrecked: a step back, said. Missed or partly done: held, never punished.
+    assert p.grow_score(1, "hard") == 1 and p.grow_score(1, "part") == 1 and p.grow_score(1, "missed") == 1
+    w2 = {"week_start": "2026-11-30", "phase": "build", "sessions": [g]}
+    counted = {"counted": {g["id"]: {"ride_id": "r2", "date": "2026-11-30"}}, "progress": {}}
+    Backend._learn(w2, counted, set(), {"r2": ("wrecked", False)}, date(2026, 12, 7), score, last)
+    assert score == {"punch": 0}
+    g = Backend._grow(week("2026-12-07", "2026-12-07")["sessions"][0], "build", score, last)
+    assert p.job_minutes(g) == {"punch": 7.5} and g["grew"].startswith("A step back") and "felt wrecked" in g["grew"]
+    # Base weeks grow at most halfway; easy, long and group rides don't grow.
+    assert p.grown({"kind": "surges", "seconds": 3300, "indoor": True}, 8, "base")["level"] == 0.5
+    assert p.grown({"kind": "long", "seconds": 7200}, 8, "build") is None

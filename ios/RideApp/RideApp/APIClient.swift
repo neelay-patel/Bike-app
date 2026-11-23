@@ -460,6 +460,10 @@ struct TrainNote: Decodable, Identifiable {
     let feelNote: String?
     /// Which of the week's jobs the ride did, and how much of each (docs/train-method.md).
     let jobs: Jobs?
+    /// The session this ride did part of, and what's left of it.
+    let toward: Toward?
+
+    struct Toward: Decodable { let sessionId: String; let title: String; let job: String?; let line: String }
 
     struct Jobs: Decodable {
         let summary: String?
@@ -554,6 +558,24 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let counted: Counted?
     /// How to ride it: only on the session's own page (GET v1/plan/sessions/{id}).
     let guide: SessionGuide?
+    /// The job it does in the week (docs/train-method.md): punch, top_end, hold, long, easy, strength.
+    let job: String?
+    /// Partly done: how much of its job rides have done, and what's left.
+    let progress: Progress?
+    /// Why it's bigger (or smaller) than the last one of its kind: grown from the evidence.
+    let grew: String?
+
+    struct Progress: Decodable, Hashable {
+        let haveMin: Double
+        let wantMin: Double
+        let leftMin: Double
+        let line: String
+    }
+
+    var jobTitle: String? {
+        ["punch": "Punch", "top_end": "Top end", "hold": "Hold", "long": "Long", "easy": "Easy",
+         "strength": "Strength"][job ?? ""]
+    }
 
     struct Counted: Decodable, Hashable {
         let rideId: String

@@ -214,8 +214,9 @@ SHARE = {"group": 0.32, "long": 0.36}  # the long session's share of the week's 
 
 
 # The job each workout does (docs/train-method.md): a week is a set of jobs, a workout one good way to do one.
+# A group ride answers surges at the group's pace: punch (docs/train-method.md, the jobs table).
 JOB_OF = {"surges": "punch", "sprint": "punch", "vo2": "top_end", "steady": "hold", "threshold": "hold",
-          "over_unders": "hold", "long": "long", "group": "long", "endurance": "easy", "easy": "easy",
+          "over_unders": "hold", "long": "long", "group": "punch", "endurance": "easy", "easy": "easy",
           "strength": "strength"}
 _JOB_ZONE = {"Z6": "punch", "Z7": "punch", "Z5": "top_end", "SS": "hold", "Z4": "hold"}
 
@@ -224,8 +225,10 @@ def job_minutes(w: dict) -> dict:
     """Minutes of each job's work the workout asks for: {"punch": 7.5} for the lightest surges. Over-unders count
     whole (over and under are both hold work); long rides their whole time."""
     out: dict[str, float] = {}
-    if w.get("kind") in ("long", "group"):
+    if w.get("kind") == "long":
         return {"long": round(w.get("seconds", 0) / 60)}
+    if w.get("kind") == "group":
+        return {}                     # the group sets the efforts: any punch counts
 
     def walk(steps, mult=1, whole=None):
         for st in steps:
@@ -239,6 +242,29 @@ def job_minutes(w: dict) -> dict:
                 out[job] = out.get(job, 0) + mult * st["seconds"] / 60
     walk(w.get("steps") or [])
     return {k: round(v, 1) for k, v in out.items()}
+
+
+# Growth by evidence (docs/train-method.md, progression): a job's sessions step up when the last one was done in
+# full and felt fine, stay when it felt hard or was partly done, step back when it wrecked the rider or hurt.
+GROW_STEP = 0.25                 # one step of `level` (surges: 5 -> 6 reps; sweet spot 2 x 10 -> 2 x 11 min)
+GROW_CAP = {"base": 0.5, "build": 1.0, "sharpen": 1.0}   # phases where sessions grow, and how far
+GROW_FLOOR = {"sharpen": 0.5}
+GROWS = ("surges", "sprint", "vo2", "steady", "threshold", "over_unders")
+
+
+def grow_score(score: int, outcome: str) -> int:
+    """outcome: done (felt fine, or no tap) | hard | part | missed | wrecked."""
+    return max(-2, min(8, score + {"done": 1, "wrecked": -1}.get(outcome, 0)))
+
+
+def grown(session: dict, score: int, phase: str) -> dict | None:
+    """The session at the size the rider's evidence says, or None when it doesn't grow (easy, long and group
+    rides; easier weeks and the taper)."""
+    if session.get("kind") not in GROWS or phase not in GROW_CAP:
+        return None
+    level = min(GROW_CAP[phase], max(GROW_FLOOR.get(phase, 0.0), GROW_STEP * score))
+    w = workout(session["kind"], level, max(30, round((session.get("seconds") or 0) / 60)), session.get("indoor", True))
+    return {**session, **w, "level": level}
 
 
 def usual_days(starts: list[datetime], n: int) -> list[str]:

@@ -132,9 +132,11 @@ def test_the_week_in_the_plan_view():
     counted = Backend._count_week(None, c, week, {})
     assert counted["counted"]["w1-mon"]["ride_id"] == f["ride_id"]
     assert counted["counted"]["w1-mon"]["kind_title"] == "Surges"
-    assert counted["counted"]["w1-fri"]["ride_id"] == "old"           # mixed riding fits the group ride
+    # Counted by jobs: the surges did the punch job. A ride whose work isn't read yet does no job until it is.
+    assert counted["counted"]["w1-mon"]["reason"].startswith("Punch")
+    assert [x["ride_id"] for x in counted["extra"]] == ["old"]
     status = {s["id"]: Backend._session_status(s, counted, set(), week, c["today"]) for s in WEEK}
-    assert status == {"w1-mon": "done", "w1-tue": "open", "w1-wed": "open", "w1-fri": "done",
+    assert status == {"w1-mon": "done", "w1-tue": "open", "w1-wed": "open", "w1-fri": "upcoming",
                       "w1-sat": "upcoming"}
     # Once the week is over, what's left is missed; a session ticked by hand is done.
     status = {s["id"]: Backend._session_status(s, counted, {"w1-sat"}, week, date(2026, 11, 23)) for s in WEEK}
@@ -285,3 +287,43 @@ def test_a_short_ride_does_one_hard_job_and_says_the_rest():
     assert [x["job"] for x in j["jobs"]] == ["punch"]
     (a,) = j["also"]
     assert a["job"] == "hold" and a["line"].startswith("Also ") and "the week's hold job is still to come" in a["line"]
+
+
+# --- the week as jobs (build step 2) --------------------------------------------------------------------
+
+def _job(job, have, status="done", line=None):
+    return {"job": job, "title": train.JOB_TITLES[job], "status": status, "have_min": have,
+            "line": line or f"{train.JOB_TITLES[job]} line", "detail": "the work"}
+
+
+def jr(rid, d, *jobs):
+    return {"ride_id": rid, "date": d, "jobs": {"jobs": list(jobs)}}
+
+
+def test_rides_fill_the_weeks_jobs_whatever_the_workout():
+    from rideengine.analysis import plan as p
+    week = [{"id": "mon", "date": "2026-11-23", **p.workout("surges", 0.0, 55, True)},      # punch, 7.5 min
+            {"id": "wed", "date": "2026-11-25", **p.workout("steady", 0.0, 55, True)},      # hold, 20 min
+            {"id": "fri", "date": "2026-11-27", **p.workout("group", 0.0, 75, True)},       # punch, any
+            {"id": "sat", "date": "2026-11-28", **p.workout("long", 0.0, 150, False)},      # long, 120 min
+            {"id": "sun", "date": "2026-11-29", **p.workout("endurance", 0.0, 50, False)}]  # easy
+    # A different Zwift workout of short hard efforts on Tuesday does the punch job: Monday's, the nearest.
+    m = train.count_jobs(week, [jr("tue", "2026-11-24", _job("punch", 9))])
+    assert m["counted"]["mon"]["ride_id"] == "tue" and m["ride_jobs"]["tue"] == [{"job": "punch", "session_id": "mon"}]
+    # A long group ride with surges on Saturday: punch (Friday's group ride, the nearest open punch) and long.
+    m = train.count_jobs(week, [jr("tue", "2026-11-24", _job("punch", 9)),
+                                jr("sat", "2026-11-28", _job("punch", 12), _job("long", 180))])
+    assert set(m["counted"]) == {"mon", "fri", "sat"}
+    # Partly done leaves the rest open, and a later ride finishes it.
+    m = train.count_jobs(week, [jr("w1", "2026-11-25", _job("hold", 8.5, "part"))])
+    assert "wed" not in m["counted"] and m["progress"]["wed"]["left_min"] == 11.5
+    assert m["progress"]["wed"]["line"] == "Hold: 8.5 of 20 min done. 11.5 min more finishes it."
+    m = train.count_jobs(week, [jr("w1", "2026-11-25", _job("hold", 8.5, "part")),
+                                jr("w2", "2026-11-26", _job("hold", 12, "part"))])
+    assert m["counted"]["wed"]["rides"] == ["w1", "w2"] and m["counted"]["wed"]["reason"] == "Hold: done. the work."
+    # Easy riding does the easy job; a ride that did no job is extra; the rider's own call stands.
+    m = train.count_jobs(week, [jr("e", "2026-11-29", _job("easy", 50)), jr("x", "2026-11-29")],
+                         {"tue": "sun"})
+    assert m["counted"]["sun"]["ride_id"] == "e" and m["extra"] == ["x"]
+    m = train.count_jobs(week, [jr("tue", "2026-11-24", _job("punch", 9))], {"tue": "wed"})
+    assert m["counted"] == {"wed": {"ride_id": "tue", "rides": ["tue"], "reason": None, "by_hand": True}}

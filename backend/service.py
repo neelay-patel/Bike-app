@@ -38,6 +38,12 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def train_mins(m: float) -> str:
+    """Minutes of work in words, to the half minute: '7.5 min', '12 min'."""
+    from rideengine.analysis.train import _mins
+    return _mins(m * 60)
+
+
 class Backend:
     def __init__(self, settings: Settings, registry: Optional[dict] = None, background: bool = False):
         """background: refresh insights on a worker thread (the server). Off, they're refreshed
@@ -670,6 +676,8 @@ class Backend:
             datetime.strptime(t, "%H:%M")  # raises ValueError for a bad time
         season = g.seasons(records_entries(c["feats"], c["tz"]), c["today"])
         new = p.build_plan(goal, c["today"], season, days, times, hours)
+        # Sessions grow from the evidence from here on (sessions already shown keep their size).
+        new["grow_from"] = (old.get("grow_from") if same_goal and old.get("grow_from") else c["today"].isoformat())
         if same_goal:  # keep the sessions before today
             kept = [s for w in old["weeks"] for s in w["sessions"] if s["date"] < c["today"].isoformat()]
             if kept and new["weeks"]:
@@ -696,10 +704,26 @@ class Backend:
             done = {r["session_id"] for r in self.db.execute("SELECT session_id FROM plan_done WHERE user_id = ?", (user_id,))}
             moved = {r["ride_id"]: r["session_id"] for r in self.db.execute(
                 "SELECT ride_id, session_id FROM plan_matches WHERE user_id = ?", (user_id,))}
+            feels = {r["ride_id"]: (r["feel"], bool(r["hurts"])) for r in self.db.execute(
+                "SELECT ride_id, feel, hurts FROM ride_feel WHERE user_id = ?", (user_id,))}
         today = c["today"]
+        if not plan.get("grow_from"):
+            # A plan from before growth by evidence (23 Nov 2026): sessions up to today were shown, and may have
+            # been ridden, at their planned size; they keep it.
+            plan["grow_from"] = (today + timedelta(days=1)).isoformat()
+            with self.lock:
+                self.db.execute("UPDATE plans SET data = ? WHERE plan_id = ?",
+                                (json.dumps({k: v for k, v in plan.items() if k != "plan_id"}), plan["plan_id"]))
         weeks = []
+        # Growth by evidence (docs/train-method.md): each job's sessions take their size from how that job went
+        # in the weeks before, never from later ones, so a week already ridden keeps the sessions it was shown.
+        score: dict[str, int] = {}
+        last: dict[str, dict] = {}
         for w in plan["weeks"]:
+            w = {**w, "sessions": [self._grow(s, w["phase"], score, last) if s["date"] >= plan["grow_from"] else s
+                                   for s in w["sessions"]]}
             counted = self._count_week(c, w, moved)
+            self._learn(w, counted, done, feels, today, score, last)
             sessions = []
             for s in w["sessions"]:
                 t = p.targets(s, c["aim"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
@@ -709,8 +733,11 @@ class Backend:
                 if t["kind"] == "group" and "Zwift" not in t["purpose"]:
                     t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
                 t["status"] = self._session_status(s, counted, done, w, today)
+                t["job"] = p.JOB_OF.get(s["kind"])
                 if s["id"] in counted["counted"]:
                     t["counted"] = counted["counted"][s["id"]]
+                elif s["id"] in counted["progress"]:
+                    t["progress"] = counted["progress"][s["id"]]
                 t["summary"] = p.describe(t) if s["steps"] else s["purpose"]
                 sessions.append(t)
             weeks.append({**w, "sessions": sessions, "rides": counted["rides"], "extra": counted["extra"],
@@ -724,6 +751,56 @@ class Backend:
                 "zones": {z: {"name": v["name"], "pct_ftp": [round(v["ftp"][0] * 100), round(v["ftp"][1] * 100)]}
                           for z, v in p.ZONES.items()},
                 "this_week": this_week["index"] if this_week else None, "weeks": weeks}
+
+    @staticmethod
+    def _grow(s: dict, phase: str, score: dict, last: dict) -> dict:
+        """The session at the size the evidence so far says, with a line when it changed from the last one."""
+        from rideengine.analysis import plan as p
+        from rideengine.analysis import today as td
+        job = p.JOB_OF.get(s["kind"])
+        g = p.grown(s, score.get(job, 0), phase)
+        if g is None:
+            return s
+        prev = last.get(s["kind"])
+        now = p.job_minutes(g).get(job)
+        before = last.get("shown:" + s["kind"])          # the session of this kind just before, done or not
+        last["shown:" + s["kind"]] = now
+        if before is not None and now == before:
+            return g                                      # same as the one before it: nothing new to say
+        if prev and now and prev["minutes"] and abs(now - prev["minutes"]) >= 0.5:
+            what = "of hard efforts" if job in ("punch", "top_end") else "of steady work"
+            day = td.WEEKDAY[date.fromisoformat(prev["date"]).weekday()]
+            if now > prev["minutes"]:
+                felt = {"easy": " and felt easy", "good": " and felt good"}.get(prev["feel"], "")
+                g["grew"] = (f"A step up: {train_mins(now)} {what}, from {train_mins(prev['minutes'])}, because "
+                             f"you did {day}'s {prev['title'].lower()} in full{felt}.")
+            elif prev["why"] in ("hurt", "felt wrecked"):
+                g["grew"] = (f"A step back: {train_mins(now)} {what}, from {train_mins(prev['minutes'])}, because "
+                             f"{day}'s {prev['title'].lower()} {prev['why']}.")
+        return g
+
+    @staticmethod
+    def _learn(w: dict, counted: dict, done: set, feels: dict, today: date, score: dict, last: dict) -> None:
+        """What the week's hard sessions say about each job: done in full and felt fine steps it up, hard or
+        partly done holds it, wrecked or something hurting steps it back (plan.grow_score)."""
+        from rideengine.analysis import plan as p
+        over = date.fromisoformat(w["week_start"]) + timedelta(days=7) <= today
+        for s in w["sessions"]:
+            if s["kind"] not in p.GROWS:
+                continue
+            job = p.JOB_OF[s["kind"]]
+            x = counted["counted"].get(s["id"])
+            if x:
+                feel, hurts = feels.get(x["ride_id"], (None, False))
+                outcome = "wrecked" if hurts or feel == "wrecked" else "hard" if feel == "hard" else "done"
+                why = "hurt" if hurts else "felt wrecked" if feel == "wrecked" else "felt hard"
+                last[s["kind"]] = {"minutes": p.job_minutes(s).get(job), "date": x["date"], "feel": feel,
+                                   "title": s["title"], "why": why}
+            elif over:
+                outcome = "part" if s["id"] in counted["progress"] else "missed"
+            else:
+                continue
+            score[job] = p.grow_score(score.get(job, 0), outcome)
 
     def _count_week(self, c: dict, week: dict, moved: dict) -> dict:
         """Which of the week's rides counts as which session, by what each ride contained, whatever the day
@@ -747,14 +824,21 @@ class Backend:
                           "minutes": cls["facts"].get("minutes") or round((f.get("moving_s") or 0) / 60),
                           "indoor": f.get("indoor"), "class": cls, "jobs": Backend._jobs(c, f, week),
                           "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None})
-        m = train.match_week(week["sessions"], rides, {r: s for r, s in moved.items()})
+        # By jobs (docs/train-method.md): each ride's jobs fill the week's sessions of the same job, whatever the
+        # workout and the day; partly done leaves the rest open.
+        rides.sort(key=lambda r: r["start"])
+        m = train.count_jobs(week["sessions"], rides, {r: s for r, s in moved.items()})
         by_ride = {r["ride_id"]: r for r in rides}
-        counted = {sid: {**x, "date": by_ride[x["ride_id"]]["date"], "start": by_ride[x["ride_id"]]["start"],
+        for r in rides:
+            r["counts_for"] = m["ride_jobs"].get(r["ride_id"], [])
+        counted = {sid: {**x, "fit": None, "reason": x["reason"] or by_ride[x["ride_id"]]["class"].get("reason"),
+                         "date": by_ride[x["ride_id"]]["date"], "start": by_ride[x["ride_id"]]["start"],
                          "kind": by_ride[x["ride_id"]]["class"]["kind"],
                          "kind_title": by_ride[x["ride_id"]]["kind_title"]}
                    for sid, x in m["counted"].items()}
-        return {"counted": counted, "rides": rides,
-                "extra": [{"ride_id": r, "kind_title": by_ride[r]["kind_title"], "reason": by_ride[r]["class"]["reason"]}
+        return {"counted": counted, "progress": m["progress"], "rides": rides,
+                "extra": [{"ride_id": r, "kind_title": by_ride[r]["kind_title"],
+                           "reason": (by_ride[r]["jobs"] or {}).get("summary") or by_ride[r]["class"]["reason"]}
                           for r in m["extra"]]}
 
     @staticmethod
@@ -1096,7 +1180,7 @@ class Backend:
         """The planned session (targets filled in) this ride counts as, if any."""
         view = self.plan_view(user_id)
         return next((s for w in (view or {}).get("weeks", []) for s in w["sessions"]
-                     if (s.get("counted") or {}).get("ride_id") == ride_id), None)
+                     if ride_id in (s.get("counted") or {}).get("rides", [(s.get("counted") or {}).get("ride_id")])), None)
 
     def train_ride_note(self, user_id: int, ride_id: str, _today: Optional[dict] = None) -> Optional[dict]:
         """After a ride (docs/train-words.md): what you did, what it counted as, what it means for the goal,
@@ -1111,14 +1195,17 @@ class Backend:
         ftp = c["ftp"]["watts"]
         cls = (train.classify(f["work"], ftp, c["max_hr"], c["resting_hr"]) if f.get("work")
                else {"kind": None, "confidence": 0, "reason": "", "facts": {}})
-        counted, intent, against, ride_week = None, None, None, None
+        counted, intent, against, ride_week, toward = None, None, None, None, None
         view = self.plan_view(user_id)
         if view:
             ride_week = next((w for w in view["weeks"] if date.fromisoformat(w["week_start"]) <= d <
                               date.fromisoformat(w["week_start"]) + timedelta(days=7)), None)
             for w in view["weeks"]:
                 for s in w["sessions"]:
-                    if (s.get("counted") or {}).get("ride_id") == ride_id:
+                    if ride_id in (s.get("progress") or {}).get("rides", []):
+                        toward = {"session_id": s["id"], "title": s["title"], "job": s.get("job"),
+                                  "line": s["progress"]["line"]}
+                    if ride_id in (s.get("counted") or {}).get("rides", [(s.get("counted") or {}).get("ride_id")]):
                         against = self._ridden_against(user_id, c, s, f.get("work"), ride_id)
                         planned = date.fromisoformat(s["date"])
                         counted = {"session_id": s["id"], "title": s["title"], "kind": s["kind"],
@@ -1155,7 +1242,7 @@ class Backend:
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
-                "jobs": self._jobs(c, f, ride_week),
+                "jobs": self._jobs(c, f, ride_week), "toward": toward,
                 "load": contrib["load"],
                 "next": nxt, "try": tips[0] if tips else None, "tips": tips,
                 "feel": {"feel": feel["feel"], "hurts": feel["hurts"]} if feel else None,

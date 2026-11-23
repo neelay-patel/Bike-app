@@ -537,6 +537,86 @@ def jobs_done(w: dict, ftp: float | None, max_hr: float | None = None, rest_hr: 
     return out
 
 
+# --- the week as jobs (docs/train-method.md, build step 2) ----------------------------------------------
+
+def _slot_want(session: dict, long_min: float | None) -> float:
+    """Minutes of its job a planned session asks: its own hard minutes, the long ride's share, or any easy ride."""
+    from .plan import JOB_OF, job_minutes
+    job = JOB_OF.get(session["kind"])
+    if job == "long":
+        return max(LONG_FLOOR_MIN, round(LONG_SHARE * (session.get("seconds") or 0) / 60 / 5) * 5)
+    if job == "easy":
+        return EASY_MIN
+    return job_minutes(session).get(job) or JOB_WANT_MIN.get(job, 5)
+
+
+def count_jobs(sessions: list[dict], rides: list[dict], overrides: dict | None = None) -> dict:
+    """The week by jobs, not workouts: each ride's jobs (jobs_done) fill the week's sessions of the same job,
+    whatever the workout and whatever the day. sessions: the week's planned sessions; rides: the week's rides,
+    oldest first, each {"ride_id", "date", "jobs": jobs_done(...) or None}; overrides: {ride_id: session_id or
+    None} set by the rider. A session is done when its job is done in full, by one ride or several; partly done
+    leaves the rest open, said in a line. Returns {"counted": {session_id: {"ride_id", "rides", "reason",
+    "by_hand"?}}, "progress": {session_id: {"job", "have_min", "want_min", "left_min", "line", "rides"}},
+    "extra": [ride_id], "ride_jobs": {ride_id: [{"job", "session_id"}]}}."""
+    from .plan import JOB_OF
+    overrides = overrides or {}
+    slots = {s["id"]: {"session": s, "job": JOB_OF.get(s["kind"]), "want": _slot_want(s, None), "have": 0.0,
+                       "rides": []} for s in sessions if not s.get("off_bike")}
+    counted: dict[str, dict] = {}
+    ride_jobs: dict[str, list] = {}
+    extra = []
+    for r in rides:
+        rid = r["ride_id"]
+        if rid in overrides:              # the rider's own call stands
+            sid = overrides[rid]
+            if sid in slots and sid not in counted:
+                counted[sid] = {"ride_id": rid, "rides": [rid], "reason": None, "by_hand": True}
+                ride_jobs[rid] = [{"job": slots[sid]["job"], "session_id": sid}]
+            else:
+                extra.append(rid)
+            continue
+        used = []
+        for j in (r.get("jobs") or {}).get("jobs", []):
+            open_ = [x for x in slots.values() if x["job"] == j["job"] and x["session"]["id"] not in counted]
+            if not open_:
+                continue
+            d = r["date"]
+            # A slot already started first, then the one planned nearest the ride's day (the earlier on a tie).
+            slot = min(open_, key=lambda x: (not x["have"], abs((_d(x["session"]["date"]) - _d(d)).days),
+                                             x["session"]["date"]))
+            add = slot["want"] if j["job"] in ("long", "easy") else j["have_min"]
+            slot["have"] += add
+            slot["rides"].append(rid)
+            sid = slot["session"]["id"]
+            used.append({"job": j["job"], "session_id": sid})
+            if slot["have"] >= slot["want"] - 0.05:
+                reason = (f"{j['title']}: done. {j['detail']}." if j["status"] == "part" and j.get("detail")
+                          else j["line"])
+                counted[sid] = {"ride_id": rid, "rides": list(slot["rides"]), "reason": reason}
+        if used:
+            ride_jobs[rid] = used
+        else:
+            extra.append(rid)
+    progress = {}
+    for sid, x in slots.items():
+        if sid in counted or not x["have"]:
+            continue
+        a, b = _mins(x["have"] * 60), _mins(x["want"] * 60)
+        if a.endswith(" min") and b.endswith(" min"):
+            a = a[:-4]
+        left = x["want"] - x["have"]
+        progress[sid] = {"job": x["job"], "have_min": round(x["have"], 1), "want_min": x["want"],
+                         "left_min": round(left, 1), "rides": x["rides"],
+                         "line": f"{JOB_TITLES.get(x['job'], x['job'])}: {a} of {b} done. "
+                                 f"{_mins(left * 60)} more finishes it."}
+    return {"counted": counted, "progress": progress, "extra": extra, "ride_jobs": ride_jobs}
+
+
+def _d(s):
+    from datetime import date
+    return s if isinstance(s, date) else date.fromisoformat(s)
+
+
 # --- which session each ride counts as -----------------------------------------------------------------
 
 def fit(ride_class: dict, ride_minutes: float, session: dict) -> float:

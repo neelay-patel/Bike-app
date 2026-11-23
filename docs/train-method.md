@@ -74,10 +74,11 @@ suggested way to do a job.
 - **More than the job asked counts for more.** Extra hard minutes are credited ("Punch, and then some: 12 min of
   hard efforts against 5"). They count toward the week's hard days, so the next day is easy as the limits say, but
   the rest of the week's jobs stay as they are.
-- **Jobs grow with the rider (progression).** A job done fully and felt good or easy steps up next time (another
-  rep, a longer effort, a few watts more). Partly done or felt hard: same again. Wrecked or something hurts: a step
-  back. Today the steps follow the calendar (`plan.workout` level by phase) **(built)**; they should follow this
-  evidence instead, within the phase.
+- **Jobs grow with the rider (progression)** **(built 23 Nov)**. A job done fully and felt good or easy (or with no
+  tap) steps up next time: a quarter of the way from the lightest to the hardest version (surges 5 to 6 reps, sweet
+  spot 2 × 10 to 2 × 11 min). Partly done, missed or felt hard: same again. Wrecked or something hurts: a step
+  back. Base weeks grow at most halfway, build and sharpen all the way (sharpen starts halfway); easier weeks,
+  the taper, easy, long and group rides don't grow.
 
 ## The rules
 ### Limits no plan change and no AI can cross (most are built)
@@ -175,7 +176,12 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
 1. **Jobs from a ride** (engine) **(built 23 Nov)**. `train.jobs_done(work)`: which jobs a ride did and how much of each (hard minutes
    by effort length, steady minutes, longest ride), from the sets and phases it already reads. Shown alongside
    today's session counting at first, so the two can be compared on real rides.
-2. **A week of jobs** (engine and backend). Plan weeks list jobs, each with its suggested workout and its shape;
+2. **A week of jobs** (engine and backend) **(built 23 Nov)**: `train.count_jobs` fills the week's sessions by job
+   (a session's job: `plan.JOB_OF`; the group ride is punch); a session is done when its job is done in full, by
+   one ride or several, and partly done shows what's left. Sessions grow from the evidence (`plan.grown`,
+   `Backend._grow`/`_learn`): each job's sessions take their size from earlier weeks only, from the plan's
+   `grow_from` day on, so sessions already shown keep their size; a step up or back is said on the session's page.
+   The week view shows each session's job and how much is done. As planned: Plan weeks list jobs, each with its suggested workout and its shape;
    `match_week` counts jobs (two from one ride, partly done with the rest open); progression by evidence
    (`level` per job, stepped by done-and-felt). The week view in the app shows jobs done and left.
 3. **Re-plan after every ride** (engine and backend). Place the jobs left on the days left within the limits; fold

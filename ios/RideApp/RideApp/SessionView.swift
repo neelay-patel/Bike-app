@@ -72,6 +72,21 @@ struct SessionDetail: View {
             Text(s.title).font(Theme.heading(44)).foregroundStyle(Theme.ink)
             Text(guide?.why ?? s.purpose).font(Theme.text(16)).foregroundStyle(Theme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
+            if let g = s.grew {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: g.hasPrefix("A step up") ? "arrow.up.right" : "arrow.down.right")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.cobalt)
+                    Text(g).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 4)
+            }
+            if let p = s.progress {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "circle.lefthalf.filled").font(.system(size: 13)).foregroundStyle(Theme.cobalt)
+                    Text(p.line).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 4)
+            }
         }
     }
 

@@ -275,6 +275,11 @@ private struct DoneHero: View {
                         Text(c.title + (c.plannedFor.map { " · planned \($0)" } ?? ""))
                             .font(Theme.text(15, .medium)).foregroundStyle(.white)
                     }
+                } else if let t = note.toward {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        MonoLabel("Part of", color: summit)
+                        Text(t.title).font(Theme.text(15, .medium)).foregroundStyle(.white)
+                    }
                 }
                 if let did = note.jobs?.summary {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -817,6 +822,12 @@ struct RideNoteView: View {
                         if let p = c.plannedFor { Text("· planned for \(p)").font(Theme.text(14)).foregroundStyle(Theme.inkMuted) }
                         if c.byHand { Text("· by you").font(Theme.text(14)).foregroundStyle(Theme.inkMuted) }
                     }
+                } else if let t = n.toward {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Part of \(t.title)").font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
+                    }
+                    Text(t.line).font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Extra riding").font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
                 }
@@ -829,7 +840,7 @@ struct RideNoteView: View {
                 if let j = n.jobs, !(j.jobs.isEmpty && j.also.isEmpty) {
                     JobsDone(jobs: j).padding(.top, 8)
                 }
-                if n.counted == nil, let k = n.kindTitle {
+                if n.counted == nil, n.toward == nil, let k = n.kindTitle {
                     Text("It was \(k.lowercased()) riding, but no open session this week needed it.")
                         .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
                 }
@@ -968,7 +979,7 @@ struct TrainWeekView: View {
                     MonoLabel("Week \(w.index) · \(PlanText.phase(w.phase)) · \(range(w))").padding(.horizontal, 4)
                     Text(w.done >= w.total ? "All done" : "\(w.done) of \(w.total) done")
                         .font(Theme.heading(42)).foregroundStyle(Theme.ink).padding(.horizontal, 4)
-                    Text("Each ride counts as the session it fits best, by what you actually did, whatever the day.")
+                    Text("A week is a set of jobs. Each ride counts for the jobs it did, whatever the workout and whatever the day; partly done leaves the rest open.")
                         .font(Theme.text(15)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
                     VStack(spacing: 0) {
@@ -1028,17 +1039,27 @@ struct TrainWeekView: View {
         let content = HStack(alignment: .top, spacing: 12) {
             ZStack {
                 Circle().fill(done ? Theme.cobalt : .clear)
-                Circle().stroke(done ? Theme.cobalt : s.status == "missed" ? Theme.heart : Theme.label, lineWidth: 1.5)
+                Circle().stroke(done || s.progress != nil ? Theme.cobalt : s.status == "missed" ? Theme.heart : Theme.label, lineWidth: 1.5)
                 if done { Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white) }
+                else if let p = s.progress {
+                    // Partly done: the circle fills as far as the job has.
+                    Circle().trim(from: 0, to: min(1, p.haveMin / max(1, p.wantMin)))
+                        .stroke(Theme.cobalt, style: StrokeStyle(lineWidth: 5)).rotationEffect(.degrees(-90))
+                        .padding(4)
+                }
             }
             .frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 3) {
+                if let j = s.jobTitle, !s.offBike { MonoLabel(j, color: Theme.cobalt) }
                 HStack(alignment: .firstTextBaseline) {
                     Text(s.title).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
                     Spacer()
                     MonoLabel(dayLine(s, w))
                 }
-                if let c = s.counted, let r = c.reason {
+                if let p = s.progress, !done {
+                    Text(p.line).font(Theme.text(13, .medium)).foregroundStyle(Theme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let c = s.counted, let r = c.reason {
                     Text(r).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
                 } else if s.status == "missed" {
                     Text("No ride fitted it this week.").font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
