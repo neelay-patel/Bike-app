@@ -6,10 +6,40 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		BB0000000000000000000008 /* KovaLive.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* KovaLive.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BB000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BB0000000000000000000007;
+			remoteInfo = KovaLive;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BB0000000000000000000009 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BB0000000000000000000008 /* KovaLive.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		AA0000000000000000000001 /* RideApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RideApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA0000000000000000000012 /* RideApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RideApp.entitlements; sourceTree = "<group>"; };
+		BB0000000000000000000001 /* KovaLive.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KovaLive.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB0000000000000000000010 /* KovaLive-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "KovaLive-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -18,10 +48,27 @@
 			path = RideApp;
 			sourceTree = "<group>";
 		};
+		BB0000000000000000000002 /* KovaLive */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KovaLive;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000003 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AA0000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0000000000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -35,6 +82,8 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000002 /* RideApp */,
+				BB0000000000000000000002 /* KovaLive */,
+				BB0000000000000000000003 /* Shared */,
 				AA0000000000000000000010 /* Config */,
 				AA0000000000000000000005 /* Products */,
 			);
@@ -44,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000001 /* RideApp.app */,
+				BB0000000000000000000001 /* KovaLive.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,6 +103,7 @@
 			children = (
 				AA0000000000000000000011 /* Info.plist */,
 				AA0000000000000000000012 /* RideApp.entitlements */,
+				BB0000000000000000000010 /* KovaLive-Info.plist */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -67,13 +118,16 @@
 				AA0000000000000000000007 /* Sources */,
 				AA0000000000000000000003 /* Frameworks */,
 				AA0000000000000000000008 /* Resources */,
+				BB0000000000000000000009 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BB000000000000000000000D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000002 /* RideApp */,
+				BB0000000000000000000003 /* Shared */,
 			);
 			name = RideApp;
 			packageProductDependencies = (
@@ -81,6 +135,29 @@
 			productName = RideApp;
 			productReference = AA0000000000000000000001 /* RideApp.app */;
 			productType = "com.apple.product-type.application";
+		};
+		BB0000000000000000000007 /* KovaLive */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BB000000000000000000000E /* Build configuration list for PBXNativeTarget "KovaLive" */;
+			buildPhases = (
+				BB0000000000000000000005 /* Sources */,
+				BB0000000000000000000004 /* Frameworks */,
+				BB0000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				BB0000000000000000000002 /* KovaLive */,
+				BB0000000000000000000003 /* Shared */,
+			);
+			name = KovaLive;
+			packageProductDependencies = (
+			);
+			productName = KovaLive;
+			productReference = BB0000000000000000000001 /* KovaLive.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -93,6 +170,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					AA0000000000000000000006 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					BB0000000000000000000007 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -112,12 +192,20 @@
 			projectRoot = "";
 			targets = (
 				AA0000000000000000000006 /* RideApp */,
+				BB0000000000000000000007 /* KovaLive */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		AA0000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0000000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -134,7 +222,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BB0000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BB000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BB0000000000000000000007 /* KovaLive */;
+			targetProxy = BB000000000000000000000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000013 /* Debug */ = {
@@ -187,6 +290,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Kova;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -215,6 +319,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Kova;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -225,6 +330,54 @@
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.neelaypatel.rideapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		BB000000000000000000000F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 535NY4Z9DP;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/KovaLive-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Kova;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.neelaypatel.rideapp.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BB0000000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 535NY4Z9DP;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/KovaLive-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Kova;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.neelaypatel.rideapp.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -248,6 +401,15 @@
 			buildConfigurations = (
 				AA0000000000000000000013 /* Debug */,
 				AA0000000000000000000014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BB000000000000000000000E /* Build configuration list for PBXNativeTarget "KovaLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB000000000000000000000F /* Debug */,
+				BB0000000000000000000011 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -151,13 +151,29 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
   Quick buttons for the common ones. Voice through iOS dictation. "Something hurts" and "ill" always back off and
   say to see a professional if it persists.
 
-### 7. Send the session to the bike (later: Neelay left the Send buttons out for now, 21 Nov 2026)
-- **Apple Watch, first:** WorkoutKit schedules the session into the Workout app with its steps and targets (no
-  partnership needed; it can't set the trainer's resistance).
+### 7. Send the session to the bike, and follow it without looking at the phone
+Built 23 Nov 2026, after Neelay rode the surges with his phone propped up to read the steps. One session in the
+engine, one sender per device (like the merge): each sender only translates the session's steps and targets.
+- **Spoken cues, for every rider** (built, `RideAlong.swift`): "Ride it with spoken cues" on a session's page.
+  Each step is spoken as it starts with its watts, ten seconds' warning before the work, halfway and one minute
+  left on long steady steps, "three, two, one" at the end of hard ones. Plays with Zwift or music (they dip only
+  while it speaks), keeps going with the phone locked (background audio), and the lock screen and Dynamic Island
+  show the step, its target, a live countdown and what's next (a Live Activity, the `KovaLive` widget extension).
+  It records nothing. The fallback for Whoop riders and anyone without a screen on the wrist or the bars.
+- **Apple Watch** (built, `WatchWorkout.swift`): WorkoutKit puts the session in the Watch's Workout app, under
+  Scheduled, with every step timed, the watts as a range the Watch nudges you back into, and a tap at each change.
+  "Send to Apple Watch" on a session's page; or "Sessions on my Apple Watch" in Settings keeps the coming week's
+  sessions there, re-sent each time Kova opens, so they follow the plan as it changes. The ride records as the
+  Watch's own Cycling workout, so the merge doesn't change. (No partnership needed; it can't set the trainer's
+  resistance.)
+- **Garmin watches and the Edge:** next, once the developer access comes through; a FIT workout file shared by
+  hand is the stopgap if wanted sooner.
+- **Whoop:** as far as we know its API is read-only (no workouts sent, no buzzing the strap): spoken cues cover it.
+  Check when we read Whoop's terms.
 - **KICKR:** Wahoo Cloud API (public, OAuth, `workouts_write` / plans): the session appears in the Wahoo app, which
   runs it in ERG. Needs a Wahoo developer app (Neelay registers it).
-- **Zwift:** .zwo export stays (Mac/PC Workouts folder). Automatic sync needs Zwift's Training API, partners only:
-  apply once the backend is hosted.
+- **Zwift:** .zwo export stays (Mac/PC Workouts folder). Easier uploads parked by Neelay, 23 Nov 2026. Automatic
+  sync needs Zwift's Training API, partners only: apply once the backend is hosted.
 - **Edge 840:** Garmin Training API with the business tier (`docs/hosting.md`); the Edge can drive the KICKR too.
 
 ### Method: the credential (alongside, any time)

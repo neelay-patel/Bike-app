@@ -23,6 +23,8 @@ struct SettingsView: View {
 
                     CoachSettingsCard()
 
+                    if WatchSessions.supported { WatchSettingsCard() }
+
                     AboutKovaRow()
 
                     MonoLabel("Development server").padding(.horizontal, 4).padding(.top, 12)

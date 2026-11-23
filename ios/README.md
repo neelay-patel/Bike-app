@@ -17,7 +17,11 @@ distance recorded during them. Read-only. Workouts written by Strava are skipped
 - `RideApp/*View.swift`, `RideApp.swift`: screens.
 - `Config/Info.plist`, `Config/RideApp.entitlements`: Health permission text, local-network access
   (dev), HealthKit + background delivery.
+- `KovaLive/`: the widget extension (`com.neelaypatel.rideapp.live`) for the ride-along's Live Activity;
+  `Shared/RideAlongActivity.swift` is in both targets. `Config/KovaLive-Info.plist` holds its extension point.
 New Swift files dropped into `RideApp/` join the target automatically (synchronized folder).
+With the free Personal Team, the extension is a second app ID on the 7-day profile; `-allowProvisioningUpdates`
+makes it.
 
 ## Run it on your iPhone
 Done on Neelay's iPhone, 14 Nov 2026 (iOS 27.2, Xcode 27.2, free Personal Team `535NY4Z9DP`, set in the project).

@@ -69,6 +69,8 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<!-- The ride-along keeps speaking each step with the phone locked (RideAlong.swift). -->
+		<string>audio</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>

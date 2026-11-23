@@ -111,6 +111,7 @@ final class AppModel: ObservableObject {
         checking = false
         if fromWatch + fromGarmin > 0 { await refresh() }
         await CoachNotifier.shared.refresh(appActive: true)   // the app is open: mark the coach's news as seen
+        await WatchSessions.shared.sync()                     // the Watch has the week's sessions as they are now
     }
 
     func refresh() async {

@@ -106,7 +106,9 @@ On Neelay's iPhone, all pushed to origin/main:
 - **Efforts:** new efforts lead as their full ride card, this month in one line, then the collection by month.
 - **Train** (replaced Plan, 21 Nov; `docs/train-tab.md` steps 1-3 built): every ride classified by what it
   contained and counted against the week's sessions whatever the day; Today picks the session or rest (why, how it
-  should feel, what's next); after each ride one constructive thing to try; the week as counted; the goal; the plan
+  should feel, what's next); after each ride one constructive thing to try and which jobs it did
+  (`docs/train-method.md`); following a session without the phone: spoken cues with a lock-screen countdown, or
+  the session on the Apple Watch; the week as counted; the goal; the plan
   ahead (calendar feed, Zwift export). The coach's notifications (after a ride, 07:30 brief, plan changes, Sunday
   review). Indoors or out is always the rider's choice. Words: `docs/train-words.md`.
 - **You:** rider card, the four headline numbers, fitness and recovery, badges, bests, tallies, home loop.

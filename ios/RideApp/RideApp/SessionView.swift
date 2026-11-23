@@ -13,6 +13,7 @@ struct SessionDetail: View {
     @State private var part: Int?
     @State private var shareURL: URL?
     @State private var error: String?
+    @State private var riding = false
 
     private var s: PlanSession { full ?? session }
     private var guide: SessionGuide? { full?.guide }
@@ -51,6 +52,7 @@ struct SessionDetail: View {
         .background(Theme.ground.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { full = try? await APIClient().planSession(session.id) }
+        .fullScreenCover(isPresented: $riding) { RideAlongView(session: s) }
         .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
             if let shareURL { ShareSheet(items: [shareURL]).presentationDetents([.medium, .large]) }
         }
@@ -145,6 +147,13 @@ struct SessionDetail: View {
 
     private var actions: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !s.offBike && !s.steps.isEmpty {
+                Button { riding = true } label: {
+                    Label("Ride it with spoken cues", systemImage: "speaker.wave.2.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButton())
+            }
+            if !s.offBike && WatchSessions.supported { SendToWatch(session: s) }
             HStack {
                 if s.steps.contains(where: { $0.set != nil }) {
                     Button("Export for Zwift") { Task { await export() } }.buttonStyle(SecondaryButton())
