@@ -200,7 +200,9 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
    week. Planned against ridden only when every planned set is in the ride (`Backend._ridden_against`); the card
    names the session then, else the kind of work ("Punch"). As planned: The ride note's "what it did, what's left"; the card names what the ride was;
    planned vs ridden only when the sets line up; Today's shape line; the "Moved:" line and the marked days.
-5. **Coach's voice** (backend and AI). The "why it works" line and the specific praise, from the engine's facts,
+5. **Coach's voice** (backend and AI) **(built 23 Nov)**: `rideengine/analysis/voice.py` (`learn`, `done_well`),
+   the research in `docs/training-science.md` (a first pass, to be reviewed by a coach and each reference checked),
+   the words in `docs/train-words.md`. The AI gets `done_well` as the only praise it may give. As planned: The "why it works" line and the specific praise, from the engine's facts,
    in the AI's words when it's on and from `docs/train-words.md` when it's off; the research for each in
    `docs/training-science.md`.
 6. **The Sunday review** (with step 5 of `docs/train-tab.md`): skipped jobs offered another way, emphasis shifted

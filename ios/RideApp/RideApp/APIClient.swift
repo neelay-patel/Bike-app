@@ -360,6 +360,9 @@ struct TrainingPlan: Decodable {
 // MARK: - Train (docs/train-tab.md): today, the week as counted, and a note for each ride
 
 /// GET /v1/train/today. state: session | rest | done | no_plan.
+/// A line in the coach's voice, with the key of its research in docs/training-science.md.
+struct Learn: Decodable, Hashable { let key: String; let text: String }
+
 struct TrainToday: Decodable {
     let state: String
     let date: String?
@@ -380,7 +383,7 @@ struct TrainToday: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
-        case next, nextNote, changes
+        case next, nextNote, changes, learn
         case where_ = "where"
     }
     let readiness: String?
@@ -392,6 +395,8 @@ struct TrainToday: Decodable {
     let total: Int?
 
     struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
+    /// Why today's work works, in a line (its research: docs/training-science.md).
+    let learn: Learn?
     /// The week re-planned itself (docs/train-method.md "When the plan changes"): what changed and why, until seen.
     let changes: [Change]?
 
@@ -483,6 +488,9 @@ struct TrainNote: Decodable, Identifiable {
     let toward: Toward?
     /// What's left of this week's jobs, on the days they're now expected.
     let left: String?
+    /// The coach's voice (docs/train-method.md step 5): one specific thing done well, and why the work works.
+    let doneWell: Learn?
+    let learn: Learn?
 
     struct Toward: Decodable { let sessionId: String; let title: String; let job: String?; let line: String }
 

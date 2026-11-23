@@ -1004,6 +1004,8 @@ class Backend:
                                                 date.fromisoformat(week["week_start"]), readiness)
         changes = self._plan_changes(user_id, c, week, t)
         session = next((s for s in week["sessions"] if s["id"] == t["session_id"]), None)
+        from rideengine.analysis import voice
+        today_learn = voice.learn(session.get("job") if session else "rest", c["today"].toordinal())
         feel = _feel(session) if session else None
         latest = None
         rides_back = sorted((r for r in recent if r["date"] >= c["today"] - timedelta(days=2)),
@@ -1046,6 +1048,7 @@ class Backend:
                 "next_note": next((f"{x['title']} is still open this week." for x in week["sessions"]
                                    if x.get("off_bike") and x.get("status") != "done"), None),
                 "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
+                "learn": today_learn,
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
     @staticmethod
@@ -1409,10 +1412,21 @@ class Backend:
                "ascent_m": f.get("ascent_m"), "avg_power": f.get("power"), "avg_hr": f.get("avg_hr"),
                "best_minute": (f.get("power_curve") or {}).get("60")}
         feel = self.ride_feel(user_id, ride_id)
+        # The coach's voice (docs/train-method.md step 5): one specific thing done well, from the ride's own
+        # numbers, and one line on why the work works (its research: docs/training-science.md).
+        from rideengine.analysis import voice
+        jobs = self._jobs(c, f, ride_week)
+        done_well = (voice.done_well(f["work"], jobs, against, ftp, cls["kind"], round((f.get("moving_s") or 0) / 60),
+                                     tips) if f.get("work") else None)
+        jobs_done = [j["job"] for j in (jobs or {}).get("jobs", []) if j["status"] in ("done", "more")]
+        kind_job = voice.KIND_JOB.get(cls["kind"])
+        main_job = kind_job if kind_job in jobs_done else jobs_done[0] if jobs_done else kind_job
+        note_learn = voice.learn(main_job, int(ride_id) if ride_id.isdigit() else 0)
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
-                "jobs": self._jobs(c, f, ride_week), "toward": toward, "left": self._left_this_week(c, ride_week),
+                "jobs": jobs, "toward": toward, "left": self._left_this_week(c, ride_week),
+                "done_well": done_well, "learn": note_learn,
                 "load": contrib["load"],
                 "next": nxt, "try": tips[0] if tips else None, "tips": tips,
                 "feel": {"feel": feel["feel"], "hurts": feel["hurts"]} if feel else None,
@@ -1458,6 +1472,8 @@ class Backend:
             "what_changed_because_of_how_it_felt": note.get("feel_note"),
             "against_the_plan": ({"summary": note["against"]["summary"], "sets": note["against"]["lines"]}
                                  if note.get("against") else None),
+            "jobs_it_did": (note.get("jobs") or {}).get("summary"),
+            "done_well": (note.get("done_well") or {}).get("text"),
         }
 
     def ride_feel(self, user_id: int, ride_id: str) -> Optional[dict]:
@@ -1474,10 +1490,20 @@ class Backend:
         for n in (t or {}).get("next") or []:
             if td.hard(n["session"]["kind"]) and n["session"].get("steps"):
                 return n["session"], n["when"]
-        s = next((s for w in (view or {}).get("weeks", []) for s in w["sessions"]
-                  if s["date"] > today.isoformat() and s["status"] in ("upcoming", "open", "today")
-                  and td.hard(s["kind"]) and s.get("steps")), None)
-        return s, td.WEEKDAY[date.fromisoformat(s["date"]).weekday()] if s else None
+        # Else the next one on the days the week now has (re-planned this week, planned after), a session with
+        # sets of its own before a group ride.
+        ahead = []
+        for w in (view or {}).get("weeks", []):
+            when = (w.get("replan") or {}).get("schedule", {})
+            for s in w["sessions"]:
+                on = when.get(s["id"], s["date"])
+                if on > today.isoformat() and s["status"] in ("upcoming", "open", "today") and td.hard(s["kind"]) \
+                        and s.get("steps") and not s.get("dropped"):
+                    ahead.append((on, s["kind"] == "group", s))
+        if not ahead:
+            return None, None
+        on, _, s = min(ahead, key=lambda x: (x[0], x[1]))
+        return s, td.WEEKDAY[date.fromisoformat(on).weekday()]
 
     @staticmethod
     def _feel_note(aim: dict, ride_id: str, feel: Optional[dict], nxt: Optional[dict] = None,

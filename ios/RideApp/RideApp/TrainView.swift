@@ -203,6 +203,7 @@ struct TodayHero: View {
             if let feel = today.feel { line("Feel", TrainText.feelWords(feel)) }
             if let why = today.why, !why.isEmpty { line("Why", why) }
             if let shape = s.shape { line("Or", String(shape.dropFirst(3)).capitalizedFirst) }
+            if let l = today.learn { line("How", l.text) }
             NavigationLink { SessionDetail(session: s, plan: plan, when: "Today") } label: {
                 HStack(spacing: 6) {
                     Text("The session, step by step").font(Theme.text(14, .medium))
@@ -232,6 +233,9 @@ struct TodayHero: View {
             }
             if let why = today.why, !why.isEmpty {
                 Text(why).font(Theme.text(15)).foregroundStyle(Theme.ink.opacity(0.85)).fixedSize(horizontal: false, vertical: true)
+            }
+            if !done, let l = today.learn {
+                Text(l.text).font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
@@ -830,11 +834,23 @@ struct RideNoteView: View {
                     did(n)
                     counted(n)
                     if let s = n.story {
+                        // The AI's words already carry the praise (it's told to praise only what done_well names).
                         card { Labelled(label: "What it means", text: s.story) }
-                    } else if !n.means.isEmpty {
-                        card { Labelled(label: "What it means", text: n.means.joined(separator: " ")) }
+                    } else if !n.means.isEmpty || n.doneWell != nil {
+                        card { Labelled(label: "What it means",
+                                        text: ([n.doneWell?.text].compactMap { $0 } + n.means).joined(separator: " ")) }
                     }
                     if let next = n.next, !next.isEmpty { card { Labelled(label: "What's next", text: next) } }
+                    if let l = n.learn {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: "lightbulb").font(.system(size: 14)).foregroundStyle(Theme.cobalt)
+                            VStack(alignment: .leading, spacing: 4) {
+                                MonoLabel("Why it works")
+                                Text(l.text).font(Theme.text(15)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     if let tip = n.tips.first { tips(n, first: tip) }
                     feel(n)
                     if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }

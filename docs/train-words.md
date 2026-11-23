@@ -25,6 +25,16 @@ going out too hard on the first of a set of efforts; cadence on the climbs; swee
 heart rate climbing at the same power late in long rides (drink and eat); no warm-up before hard work; cadence on
 steady riding too low or too high (`rideengine/analysis/feedback.py`).
 
+Plus **WHY IT WORKS** (23 Nov 2026, docs/train-method.md step 5): one line on why the work works, on the ride
+note (for the job the ride did) and on Today (for today's session, or rest). Plain words, varied day to day, and
+each line's research is in docs/training-science.md under its key (`rideengine/analysis/voice.py`). It teaches one
+thing; never a lecture.
+
+Praise, under WHAT IT MEANS, is the engine's **done well**: one specific thing the ride did well, from its own
+numbers ("Your last hard minute (228 W) was as strong as your first (219 W): you paced the whole set…"). Only
+from power, never from a rough heart-rate read; never what the ride's one thing to try asks to change; and when
+there's nothing specific, no praise at all. The AI coach may say it in its own words, and praises nothing else.
+
 Plus **ASK**: one question, answered with one tap ("How did it feel?").
 
 A session that's still to come uses the same idea in its own order: **the session** (name, and what it is in one

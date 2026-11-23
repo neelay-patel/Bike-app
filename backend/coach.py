@@ -53,6 +53,8 @@ Rules (Kova's words guide):
 - Don't give medical advice. Don't mention recovery numbers.
 - If the rider said how the ride felt, take it into account; when the facts say what changed because of it (the
   targets going up after a hard session felt easy), say so in a few words.
+- Praise only what the facts' done_well names, in your own words (its numbers as written); if done_well is empty,
+  praise nothing. Never a comparison that shames.
 - Don't repeat the "one thing to try" or "what's next": the card shows those separately. But stay consistent
   with the one thing to try: never praise what it asks the rider to change (an easy day ridden hard is not "good
   steady work").
