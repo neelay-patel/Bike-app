@@ -41,6 +41,9 @@ struct SessionDetail: View {
                         .padding(.horizontal, 4)
                     }
                 }
+                if let shape = s.shape, !s.offBike {
+                    Note(label: "Any workout that does the same job", text: String(shape.dropFirst(3)).capitalizedFirst)
+                }
                 if let g = guide {
                     if let w = g.where_ { Note(label: "Where", text: w) }
                     if !g.bring.isEmpty { Note(label: "Before you go", text: g.bring.joined(separator: " ")) }

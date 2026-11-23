@@ -380,7 +380,7 @@ struct TrainToday: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
-        case next, nextNote
+        case next, nextNote, changes
         case where_ = "where"
     }
     let readiness: String?
@@ -392,6 +392,25 @@ struct TrainToday: Decodable {
     let total: Int?
 
     struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
+    /// The week re-planned itself (docs/train-method.md "When the plan changes"): what changed and why, until seen.
+    let changes: [Change]?
+
+    struct Change: Decodable, Identifiable {
+        let id: Int
+        let line: String
+        let reason: String?
+        let big: Bool?
+        let items: [Item]?
+
+        struct Item: Decodable, Hashable {
+            let kind: String          // moved | folded | dropped
+            let sessionId: String?
+            let title: String?
+            let from: String?
+            let to: String?
+            let line: String?
+        }
+    }
     struct NextSession: Decodable, Identifiable {
         var id: String { session.id }
         let date: String
@@ -462,6 +481,8 @@ struct TrainNote: Decodable, Identifiable {
     let jobs: Jobs?
     /// The session this ride did part of, and what's left of it.
     let toward: Toward?
+    /// What's left of this week's jobs, on the days they're now expected.
+    let left: String?
 
     struct Toward: Decodable { let sessionId: String; let title: String; let job: String?; let line: String }
 
@@ -564,6 +585,8 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let progress: Progress?
     /// Why it's bigger (or smaller) than the last one of its kind: grown from the evidence.
     let grew: String?
+    /// The job's shape in words, so any workout can do it ("Or any ride with 7.5 min or more of hard efforts…").
+    let shape: String?
     /// Re-planned this week (docs/train-method.md): leftovers of other sessions added to this one ...
     let added: [String]?
     /// ... this session's leftover, added to another ride ...
@@ -1252,6 +1275,12 @@ struct APIClient {
 
     /// A session with how to ride it (its `guide`).
     func planSession(_ sessionId: String) async throws -> PlanSession { try await get("v1/plan/sessions/\(sessionId)") }
+
+    /// The rider has seen these plan changes: they're not shown again.
+    func seenChanges(_ ids: [Int]) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["ids": ids])
+        _ = try await send(request("POST", "v1/train/changes/seen", body: body))
+    }
 
     func setDone(_ sessionId: String, _ done: Bool) async throws {
         _ = try await send(request(done ? "PUT" : "DELETE", "v1/plan/sessions/\(sessionId)/done"))

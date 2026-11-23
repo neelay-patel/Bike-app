@@ -276,6 +276,31 @@ def with_leftover(session: dict, block: dict) -> dict:
     return {**session, "steps": steps, "seconds": (session.get("seconds") or 0) + extra}
 
 
+def shape(session: dict, watts: list | None = None) -> str | None:
+    """The job's shape in words, so any workout the rider likes can do it (docs/train-method.md: no Zwift or other
+    app's workout names). watts: the session's main target range, when it has one."""
+    job = JOB_OF.get(session.get("kind"))
+    mins = job_minutes(session).get(job)
+    w = f" at about {watts[0]}–{watts[1]} W" if watts else ""
+    if job == "punch":
+        m = mins or 5
+        return (f"Or any ride with {m:g} min or more of hard efforts of 30 s to 2 min, easy riding between: an interval "
+                f"workout, a hard group ride, or hills taken hard.")
+    if job == "top_end":
+        m = mins or 10
+        return f"Or any ride with {m:g} min or more of hard efforts of 3 to 5 min{w}, as long easy between."
+    if job == "hold":
+        m = mins or 20
+        return (f"Or any ride with {m:g} min or more of steady work{w}, in blocks of 8 min or more: a long steady "
+                f"climb counts.")
+    if job == "long":
+        m = round((session.get("seconds") or 0) / 60)
+        return f"Or any ride of {m} min or more at a pace you could chat at, indoors or out."
+    if job == "easy":
+        return "Or any easy ride: legs turning, nothing hard."
+    return None
+
+
 # Growth by evidence (docs/train-method.md, progression): a job's sessions step up when the last one was done in
 # full and felt fine, stay when it felt hard or was partly done, step back when it wrecked the rider or hurt.
 GROW_STEP = 0.25                 # one step of `level` (surges: 5 -> 6 reps; sweet spot 2 x 10 -> 2 x 11 min)

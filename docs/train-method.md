@@ -192,7 +192,13 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
    Friday" because "Wednesday went by without a ride"; `changes` on Today, marked seen with
    `POST v1/train/changes/seen`. As planned: Place the jobs left on the days left within the limits; fold
    small remainders; drop and say when there's no room; store each change with its reason.
-4. **What the rider sees** (app). The ride note's "what it did, what's left"; the card names what the ride was;
+4. **What the rider sees** (app) **(built 23 Nov)**: the "Moved:" line on Today with its reason, shown until seen
+   (a few seconds on screen, or tapped for the before and after), and the moved days marked in the week strip,
+   their session sliding over from its old day; a notification only for a bigger change (a session let go, the
+   long ride moved). Every riding session carries its job's shape (`plan.shape`: "Or any ride with 7.5 min or
+   more of hard efforts of 30 s to 2 min…"), on Today and the session's page. The ride note says what's left this
+   week. Planned against ridden only when every planned set is in the ride (`Backend._ridden_against`); the card
+   names the session then, else the kind of work ("Punch"). As planned: The ride note's "what it did, what's left"; the card names what the ride was;
    planned vs ridden only when the sets line up; Today's shape line; the "Moved:" line and the marked days.
 5. **Coach's voice** (backend and AI). The "why it works" line and the specific praise, from the engine's facts,
    in the AI's words when it's on and from `docs/train-words.md` when it's off; the research for each in

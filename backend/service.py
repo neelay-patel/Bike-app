@@ -754,6 +754,10 @@ class Backend:
                     if gone:
                         t["dropped"] = gone["line"]
                 t["summary"] = p.describe(t) if s["steps"] else s["purpose"]
+                if not s.get("off_bike"):
+                    main = next((x["steps"][0].get("target", {}).get("watts") for x in t.get("steps") or []
+                                 if x.get("steps") and not (x.get("set") or "").startswith("Added")), None)
+                    t["shape"] = p.shape(t, main)
                 sessions.append(t)
             weeks.append({**w, "sessions": sessions, "rides": counted["rides"], "extra": counted["extra"],
                           "replan": replan,
@@ -1044,6 +1048,29 @@ class Backend:
                 "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
+    @staticmethod
+    def _left_this_week(c: dict, week: Optional[dict]) -> Optional[str]:
+        """What's left of this week's jobs, on the days they're now expected: "Still to come this week: steady
+        work on Wednesday, easy riding on Thursday and punch on Friday." Only for the week we're in."""
+        from rideengine.analysis import today as td
+        if not week or not week.get("replan"):
+            return None
+        when = week["replan"].get("schedule", {})
+        words = {"punch": "punch", "top_end": "top-end work", "hold": "steady work", "long": "the long ride",
+                 "easy": "easy riding"}
+        left = sorted(((when[s["id"]], s) for s in week["sessions"] if s["id"] in when and not s.get("off_bike")
+                       and s["status"] != "done" and not s.get("dropped")), key=lambda x: x[0])
+        if not left:
+            return "That's every job this week done." if all(
+                s["status"] == "done" or s.get("off_bike") or s.get("dropped") for s in week["sessions"]) else None
+        parts = []
+        for d, s in left:
+            day = td._day_name(date.fromisoformat(d), c["today"])
+            day = day.lower() if day in ("Today", "Tomorrow") else f"on {day}"
+            parts.append(f"{words.get(s.get('job'), s['title'].lower())} {day}")
+        text = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+        return f"Still to come this week: {text}."
+
     def _plan_changes(self, user_id: int, c: dict, week: dict, t: dict) -> list[dict]:
         """Store how the week is laid out now and, when that differs from last time, what changed and why
         (docs/train-method.md "When the plan changes"): sessions moved to another day, leftovers added to a ride,
@@ -1054,6 +1081,7 @@ class Backend:
         now = {"schedule": t.get("schedule", {}), "folded": {f["id"]: f["into"] for f in t.get("folded", [])},
                "dropped": [d["id"] for d in t.get("dropped", [])]}
         titles = {s["id"]: s["title"] for s in week["sessions"]}
+        kinds = {s["id"]: s.get("kind") for s in week["sessions"]}
         with self.lock:
             row = self.db.execute("SELECT data, at FROM plan_snapshots WHERE user_id = ? AND week_start = ?",
                                   (user_id, ws)).fetchone()
@@ -1063,7 +1091,8 @@ class Backend:
             for sid, d in now["schedule"].items():
                 was = before["schedule"].get(sid)
                 if was and was != d and sid not in before.get("dropped", []):
-                    items.append({"kind": "moved", "session_id": sid, "title": titles.get(sid, ""), "from": was, "to": d})
+                    items.append({"kind": "moved", "session_id": sid, "title": titles.get(sid, ""), "from": was, "to": d,
+                                  "long": kinds.get(sid) == "long"})
             for f in t.get("folded", []):
                 if before.get("folded", {}).get(f["id"]) != f["into"]:
                     items.append({"kind": "folded", "session_id": f["id"], "into": f["into"], "line": f["line"]})
@@ -1101,8 +1130,9 @@ class Backend:
         with self.lock:
             rows = self.db.execute("SELECT id, data, at FROM plan_changes WHERE user_id = ? AND week_start = ? "
                                    "AND seen = 0 ORDER BY id DESC LIMIT 3", (user_id, ws)).fetchall()
-        return [{"id": r["id"], "at": r["at"], **{k: v for k, v in json.loads(r["data"]).items() if k != "items"},
-                 "big": any(i["kind"] == "dropped" for i in json.loads(r["data"])["items"])} for r in rows]
+        return [{"id": r["id"], "at": r["at"], **json.loads(r["data"]),
+                 "big": any(i["kind"] == "dropped" or i.get("long") for i in json.loads(r["data"])["items"])}
+                for r in rows]
 
     @staticmethod
     def _change_reason(c: dict, week: dict, t: dict, since: Optional[float]) -> str:
@@ -1204,21 +1234,22 @@ class Backend:
                           "opens": {"screen": "ride", "ride_id": r["ride_id"]},
                           "at": datetime.fromtimestamp(float(r["ride_id"]), tz).isoformat()})
 
-        # A plan change today: recovery says ease off, or today's planned session moved.
+        # A change today: recovery says ease off.
         if now.time() >= datetime.min.time().replace(hour=self.BRIEF_AT[0], minute=self.BRIEF_AT[1]):
-            moved_off = [m for m in t.get("moved") or [] if m["from"] == today.isoformat()]
             if t.get("readiness") == "strained" and t["state"] in ("session", "rest"):
                 title = "Easy today instead" if t["state"] == "session" else "Rest today instead"
                 items.append({"id": f"change:{today}", "kind": "change", "title": title,
                               "body": "Your recovery is lower than usual this morning. " + (
                                   f"Today: {td.short(t['session'])}." if t.get("session") else "The harder work moves later."),
                               "opens": {"screen": "today"}, "at": at(today, self.BRIEF_AT)})
-            elif moved_off and t["state"] in ("session", "rest"):
-                m = moved_off[0]
-                when = td.WEEKDAY[date.fromisoformat(m["to"]).weekday()]
-                items.append({"id": f"change:{today}", "kind": "change", "title": f"{m['title']} moves to {when}",
-                              "body": (t.get("why") or "").split(":")[0].rstrip(".") + "." if t.get("why") else "",
-                              "opens": {"screen": "today"}, "at": at(today, self.BRIEF_AT)})
+        # The week re-planned itself: only a bigger change is worth a notification (a session let go, the long ride
+        # moved); small shuffles are said in the app, on Today (docs/train-method.md "When the plan changes").
+        for ch in t.get("changes") or []:
+            if ch.get("big"):
+                items.append({"id": f"plan:{ch['id']}", "kind": "change", "title": "This week's plan changed",
+                              "body": f"{ch['line']} {ch.get('reason') or ''}".strip(),
+                              "opens": {"screen": "today"},
+                              "at": datetime.fromtimestamp(ch["at"], tz).isoformat()})
 
         # The week's review, Sunday evening (or the Monday after, if the phone didn't wake).
         ws = date.fromisoformat(t["days"][0]["date"]) if t.get("days") else None
@@ -1308,7 +1339,12 @@ class Backend:
         then = (feel or {}).get("from_w") or self._aim(user_id, c["ftp"], c["tz"], before=ride_id)["watts"]
         if then and session.get("steps"):
             session = p.targets(session, then, c["hr_zones"])
-        return train.against(session, work)
+        a = train.against(session, work)
+        # Only when the ride was the suggested workout (docs/train-method.md): every planned set is in it. Another
+        # workout that did the same job is read by its own sets and the job, not graded against this one.
+        if a is None or any(r["verdict"] == "missing" for r in a["sets"]):
+            return None
+        return a
 
     def _counted_session(self, user_id: int, ride_id: str) -> Optional[dict]:
         """The planned session (targets filled in) this ride counts as, if any."""
@@ -1376,7 +1412,7 @@ class Backend:
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
-                "jobs": self._jobs(c, f, ride_week), "toward": toward,
+                "jobs": self._jobs(c, f, ride_week), "toward": toward, "left": self._left_this_week(c, ride_week),
                 "load": contrib["load"],
                 "next": nxt, "try": tips[0] if tips else None, "tips": tips,
                 "feel": {"feel": feel["feel"], "hurts": feel["hurts"]} if feel else None,
@@ -1704,16 +1740,26 @@ class Backend:
             if on and f and f.get("first"):
                 loop = repeats.haversine(*f["first"], *f["last"]) <= repeats.LOOP_M
                 name = f"{on[0]['name']} {'loop' if loop else 'ride'}"
-        # A ride that counts as a planned session says so: its name indoors, and what was ridden of it.
-        session = self._counted_session(user_id, ride_id) if (name is None and ride.indoor) or headline is None else None
-        if session and name is None and ride.indoor:
-            name = session["title"]
+        # What the ride was (docs/train-method.md): the suggested session's name when it was that workout, else the
+        # kind of work it did ("Punch"); indoors, where there's no place to name it after.
+        a, jobs = None, None
+        if (name is None and ride.indoor) or headline is None:
+            from rideengine.analysis import train
+            session = self._counted_session(user_id, ride_id)
+            c = self._plan_context(user_id)
+            if session:
+                a = self._ridden_against(user_id, c, session, train.work(ride), ride_id)
+            f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None)
+            jobs = self._jobs(c, f, None) if f else None
+            if name is None and ride.indoor:
+                name = (session["title"] if session and a else
+                        jobs["jobs"][0]["title"] if jobs and jobs["jobs"] else None)
         if headline is None:
             headline = records.headline(self.notes(user_id, ride_id))
-        if headline is None and session:
-            from rideengine.analysis import train
-            a = self._ridden_against(user_id, self._plan_context(user_id), session, train.work(ride), ride_id)
-            headline = a["short"] if a and a.get("short") else None
+        if headline is None and a and a.get("short"):
+            headline = a["short"]
+        if headline is None and jobs and jobs.get("summary"):
+            headline = jobs["summary"]
         home = self.home_point(user_id, [f for f in feats if f["ride_id"] in visible]) if privacy else None
         from rideengine.analysis.collection import is_holo
         return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,

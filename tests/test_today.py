@@ -329,3 +329,20 @@ def test_plan_changes_are_stored_with_their_reason(env):
          "dropped": [{"id": "sun", "title": "Endurance", "line": "No room for endurance this week, so it's let go."}]}
     (ch,) = be._plan_changes(uid, {"today": date(2026, 11, 28)}, week, t)
     assert ch["big"] and ch["line"] == "No room for endurance this week, so it's let go. Next week starts fresh."
+
+
+def test_what_the_rider_sees_after_re_planning(env):
+    """Step 4: the job's shape for any workout, what's left this week, and only the suggested workout graded."""
+    from rideengine.analysis import plan as p
+    assert p.shape(p.workout("surges", 0.0, 55, True)).startswith("Or any ride with 7.5 min or more of hard efforts")
+    assert "Zwift" not in p.shape(p.workout("surges", 0.0, 55, True))
+    assert "140–149 W" in p.shape(p.workout("steady", 0.0, 55, True), [140, 149])
+    week = {"replan": {"schedule": {"wed": "2026-11-25", "fri": "2026-11-27"}},
+            "sessions": [{"id": "mon", "job": "punch", "title": "Surges", "status": "done"},
+                         {"id": "wed", "job": "hold", "title": "Sweet spot", "status": "upcoming"},
+                         {"id": "fri", "job": "punch", "title": "Group ride", "status": "upcoming"}]}
+    assert Backend._left_this_week({"today": date(2026, 11, 24)}, week) == \
+        "Still to come this week: steady work tomorrow and punch on Friday."
+    week["sessions"][1]["status"] = week["sessions"][2]["status"] = "done"
+    week["replan"]["schedule"] = {}
+    assert Backend._left_this_week({"today": date(2026, 11, 28)}, week) == "That's every job this week done."

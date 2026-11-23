@@ -32,10 +32,14 @@ struct TrainView: View {
                             }
                         }
                         if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
+                        if let c = t.changes?.first { PlanChangeLine(change: c, all: t.changes ?? []).arrive(4) }
                         if let days = t.days, !days.isEmpty {
-                            NavigationLink { TrainWeekView() } label: { WeekStrip(days: days, done: t.done, total: t.total, phase: t.phase) }
-                                .buttonStyle(.plain)
-                                .arrive(4)
+                            NavigationLink { TrainWeekView() } label: {
+                                WeekStrip(days: days, done: t.done, total: t.total, phase: t.phase,
+                                          changed: PlanChangeLine.moves(t.changes ?? []))
+                            }
+                            .buttonStyle(.plain)
+                            .arrive(4)
                         }
                         if let goal = t.goal { GoalCard(goal: goal).arrive(5) }
                         Text("Training guidance from your own data, not medical advice.")
@@ -198,6 +202,7 @@ struct TodayHero: View {
             Rectangle().fill(Theme.panelLine).frame(height: 1)
             if let feel = today.feel { line("Feel", TrainText.feelWords(feel)) }
             if let why = today.why, !why.isEmpty { line("Why", why) }
+            if let shape = s.shape { line("Or", String(shape.dropFirst(3)).capitalizedFirst) }
             NavigationLink { SessionDetail(session: s, plan: plan, when: "Today") } label: {
                 HStack(spacing: 6) {
                     Text("The session, step by step").font(Theme.text(14, .medium))
@@ -368,7 +373,7 @@ struct NextCard: View {
                     Text(note).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if !moved.isEmpty {
+            if !moved.isEmpty, (today.changes ?? []).isEmpty {
                 Text("Moved to fit the week: " + moved.map { m in
                     "\(m.title) to \(GoalText.date(m.to)?.formatted(.dateTime.weekday(.wide)) ?? m.to)"
                 }.joined(separator: ", ") + ".")
@@ -428,8 +433,8 @@ struct LatestRideCard: View {
                     .font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
                 if let did = note.jobs?.summary {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        MonoLabel("Did", color: summit)
-                        Text(did).font(Theme.text(15, .medium)).foregroundStyle(.white)
+                        MonoLabel("Did", color: Theme.cobalt)
+                        Text(did).font(Theme.text(15, .medium)).foregroundStyle(Theme.ink)
                     }
                 }
                 if let tip = note.tips.first {
@@ -448,6 +453,104 @@ struct LatestRideCard: View {
     }
 }
 
+/// The week re-planned itself: what changed and why, in a line, until seen (docs/train-method.md "When the plan
+/// changes"). It counts as seen once it has been on screen for a few seconds, or when tapped for the before and
+/// after; it's not shown again after that.
+struct PlanChangeLine: View {
+    let change: TrainToday.Change
+    let all: [TrainToday.Change]
+    @State private var open = false
+    @State private var seen = false
+
+    /// Moved sessions in unseen changes: new day -> old day.
+    static func moves(_ changes: [TrainToday.Change]) -> [String: String] {
+        var out: [String: String] = [:]
+        for c in changes.reversed() {
+            for i in c.items ?? [] where i.kind == "moved" {
+                if let to = i.to, let from = i.from { out[to] = out[from] ?? from }
+            }
+        }
+        return out
+    }
+
+    var body: some View {
+        Button { open = true; markSeen() } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.triangle.swap").font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.cobalt).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(change.line).font(Theme.text(14, .semibold)).foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                    if let r = change.reason {
+                        Text(r).font(Theme.text(13)).foregroundStyle(Theme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.label)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Theme.cobaltSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Shows the week before and after")
+        .task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)    // read: don't show it again next time
+            markSeen()
+        }
+        .sheet(isPresented: $open) { PlanChangeSheet(changes: all).presentationDetents([.medium, .large]) }
+    }
+
+    private func markSeen() {
+        guard !seen else { return }
+        seen = true
+        let ids = all.map(\.id)
+        Task { try? await APIClient().seenChanges(ids) }
+    }
+}
+
+/// The before and after: each change, newest first, with what moved where.
+private struct PlanChangeSheet: View {
+    let changes: [TrainToday.Change]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                MonoLabel("How the week changed")
+                ForEach(changes) { c in
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let r = c.reason { Text(r).font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink) }
+                        ForEach(c.items ?? [], id: \.self) { i in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: i.kind == "moved" ? "arrow.right" : i.kind == "folded" ? "plus.circle" : "minus.circle")
+                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.cobalt)
+                                Text(words(i)).font(Theme.text(14)).foregroundStyle(Theme.inkSoft)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(14).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 16)
+                }
+                Text("The week lays itself out again after every ride and every day that passes, within the limits: rest between hard days, and no more than four days of riding in a row.")
+                    .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(20)
+        }
+        .background(Theme.ground.ignoresSafeArea())
+    }
+
+    private func words(_ i: TrainToday.Change.Item) -> String {
+        if i.kind == "moved", let t = i.title, let f = i.from.flatMap(GoalText.date), let to = i.to.flatMap(GoalText.date) {
+            return "\(t): \(f.formatted(.dateTime.weekday(.wide))) → \(to.formatted(.dateTime.weekday(.wide)))"
+        }
+        return i.line ?? i.title ?? ""
+    }
+}
+
+extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
+
 /// The week as seven days: ridden (filled), a session expected (ring), rest (a dash), today outlined. The first
 /// time you see it, a line runs from Monday to today and the days fill in behind it; the next session ripples.
 struct WeekStrip: View {
@@ -455,8 +558,13 @@ struct WeekStrip: View {
     let done: Int?
     let total: Int?
     let phase: String?
+    /// Days the week just moved a session to, with the day it came from (unseen plan changes): marked, and the
+    /// session slides over from where it was, once.
+    var changed: [String: String] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
+    @State private var slid = false
+    @State private var column: CGFloat = 0
 
     private var todayIndex: Int? { days.firstIndex(where: \.today) }
     /// The next session to ride: today's, if it's still to do, else the first one after today.
@@ -491,15 +599,24 @@ struct WeekStrip: View {
                     }
                 }
                 .background { progressLine }
+                .background { GeometryReader { g in Color.clear.onAppear { column = g.size.width / CGFloat(max(days.count, 1)) } } }
             }
         }
         .padding(16).surfaceCard(radius: 22).contentShape(Rectangle())
         .onFirstSeen(play)
-        .onTabVisit { if !reduceMotion { replay({ shown = false }, then: play) } }
+        .onTabVisit { if !reduceMotion { replay({ shown = false; slid = false }, then: play) } }
     }
 
     private func play() {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.3).delay(0.6)) { shown = true }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.9, dampingFraction: 0.75).delay(2.0)) { slid = true }
+    }
+
+    /// How far a moved session starts from its new day: back where it was, in columns.
+    private func slide(_ d: TrainToday.Day, _ i: Int) -> CGFloat {
+        guard !slid, !reduceMotion, let from = changed[d.date], let f = days.firstIndex(where: { $0.date == from })
+        else { return 0 }
+        return CGFloat(f - i) * column
     }
 
     /// Monday to today: how far into the week you are.
@@ -531,7 +648,13 @@ struct WeekStrip: View {
             case "rode": Circle().fill(Theme.cobalt).frame(width: 18, height: 18)
             case "session": Circle().fill(Theme.surface).frame(width: 16, height: 16)
                 .overlay(Circle().stroke(Theme.cobalt, lineWidth: 2))
+                .offset(x: slide(d, i))
             default: Capsule().fill(Theme.label.opacity(0.5)).frame(width: 12, height: 3)
+            }
+            if changed[d.date] != nil {
+                // Moved here: a small mark under the day.
+                Image(systemName: "arrow.turn.down.right").font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.cobalt).offset(y: 16)
             }
         }
         .scaleEffect(on ? 1 : 0.4)
@@ -839,6 +962,10 @@ struct RideNoteView: View {
                 }
                 if let j = n.jobs, !(j.jobs.isEmpty && j.also.isEmpty) {
                     JobsDone(jobs: j).padding(.top, 8)
+                }
+                if let left = n.left {
+                    Text(left).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                 }
                 if n.counted == nil, n.toward == nil, let k = n.kindTitle {
                     Text("It was \(k.lowercased()) riding, but no open session this week needed it.")
