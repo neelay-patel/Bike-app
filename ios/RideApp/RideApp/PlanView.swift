@@ -145,13 +145,6 @@ enum PlanText {
         guard let t = s.target else { return 0.5 }
         return Double(t.pctFtp[0] + t.pctFtp[1]) / 200
     }
-
-    static func target(_ s: PlanStep) -> String {
-        guard let t = s.target else { return "" }
-        var parts = [t.watts.map { "\($0[0])–\($0[1]) W" } ?? "\(t.pctFtp[0])–\(t.pctFtp[1])% FTP"]
-        if let hr = t.hr { parts.append("♥ \(hr[0])–\(hr[1])") }
-        return parts.joined(separator: " · ")
-    }
 }
 
 // MARK: - Calendar
@@ -351,6 +344,8 @@ private struct WeekSummary: View {
 /// The session's shape: each step a block, as wide as it is long and as tall as it is hard.
 struct IntervalChart: View {
     let steps: [PlanStep]
+    /// The flat steps to show at full strength (the rest dim): a part of the session picked on its page.
+    var highlight: Range<Int>? = nil
     @State private var grown = false
 
     var body: some View {
@@ -363,130 +358,20 @@ struct IntervalChart: View {
                         .fill(PlanText.zoneColor(s.zone))
                         .frame(width: max(1, geo.size.width * CGFloat((s.seconds ?? 0) / total)),
                                height: geo.size.height * CGFloat(min(1, PlanText.intensity(s) / 1.5)))
+                        .opacity(highlight.map { $0.contains(i) ? 1 : 0.28 } ?? 1)
                         .modifier(GrowIn(index: i, count: flat.count, grown: grown))
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .animation(.easeInOut(duration: 0.3), value: highlight)
         .onAppear { grown = true }
         .accessibilityHidden(true)
     }
 }
 
-// MARK: - Session detail
-
-struct SessionDetail: View {
-    @EnvironmentObject var model: AppModel
-    let session: PlanSession
-    let plan: TrainingPlan?
-    @State private var shareURL: URL?
-    @State private var error: String?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    MonoLabel("\(session.day?.formatted(.dateTime.weekday(.wide).day().month(.wide)) ?? session.date) · \(session.time)")
-                    Text(session.title).font(Theme.heading(40)).foregroundStyle(Theme.ink)
-                    Text(session.purpose).font(Theme.text(15)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
-                }
-                if !session.steps.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            HeroStat(label: "Time", value: PlanText.duration(session.seconds), unit: nil)
-                            Spacer()
-                            if let load = session.load { HeroStat(label: "Load", value: "\(Int(load))", unit: nil) }
-                        }
-                        IntervalChart(steps: session.steps).frame(height: 90)
-                        if plan?.ftp.watts == nil {
-                            Text("Watts appear once we know your FTP. Until then, ride by % of FTP and heart rate.")
-                                .font(Theme.text(12)).foregroundStyle(Theme.panelLabel)
-                        }
-                    }
-                    .foregroundStyle(.white).padding(16)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                    MonoLabel("The session")
-                    VStack(spacing: 0) {
-                        ForEach(Array(session.steps.enumerated()), id: \.offset) { i, s in
-                            StepRow(step: s)
-                            if i < session.steps.count - 1 { Rectangle().fill(Theme.line).frame(height: 1) }
-                        }
-                    }
-                    .padding(.horizontal, 14).surfaceCard(radius: 16)
-                }
-                HStack {
-                    Button(session.status == "done" ? "Mark not done" : "Mark as done") {
-                        Task {
-                            await model.run("Couldn't update the session") { try await APIClient().setDone(session.id, session.status != "done") }
-                        }
-                    }
-                    .buttonStyle(SecondaryButton())
-                    Spacer()
-                    if !session.steps.isEmpty && session.steps.contains(where: { $0.set != nil }) {
-                        Button("Export for Zwift") { Task { await export() } }.buttonStyle(SecondaryButton())
-                    }
-                }
-                if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
-                Text("Zwift: put the file in Documents/Zwift/Workouts and Zwift sets your KICKR's resistance for each step.")
-                    .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
-                    .opacity(session.steps.contains(where: { $0.set != nil }) ? 1 : 0)
-            }
-            .padding(16)
-        }
-        .background(Theme.ground.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
-            if let shareURL { ShareSheet(items: [shareURL]).presentationDetents([.medium, .large]) }
-        }
-    }
-
-    private func export() async {
-        do {
-            let data = try await APIClient().zwift(session.id)
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(session.title) \(session.date).zwo")
-            try data.write(to: url)
-            shareURL = url
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-}
-
-private struct StepRow: View {
-    let step: PlanStep
-
-    var body: some View {
-        if let set = step.set, let inner = step.steps {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(set).font(Theme.text(15, .semibold))
-                ForEach(Array(inner.enumerated()), id: \.offset) { _, s in
-                    if s.set != nil { StepRow(step: s).padding(.leading, 12) } else { line(s, indent: true) }
-                }
-            }
-            .padding(.vertical, 10)
-        } else {
-            line(step, indent: false).padding(.vertical, 10)
-        }
-    }
-
-    private func line(_ s: PlanStep, indent: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            RoundedRectangle(cornerRadius: 2).fill(PlanText.zoneColor(s.zone)).frame(width: 4, height: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(s.label ?? "") · \(PlanText.short(s.seconds ?? 0))").font(Theme.text(indent ? 14 : 15, indent ? .regular : .semibold))
-                if let t = s.target {
-                    Text(PlanText.target(s)).font(Theme.mono(12)).foregroundStyle(Theme.cobalt)
-                    Text("\(t.zoneName) · feels \(t.rpe)/10").font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, indent ? 12 : 0)
-        .accessibilityElement(children: .combine)
-    }
-}
+// The session's own page (SessionDetail) is in SessionView.swift.
 
 // MARK: - Settings sheets
 

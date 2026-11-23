@@ -128,11 +128,19 @@ def test_garmin_sync_then_phone_upload_merge(env, tmp_path):
     assert client.post("/v1/connections/garmin_personal/sync?since=2026-01-01").json()["new"] == 0
     assert sorted(garmin.downloads) == [111, 222]
 
-    # The phone uploads the Apple Watch workout for the first ride: it merges.
+    # How the Garmin ride felt, said before the Watch's workout arrives.
+    assert client.put(f"/v1/train/rides/{int(T0)}/feel", json={"feel": "hard"}).status_code in (200, 404)
+    be.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at) VALUES (?, ?, 'hard', 0, 0)",
+                  (uid, str(int(T0))))
+
+    # The phone uploads the Apple Watch workout for the first ride: it merges. The Watch was riding for 17
+    # minutes before the Garmin started, so the ride starts with it, and its id (its start) moves; what the
+    # rider said about it moves too.
     up = client.post("/v1/uploads/apple_health", content=json.dumps(phone_json()))
     assert up.status_code == 201
     ride_id = up.json()["ride_id"]
-    assert ride_id == str(int(T0))
+    assert ride_id == str(int(T0 - 17 * 60))
+    assert be.ride_feel(uid, ride_id)["feel"] == "hard" and be.ride_feel(uid, str(int(T0))) is None
     d = client.get(f"/v1/rides/{ride_id}").json()
     assert d["sources"] == ["apple_watch", "garmin"]
     assert d["provenance"]["channel:lat"] == "garmin" and d["provenance"]["channel:hr"] == "apple_watch"

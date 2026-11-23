@@ -77,6 +77,16 @@ struct Effort: Decodable {
     let folded: [Folded]
     /// Rule-based words, in order: what happened.
     let lines: [String]
+    /// The planned session this ride counts as, planned against ridden (the same as the ride note in Train).
+    let plan: Plan?
+
+    struct Plan: Decodable {
+        let sessionId: String
+        let title: String
+        let summary: String?
+        let lines: [String]
+        let sets: [PlannedSet]
+    }
 
     struct Part: Decodable {
         let rideId: String
@@ -121,6 +131,8 @@ struct RideSummary: Decodable, Identifiable {
     /// Why the server would leave this ride out of lists ("false_start", "empty"), or nil.
     let hidden: String?
     let excluded: [Excluded]?
+    /// Riding another device recorded before the main recording started or after it stopped (merge.py).
+    let added: [Added]?
     /// What's notable about this ride, best first (rule-based, as of the ride's date).
     let notes: [RideNote]?
     /// The effort (session) this ride is part of: the id of its main ride. False starts point at the real one.
@@ -132,6 +144,15 @@ struct RideSummary: Decodable, Identifiable {
         let km: Double
         let minutes: Int
         let peakKmh: Double
+    }
+
+    /// "before" or "after" the main recording: minutes and km from another device.
+    struct Added: Decodable {
+        let where_: String
+        let source: String
+        let minutes: Double
+        let km: Double?
+        enum CodingKeys: String, CodingKey { case where_ = "where", source, minutes, km }
     }
 
     struct Summary: Decodable {
@@ -173,6 +194,18 @@ struct RideNote: Decodable, Hashable {
     let weight: Int
     let pb: Bool            // a personal best at the time
     let milestone: Bool     // a round number crossed
+}
+
+/// One planned set against what was ridden: "5 × 1 min hard", 5 of 5, 219 W against 183–226 W.
+struct PlannedSet: Decodable, Hashable {
+    let set: String
+    let planned: Int
+    let done: Int
+    let power: Int?
+    let watts: [Int]?
+    let target: [Int]?
+    /// on | above | below | done (no target) | missing
+    let verdict: String
 }
 
 /// The You screen: tallies, streaks, personal bests (GET /v1/you).
@@ -341,9 +374,13 @@ struct TrainToday: Decodable {
     let where_: String?
     let then: String?
     let moved: [Moved]?
+    /// The sessions What's Next names (tomorrow's, and the one after), each opening its own page.
+    let next: [NextSession]?
+    let nextNote: String?
 
     enum CodingKeys: String, CodingKey {
         case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
+        case next, nextNote
         case where_ = "where"
     }
     let readiness: String?
@@ -355,6 +392,12 @@ struct TrainToday: Decodable {
     let total: Int?
 
     struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
+    struct NextSession: Decodable, Identifiable {
+        var id: String { session.id }
+        let date: String
+        let when: String
+        let session: PlanSession
+    }
 
     struct Day: Decodable, Identifiable {
         var id: String { date }
@@ -411,7 +454,12 @@ struct TrainNote: Decodable, Identifiable {
     /// The AI coach's words, from the engine's facts (only with the personal-use setting on).
     let story: Story?
     let feel: Feel?
+    /// The session it counts as, planned against ridden, set by set.
+    let against: Against?
+    /// What the rider's "how did it feel" changed (the targets going up after a hard session felt easy).
+    let feelNote: String?
 
+    struct Against: Decodable { let summary: String; let lines: [String]; let sets: [PlannedSet] }
     struct Story: Decodable { let headline: String; let story: String }
     struct Feel: Decodable { let feel: String; let hurts: Bool }
 
@@ -488,6 +536,8 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let load: Double?
     /// The ride that counted as this session, by what it contained, whatever the day (Train, step 1).
     let counted: Counted?
+    /// How to ride it: only on the session's own page (GET v1/plan/sessions/{id}).
+    let guide: SessionGuide?
 
     struct Counted: Decodable, Hashable {
         let rideId: String
@@ -526,6 +576,25 @@ struct PlanTarget: Decodable, Hashable {
     let rpe: Int
     let watts: [Int]?
     let hr: [Int]?
+    /// Cadence to aim for (none for a sprint: wind it up as fast as you can).
+    let rpm: [Int]?
+}
+
+/// How to ride a session, part by part (rideengine/analysis/today.py `guide`), on the session's own page.
+struct SessionGuide: Decodable, Hashable {
+    let why: String
+    let feel: String?
+    let where_: String?
+    let warm: String?
+    let main: [String]
+    let cool: String?
+    let after: String?
+    let bring: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case why, feel, warm, main, cool, after, bring
+        case where_ = "where"
+    }
 }
 
 /// A number or a short text (a climb time like "13:43"), as the goals engine sends them.
@@ -1134,6 +1203,9 @@ struct APIClient {
             _ = try await send(request("PUT", "v1/plan/rides/\(rideId)/counts-as", body: body))
         }
     }
+
+    /// A session with how to ride it (its `guide`).
+    func planSession(_ sessionId: String) async throws -> PlanSession { try await get("v1/plan/sessions/\(sessionId)") }
 
     func setDone(_ sessionId: String, _ done: Bool) async throws {
         _ = try await send(request(done ? "PUT" : "DELETE", "v1/plan/sessions/\(sessionId)/done"))

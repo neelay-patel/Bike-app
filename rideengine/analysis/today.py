@@ -51,6 +51,71 @@ FEEL = {"surges": "Hard parts 8–9 out of 10, too hard to talk; everything else
         "long": "4 out of 10: you could chat all the way. Eat and drink from the first hour.",
         "easy": "2–3 out of 10: legs turning, nothing more."}
 
+# How to ride each part of a session (the session's own page, reached from Today and What's Next; 22 Nov 2026).
+# Plain words (docs/train-words.md): what to do, in order. Outside there's no power meter, so every hard part says
+# how it feels as well as its watts.
+WARM = {"default": "Start easy and build to steady over the warm-up, so the first effort isn't a shock.",
+        "hard": "Start easy and build to steady. In the last few minutes, add two or three 10-second pick-ups so "
+                "the first hard effort isn't a shock.",
+        "sprint": "Start easy and build to steady. In the last few minutes, add three 10-second pick-ups, each "
+                  "a little quicker, to wake your legs up for the sprints."}
+MAIN = {
+    "surges": ["Each hard minute: get up to speed in the first 10 seconds, seated, then hold it. Don't sprint "
+               "the start; the last 20 seconds should be the hardest part to hold.",
+               "The easy minutes between: keep pedalling lightly. They're short on purpose, like a group that "
+               "doesn't wait.",
+               "The 30-second efforts: the same, shorter. Keep the 30 seconds off moving, never stopped."],
+    "steady": ["Settle into the target in the first minute and hold it: steady, not rising. Seated and smooth.",
+               "Heart rate creeping up late in a block at the same effort is normal. If it passes the top of "
+               "its range, ease off a little."],
+    "threshold": ["Start each block at the low end of the target. You should finish wanting one more minute, "
+                  "not hanging on.",
+                  "Even pacing: the last minutes no harder than the first."],
+    "over_unders": ["Overs: lift the effort and hold it. Unders: back to just below, but keep working; it should "
+                    "never quite feel like rest until the easy minutes between sets."],
+    "vo2": ["Reach the target in the first 20 to 30 seconds, then hold it. Your breathing will keep rising "
+            "through each effort: that's the work.",
+            "The easy minutes between: really easy, so the next effort is as good as the first."],
+    "sprint": ["From a rolling start in a middle gear: out of the saddle, wind it up as fast as you can for 15 "
+               "seconds, then sit and spin.",
+               "Take the full easy minutes between. Fresh legs make every sprint count."],
+    "group": ["Sit in a wheel whenever you can, and save your effort for the surges: when the group speeds up, "
+              "answer straight away rather than chasing back on later."],
+    "long": ["A pace you could chat at the whole way. If a hill pushes you hard, shift down and spin.",
+             "Eat something every 30 to 45 minutes from the first hour, and drink to thirst."],
+    "endurance": ["A pace you could chat at the whole way. Smooth pedalling; if a hill pushes you hard, shift "
+                  "down and spin."],
+    "easy": ["Very easy. If it starts to feel like training, ease off."],
+}
+COOL = "Spin easy until your breathing settles. A good time to drink."
+CUT_SHORT = {k: "If you can't reach the target in the last efforts, stop the set there: how well you do them "
+                "matters more than how many." for k in ("surges", "threshold", "over_unders", "vo2", "sprint")}
+
+
+def guide(session: dict) -> dict:
+    """How to ride a session: why, how it should feel, where, and what to do in each part (warm-up, main set,
+    cool-down), plus what to have with you. Words only: the steps and their targets are the session's own."""
+    kind = session.get("kind")
+    if session.get("off_bike"):
+        return {"why": session.get("purpose") or "", "feel": None, "where": None, "warm": None, "main": [],
+                "cool": None, "after": None, "bring": []}
+    minutes = round((session.get("seconds") or 0) / 60)
+    bring = ["A bottle of water."]
+    if minutes > 90:
+        bring = ["Two bottles, one with carbs in it.", "Something to eat every 30 to 45 minutes."]
+    if hard(kind):
+        bring.append("Eat something 1 to 2 hours before: hard efforts go better with fuel in the tank.")
+    steps = session.get("steps") or []
+    warm_kind = "sprint" if kind == "sprint" else "hard" if hard(kind) and kind != "group" else "default"
+    return {"why": WHY.get(kind) or session.get("purpose") or "",
+            "feel": FEEL.get(kind),
+            "where": WHERE.get(kind),
+            "warm": WARM[warm_kind] if steps and steps[0].get("label") == "Warm up" else None,
+            "main": MAIN.get(kind, []),
+            "cool": COOL if steps and steps[-1].get("label") == "Cool down" else None,
+            "after": CUT_SHORT.get(kind),
+            "bring": bring}
+
 
 def hard(kind: str | None) -> bool:
     return kind in HARD

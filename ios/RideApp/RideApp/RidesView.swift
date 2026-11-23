@@ -272,6 +272,10 @@ struct RideDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     MonoLabel("Where each value came from")
                     FlowChips(chips: Format.sourceChips(ride.provenance))
+                    ForEach(Array((ride.added ?? []).enumerated()), id: \.offset) { _, a in
+                        Text(Format.addedLine(a, main: ride.provenance["channel:lat"] ?? ride.provenance["total:distance_m"]))
+                            .font(Theme.text(13)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(useLine).font(Theme.mono(11)).foregroundStyle(Theme.label)
                 }
                 .padding(.horizontal, 4).padding(.top, 4)
@@ -550,6 +554,16 @@ enum Format {
         return names[base] ?? base
     }
 
+    /// "The first 5 min (2.3 km) are from the Apple Watch: Garmin hadn't started yet."
+    static func addedLine(_ a: RideSummary.Added, main: String?) -> String {
+        let mins = Int(a.minutes.rounded())
+        let km = a.km.map { $0 >= 0.1 ? " (\(Format.number($0, decimals: 1)) km)" : "" } ?? ""
+        let other = main.map(sourceName) ?? "the other device"
+        return a.where_ == "before"
+            ? "The first \(mins) min\(km) are from the \(sourceName(a.source)): \(other) hadn't started yet."
+            : "The last \(mins) min\(km) are from the \(sourceName(a.source)): \(other) had stopped."
+    }
+
     static func sourceList(_ sources: [String]) -> String {
         sources.map(sourceName).joined(separator: " + ")
     }
@@ -635,6 +649,11 @@ struct EffortPanel: View {
                         }
                         .padding(.top, 4)
                     }
+                    if let plan = effort?.plan {
+                        Divider().overlay(Theme.line).padding(.vertical, 2)
+                        MonoLabel("Counted as \(plan.title)")
+                        PlannedVsRidden(summary: plan.summary, lines: plan.lines, sets: plan.sets)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16).surfaceCard()
@@ -667,6 +686,7 @@ enum PhaseStyle {
         switch kind {
         case "warm_up": return Theme.sand
         case "structured": return Theme.cobalt
+        case "intervals": return Theme.heart
         case "riding": return Theme.strip
         case "cool_down": return Theme.cobaltSoft
         default: return Theme.line            // pause
@@ -677,6 +697,7 @@ enum PhaseStyle {
         switch kind {
         case "warm_up": return "Warm-up"
         case "structured": return "Workout"
+        case "intervals": return "Intervals"
         case "riding": return "Own riding"
         case "cool_down": return "Cool-down"
         default: return "Pause"

@@ -51,6 +51,8 @@ Rules (Kova's words guide):
 - Speak to the rider as "you". Use "I" only for a decision the coach made.
 - Indoors or out is the rider's choice: never suggest one is better.
 - Don't give medical advice. Don't mention recovery numbers.
+- If the rider said how the ride felt, take it into account; when the facts say what changed because of it (the
+  targets going up after a hard session felt easy), say so in a few words.
 - Don't repeat the "one thing to try" or "what's next": the card shows those separately. But stay consistent
   with the one thing to try: never praise what it asks the rider to change (an easy day ridden hard is not "good
   steady work").

@@ -25,7 +25,8 @@ def test_surges():
     parts += [(25 * 60, 110, 85, 12)]
     c = kind(trainer(T0, parts))
     assert c["kind"] == "surges" and c["confidence"] >= 0.8 and c["facts"]["surges"] == 6
-    assert c["reason"].startswith("6 hard efforts of") and "easier riding between" in c["reason"]
+    assert c["reason"] == "Hard efforts: 6 × 1 min at about 240 W, with easy riding between."
+    assert c["facts"]["sets"] == [{"repeat": 6, "seconds": 60, "rest_s": 120, "power": 240}]
 
 
 def test_sweet_spot_blocks_set_by_the_trainer():
@@ -34,7 +35,7 @@ def test_sweet_spot_blocks_set_by_the_trainer():
         parts += [(12 * 60, 135, 90, 1.5), (5 * 60, 85, 88, 1.5)]
     parts += [(8 * 60, 80, 80, 10)]
     c = kind(trainer(T0, parts))
-    assert c["kind"] == "steady" and "3 steady blocks, 36 minutes" in c["reason"]
+    assert c["kind"] == "steady" and c["reason"].startswith("3 × 12 min at about 135 W")
     assert "just below what you could hold for an hour" in c["reason"]
     assert "FTP" not in c["reason"]                  # plain words (docs/train-words.md)
 
@@ -138,3 +139,55 @@ def test_the_week_in_the_plan_view():
     # Once the week is over, what's left is missed; a session ticked by hand is done.
     status = {s["id"]: Backend._session_status(s, counted, {"w1-sat"}, week, date(2026, 11, 23)) for s in WEEK}
     assert status["w1-tue"] == "missed" and status["w1-sat"] == "done"
+
+
+# --- interval sets: the ride's own page and Train read them the same way ---------------------------------
+
+def surges_as_planned():
+    """Monday's surges as ridden: warm-up, 5 x 1 min hard / 2 min easy, 5 min easy, 5 x 30 s / 30 s, then 25
+    minutes of steadier riding and a short cool-down."""
+    parts = warm(8, 90)
+    for _ in range(5):
+        parts += [(60, 220, 95, 8), (120, 110, 88, 8)]
+    parts += [(5 * 60, 115, 88, 8)]
+    for _ in range(5):
+        parts += [(30, 255, 98, 8), (30, 105, 88, 8)]
+    parts += [(25 * 60, 150, 90, 12), (3 * 60, 70, 80, 5)]
+    return trainer(T0, parts)
+
+
+def test_sets_found_and_told_the_same_everywhere():
+    from rideengine.analysis import effort
+    ride = surges_as_planned()
+    ph = effort.phases(ride)
+    sets = [(x["repeat"], x["seconds"], x["rest_s"]) for x in ph["sets"]]
+    assert sets == [(5, 60, 120), (5, 30, 30)]
+    assert 215 <= ph["sets"][0]["power"] <= 225 and 248 <= ph["sets"][1]["power"] <= 262
+    kinds = [p["kind"] for p in ph["phases"]]
+    assert kinds[:4] == ["warm_up", "intervals", "riding", "intervals"]
+    lines = " ".join(ph["lines"])
+    assert "5 × 1 min hard at" in lines and "2 min easy between" in lines and "5 × 30 s hard at" in lines
+    assert "Easy between the sets, 7 min" in lines and "Then your own riding" in lines
+    assert "likely the climbs" not in lines                       # the efforts aren't mistaken for climbs
+    c = kind(ride)
+    assert c["kind"] == "surges"
+    assert c["reason"].startswith("Hard efforts: 5 × 1 min at about 2") and "and 5 × 30 s at about 2" in c["reason"]
+
+
+def test_ride_against_the_session():
+    from rideengine.analysis import plan as p
+    w = train.work(surges_as_planned())
+    s = p.targets(p.workout("surges", 0.0, 55, True), FTP, None)
+    a = train.against(s, w)
+    assert [(r["set"], r["done"], r["planned"]) for r in a["sets"]] == [("5 × 1 min hard", 5, 5), ("5 × 30 s hard", 5, 5)]
+    assert a["lines"][0].startswith("5 × 1 min hard: all 5, ") and "W planned" in a["lines"][0]
+    assert a["summary"].startswith("Ridden as planned") and a["short"] == "5 × 1 min and 5 × 30 s hard, as planned."
+    assert any(x.startswith("Then 2") and "where the plan had" in x for x in a["lines"])   # steady, not easy
+    # Two of the five minutes missed: said plainly.
+    parts = warm(8, 90)
+    for _ in range(3):
+        parts += [(60, 220, 95, 8), (120, 110, 88, 8)]
+    parts += [(30 * 60, 110, 88, 8)]
+    a = train.against(s, train.work(trainer(T0, parts)))
+    assert a["sets"][0]["done"] == 3 and a["lines"][0].startswith("5 × 1 min hard: 3 of 5")
+    assert a["summary"].startswith("Part of the session") and a["short"].endswith(": 3 of the 10 planned.")

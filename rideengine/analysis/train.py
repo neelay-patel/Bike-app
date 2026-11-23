@@ -14,7 +14,7 @@ confidence. Everything here is calculated; an AI may retell the reasons, never c
 """
 from __future__ import annotations
 
-from .effort import _per_second
+from .effort import _per_second, say_length
 
 STEP_S = 10              # one value every 10 seconds
 ROLL_S = 30              # of 30-second rolling power (or heart rate)
@@ -82,7 +82,7 @@ def work(ride) -> dict:
     n = len(power)
     with_power = bool(ride.provenance.get("channel:power")) and sum(p is not None for p in power) > n / 2
     out: dict = {"basis": None, "p30": [], "h30": [], "c30": [], "blocks": [], "pushes": [], "drift": None,
-                 "minutes": 0}
+                 "minutes": 0, "sets": []}
     cad = _per_second(ride, "cadence", 5)
     if sum(c is not None and c >= 20 for c in cad) >= 300:     # five minutes of cadence or more
         r = _rolling([c if c is not None and c >= 20 else None for c in cad], ROLL_S // 2)
@@ -100,6 +100,9 @@ def work(ride) -> dict:
         # The harder pushes inside the rider's own riding (indoors, mostly the climbs): [start s, seconds, W, rpm].
         out["pushes"] = [[x["start_s"], x["seconds"], x["power"], x["cadence"]] for x in ph["pushes"]]
         out["drift"] = ph["drift"]["bpm"] if ph.get("drift") else None
+        # Interval sets, the same ones the ride's own page describes (effort.find_sets).
+        out["sets"] = [{k: x[k] for k in ("start_s", "end_s", "repeat", "seconds", "rest_s", "power", "rest_power")}
+                       | {"reps": [[r["seconds"], r["power"]] for r in x["reps"]]} for x in ph.get("sets", [])]
     if not with_power and any(h is not None for h in hr):     # heart rate only matters when there's no power
         r = _rolling(hr, ROLL_S // 2)
         out["h30"] = [None if v is None else round(v) for v in r[::STEP_S]]
@@ -139,6 +142,12 @@ def _efforts(p30: list, ftp: float) -> list[dict]:
         else:
             k += 1
     return out
+
+
+def say_sets(xs: list[dict]) -> str:
+    """'5 × 1 min at about 219 W and 5 × 30 s at about 255 W'."""
+    parts = [f"{x['repeat']} × {say_length(x['seconds'])} at about {x['power']} W" for x in xs]
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def _span(seconds: list[int]) -> str:
@@ -219,13 +228,30 @@ def _by_power(w: dict, ftp: float, minutes: int) -> dict:
         if minutes >= 40:
             cand.setdefault("endurance", (0.75, f"{minutes} minutes of steady riding at about {round(ap)} W, "
                                                 f"mostly comfortable{extra}."))
+    # Interval sets found in the ride (effort.find_sets) say it best, in the same words as the ride's own page.
+    sets = w.get("sets") or []
+    if sets:
+        hard_sets = [x for x in sets if x["power"] >= HARD_HOLD * ftp]
+        short = [x for x in hard_sets if SURGE_S[0] <= x["seconds"] <= SURGE_S[1]]
+        mid = [x for x in hard_sets if VO2_S[0] <= x["seconds"] <= VO2_S[1] and x["power"] >= VO2_LEVEL * ftp]
+        if sum(x["repeat"] for x in short) >= 4:
+            cand["surges"] = (min(0.97, 0.65 + 0.04 * sum(x["repeat"] for x in short)),
+                              f"Hard efforts: {say_sets(short)}, with easy riding between.")
+        if sum(x["repeat"] for x in mid) >= 3:
+            cand["vo2"] = (0.93, f"Hard efforts: {say_sets(mid)}, with easy riding between.")
+        for kind, band, words in (("steady", SS, "just below"), ("threshold", THR, "right at")):
+            held_sets = [x for x in sets if x["seconds"] >= 300 and band[0] * ftp <= x["power"] < band[1] * ftp]
+            by_blocks = (ss_block_min if kind == "steady" else thr_block_min) >= 12   # the trainer's blocks say it
+            if sum(x["repeat"] * x["seconds"] for x in held_sets) >= 12 * 60 and not by_blocks:
+                cand[kind] = (0.95, f"{say_sets(held_sets)}: {words} what you could hold for an hour.")
     if not cand:
         cand["mixed"] = (0.5, f"{minutes} minutes of varied riding at about {round(ap)} W, hard and easy mixed "
                               f"with no set pattern.")
     kind = max(cand, key=lambda k: cand[k][0])
     conf, reason = cand[kind]
     return {"kind": kind, "confidence": round(conf, 2), "reason": reason,
-            "facts": {"minutes": minutes, "avg_w": round(ap), "np_w": round(np_), "ftp_w": round(ftp),
+            "facts": {"minutes": minutes, "sets": [{k: x[k] for k in ("repeat", "seconds", "rest_s", "power")}
+                                                   for x in sets], "avg_w": round(ap), "np_w": round(np_), "ftp_w": round(ftp),
                       "surges": len(surges), "longer_efforts": len(longer), "sweet_spot_min": round(ss_min),
                       "threshold_min": round(thr_min), "steady_blocks": len(w.get("blocks", []))}}
 
@@ -333,3 +359,79 @@ def match_week(sessions: list[dict], rides: list[dict], overrides: dict | None =
         paired.add(r["ride_id"])
     extra = [r["ride_id"] for r in free_rides if r["ride_id"] not in paired]
     return {"counted": counted, "extra": extra}
+
+
+# --- the ride against the session it counts as ----------------------------------------------------------
+
+def against(session: dict, w: dict) -> dict | None:
+    """Planned against ridden, set by set: the session (with its targets filled in, plan.targets) and the ride's
+    stored work. {"summary", "lines": [...], "sets": [{"set", "planned", "done", "power", "watts", "target",
+    "verdict"}]}, or None when the session has no sets or the ride no power."""
+    import math
+    planned = [st for st in session.get("steps") or [] if st.get("repeat")]
+    sets = w.get("sets") or []
+    if not planned or w.get("basis") != "power":
+        return None
+    rows, lines, used = [], [], -1
+    for ps in planned:
+        on = ps["steps"][0]
+        label = f"{ps['repeat']} × {say_length(on['seconds'])} {on['label'].lower()}"
+        tgt = (on.get("target") or {}).get("watts")
+        k = next((i for i, x in enumerate(sets) if i > used and abs(math.log(x["seconds"] / on["seconds"])) < 0.45), None)
+        if k is None:
+            rows.append({"set": label, "planned": ps["repeat"], "done": 0, "power": None, "watts": None,
+                         "target": tgt, "verdict": "missing", "length": say_length(on["seconds"]),
+                         "label": on["label"].lower()})
+            lines.append(f"{label}: not found in the ride.")
+            continue
+        used = k
+        x = sets[k]
+        ws = [r[1] for r in x["reps"]]
+        verdict = ("above" if tgt and x["power"] > tgt[1] else "below" if tgt and x["power"] < tgt[0]
+                   else "on" if tgt else "done")
+        rows.append({"set": label, "planned": ps["repeat"], "done": x["repeat"], "power": x["power"],
+                     "watts": [min(ws), max(ws)], "target": tgt, "verdict": verdict,
+                     "length": say_length(on["seconds"]), "label": on["label"].lower()})
+        count = (f"all {ps['repeat']}" if x["repeat"] == ps["repeat"] else
+                 f"{x['repeat']} of {ps['repeat']}" if x["repeat"] < ps["repeat"] else
+                 f"{x['repeat']} ({ps['repeat']} planned)")
+        text = f"{label}: {count}, {x['power']} W on average"
+        if tgt:
+            text += {"above": f", above the {tgt[0]}–{tgt[1]} W planned", "below": f", under the {tgt[0]}–{tgt[1]} W planned",
+                     "on": f", inside the {tgt[0]}–{tgt[1]} W planned"}[verdict]
+        lines.append(text + ".")
+    # What came after the last set, against the easy riding the plan had there.
+    last = sets[used] if used >= 0 else None
+    tail = planned[-1]
+    idx = (session.get("steps") or []).index(tail)
+    after_plan = [st for st in (session.get("steps") or [])[idx + 1:] if not st.get("repeat")]
+    p30 = w.get("p30") or []
+    if last and after_plan and p30:
+        a = last["end_s"] // STEP_S
+        vals = [v for v in p30[a:] if v is not None]
+        if len(vals) * STEP_S >= 5 * 60:
+            mins = round(len(vals) * STEP_S / 60)
+            avg = round(sum(vals) / len(vals))
+            plan_min = round(sum(st["seconds"] for st in after_plan) / 60)
+            hi = max(((st.get("target") or {}).get("watts") or [0, 0])[1] for st in after_plan)
+            if hi and avg > 1.1 * hi:
+                lines.append(f"Then {mins} min at {avg} W, where the plan had {plan_min} min easy (up to {hi} W).")
+    hit = [r for r in rows if r["verdict"] != "missing"]
+    full = all(r["done"] >= r["planned"] for r in rows)
+    if not hit:
+        summary = "The session's sets weren't found in this ride."
+    elif full and all(r["verdict"] in ("on", "done") for r in hit):
+        summary = "Ridden as planned."
+    elif full and all(r["verdict"] in ("on", "above", "done") for r in hit):
+        summary = "Ridden as planned, harder than the targets."
+    elif full:
+        summary = "Every set done, some under the targets."
+    else:
+        summary = "Part of the session: " + ", ".join(f"{r['done']} of {r['planned']} {r['set'].split(' ', 2)[2]}"
+                                                     for r in rows if r["done"] < r["planned"]) + "."
+    # In a few words, for the ride card: "5 × 1 min and 5 × 30 s hard, as planned."
+    short = None
+    if hit:
+        short = " and ".join(f"{r['done']} × {r['length']}" for r in hit) + f" {hit[0]['label']}"
+        short += ", as planned." if full else f": {sum(r['done'] for r in rows)} of the {sum(r['planned'] for r in rows)} planned."
+    return {"summary": summary, "short": short, "lines": lines, "sets": rows}

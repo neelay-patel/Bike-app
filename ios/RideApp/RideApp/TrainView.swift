@@ -28,7 +28,7 @@ struct TrainView: View {
                                 FlowThread()
                                     .padding(.leading, 24).padding(.vertical, 5)
                                     .arrive(2)
-                                NextCard(text: then, moved: t.moved ?? []).arrive(2)
+                                NextCard(today: t, text: then, plan: model.plan).arrive(2)
                             }
                         }
                         if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
@@ -136,7 +136,7 @@ private struct Labelled: View {
 }
 
 /// A key number in the dot-matrix hero type, with its label under it.
-private struct HeroNumber: View {
+struct HeroNumber: View {
     let value: String
     let label: String
     var color: Color = .white
@@ -198,7 +198,7 @@ struct TodayHero: View {
             Rectangle().fill(Theme.panelLine).frame(height: 1)
             if let feel = today.feel { line("Feel", TrainText.feelWords(feel)) }
             if let why = today.why, !why.isEmpty { line("Why", why) }
-            NavigationLink { SessionDetail(session: s, plan: plan) } label: {
+            NavigationLink { SessionDetail(session: s, plan: plan, when: "Today") } label: {
                 HStack(spacing: 6) {
                     Text("The session, step by step").font(Theme.text(14, .medium))
                     Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
@@ -332,12 +332,31 @@ struct SessionShapeChart: View {
 }
 
 struct NextCard: View {
+    let today: TrainToday
     let text: String
-    let moved: [TrainToday.Moved]
+    let plan: TrainingPlan?
+
+    private var items: [TrainToday.NextSession] { today.next ?? [] }
+    private var moved: [TrainToday.Moved] { today.moved ?? [] }
+
+    /// Tomorrow is rest when What's Next names a later session first (and tomorrow is still this week).
+    private var restTomorrow: Bool { text.hasPrefix("Tomorrow: rest") && items.first?.when != "Tomorrow" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Labelled(label: "What's next", text: text, textColor: Theme.ink)
+        VStack(alignment: .leading, spacing: 10) {
+            if items.isEmpty {
+                Labelled(label: "What's next", text: text, textColor: Theme.ink)
+            } else {
+                MonoLabel("What's next")
+                if restTomorrow { restRow }
+                ForEach(items) { n in
+                    NavigationLink { SessionDetail(session: n.session, plan: plan, when: n.when) } label: { row(n) }
+                        .buttonStyle(.plain)
+                }
+                if let note = today.nextNote {
+                    Text(note).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if !moved.isEmpty {
                 Text("Moved to fit the week: " + moved.map { m in
                     "\(m.title) to \(GoalText.date(m.to)?.formatted(.dateTime.weekday(.wide)) ?? m.to)"
@@ -346,6 +365,39 @@ struct NextCard: View {
             }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+    }
+
+    private var restRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                MonoLabel("Tomorrow", color: Theme.cobalt)
+                Text("Rest").font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Theme.ground.opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// One session ahead: when, its name and main set, its shape; opens its own page.
+    private func row(_ n: TrainToday.NextSession) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                MonoLabel(n.when, color: Theme.cobalt)
+                Text(n.session.title).font(Theme.text(17, .semibold)).foregroundStyle(Theme.ink)
+                Text(TrainText.brief(n.session)).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if !n.session.steps.isEmpty {
+                IntervalChart(steps: n.session.steps).frame(width: 92, height: 30)
+            }
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.label)
+        }
+        .padding(12)
+        .background(Theme.ground.opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the session, step by step")
     }
 }
 
@@ -596,6 +648,13 @@ enum TrainText {
         feel.replacingOccurrences(of: #" \(about [^)]*\)"#, with: "", options: .regularExpression)
     }
 
+    /// A session in a few words: how long, then its main set ("60 min · 5 × 1 min hard").
+    static func brief(_ s: PlanSession) -> String {
+        let time = PlanText.duration(s.seconds)
+        guard let set = s.steps.first(where: { $0.set != nil })?.set else { return s.offBike ? s.purpose : time }
+        return "\(time) · \(set.components(separatedBy: " / ").first ?? set)"
+    }
+
     /// A session in one plain line, from its main set.
     static func line(_ s: PlanSession) -> String? {
         if let set = s.steps.first(where: { $0.set != nil })?.set {
@@ -682,8 +741,14 @@ struct RideNoteView: View {
                     .font(Theme.text(13, .medium)).foregroundStyle(Theme.heart).frame(minHeight: 36)
             }
             .buttonStyle(.plain)
-            Text(n.feel == nil ? "Your answer shapes the next few days." : "Thanks: the next days take it into account.")
-                .font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+            if let changed = n.feelNote {
+                Label(changed, systemImage: "arrow.up.right")
+                    .font(Theme.text(14)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(n.feel == nil ? "Your answer shapes the next few days, and the watts of your hard sessions."
+                                   : "Thanks: the next days take it into account.")
+                    .font(Theme.text(12)).foregroundStyle(Theme.inkMuted)
+            }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
     }
@@ -745,6 +810,9 @@ struct RideNoteView: View {
                 }
                 if let r = n.counted?.reason ?? n.reason {
                     Text(r).font(Theme.text(14)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
+                }
+                if let a = n.against {
+                    PlannedVsRidden(summary: a.summary, lines: a.lines, sets: a.sets).padding(.top, 6)
                 }
                 if n.counted == nil, let k = n.kindTitle {
                     Text("It was \(k.lowercased()) riding, but no open session this week needed it.")

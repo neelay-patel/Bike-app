@@ -4,6 +4,11 @@
    (e.g. Garmin + Apple Watch both recording one ride).
 2. merge(): pick a base timeline, then fill each channel and total from the source
    that wins for it (see sources.py), recording where each value came from.
+
+The ride runs from the first device's riding to the last's: where the base recording hadn't started yet (a Watch
+started before a Zwift course) or had already stopped, another device's samples carry it. At every moment each
+channel comes from the best source recording at that moment, and a total from the source that wins it, plus the
+next best for the stretches that source didn't record. No device names in here: sources.py ranks them.
 """
 from __future__ import annotations
 
@@ -16,6 +21,12 @@ from .model import CHANNELS, Recording, Ride, Sample, haversine, power_series
 from .sources import ALIGN_TOLERANCE, CHANNEL_PRIORITY, DEFAULT_TOLERANCE, TOTAL_PRIORITY, rank
 
 MIN_OVERLAP = 0.5  # share of the shorter recording that must overlap
+MIN_ADDED_S = 60   # a stretch before or after the base recording with less riding than this isn't added
+RIDING_W = 10      # riding, for an added stretch: power at least this, or cadence at least RIDING_RPM, or speed
+RIDING_RPM = 30    # over 30 s at least RIDING_MS (walking about with the bike, or fiddling with a head unit,
+RIDING_MS = 2.5    # isn't riding)
+MAX_STOP_S = 120   # an added stretch is the riding right up to the base recording: a longer stop ends it (waiting
+                   # at the car, the drive there, a false start before)
 
 
 def overlap_share(a: Recording, b: Recording) -> float:
@@ -54,7 +65,8 @@ def _pick(priority: list[str], candidates: list[Recording]) -> Recording | None:
 
 
 def _values(rec: Recording, channel: str) -> tuple[list[float], list[float]]:
-    pts = [(s.t, getattr(s, channel)) for s in rec.samples if getattr(s, channel) is not None]
+    # A heart rate of 0 is no reading (a head unit with no strap paired writes zeros: Zwift via Garmin).
+    pts = [(s.t, v) for s in rec.samples if (v := getattr(s, channel)) is not None and (v > 0 or channel != "hr")]
     return [p[0] for p in pts], [p[1] for p in pts]
 
 
@@ -64,31 +76,51 @@ def merge(group_: list[Recording]) -> Ride:
     with_pow = [r for r in group_ if "power" in r.channels()]
     base = (_pick(CHANNEL_PRIORITY["lat"], with_pos) or _pick(CHANNEL_PRIORITY["power"], with_pow)
             or max(group_, key=lambda r: r.duration))
-    base_samples = [s for s in base.samples if any(getattr(s, c) is not None for c in CHANNELS if c != "hr")] \
-        or base.samples
+    base_samples = _riding_samples(base) or base.samples
     samples = [replace(s) for s in base_samples]
     provenance: dict[str, str] = {}
 
+    # The riding other devices recorded before the base started or after it stopped.
+    added = []
+    for where in ("before", "after"):
+        stretch = _stretch(group_, base, samples[0].t, samples[-1].t, where)
+        if stretch:
+            rec, extra = stretch
+            samples = [replace(s) for s in extra] + samples if where == "before" else samples + [replace(s) for s in extra]
+            added.append({"where": where, "source": rec.source, "start": extra[0].t, "end": extra[-1].t,
+                          "minutes": round((extra[-1].t - extra[0].t) / 60, 1)})
+
     for ch in CHANNELS:
-        having = [r for r in group_ if ch in r.channels()]
-        winner = _pick(CHANNEL_PRIORITY.get(ch, []), having)
-        if winner is None:
+        having = sorted((r for r in group_ if ch in r.channels()),
+                        key=lambda r: (rank(CHANNEL_PRIORITY.get(ch, []), r.source), -len(r.samples)))
+        if not having:
             for s in samples:
                 setattr(s, ch, None)
             continue
-        provenance[f"channel:{ch}"] = winner.source
-        # Always align from the winner's own samples, even when it is the base: some sources
-        # (Apple Health) store heart rate as separate samples between the route points.
-        ts, vs = _values(winner, ch)
+        provenance[f"channel:{ch}"] = having[0].source
+        # Always align from each source's own samples, even the base's: some sources (Apple Health) store
+        # heart rate as separate samples between the route points. At each moment, the best source that
+        # recorded it; the next best fills where it didn't (it hadn't started, had stopped, or dropped out).
         tol = ALIGN_TOLERANCE.get(ch, DEFAULT_TOLERANCE)
+        series = [(r.source, *_values(r, ch)) for r in having]
+        filled: dict[str, int] = {}
         for s in samples:
-            k = bisect.bisect_left(ts, s.t)
-            best = None
-            for j in (k - 1, k):
-                if 0 <= j < len(ts) and abs(ts[j] - s.t) <= tol:
-                    if best is None or abs(ts[j] - s.t) < abs(ts[best] - s.t):
-                        best = j
-            setattr(s, ch, vs[best] if best is not None else None)
+            value = None
+            for src, ts, vs in series:
+                k = bisect.bisect_left(ts, s.t)
+                best = None
+                for j in (k - 1, k):
+                    if 0 <= j < len(ts) and abs(ts[j] - s.t) <= tol:
+                        if best is None or abs(ts[j] - s.t) < abs(ts[best] - s.t):
+                            best = j
+                if best is not None:
+                    value = vs[best]
+                    if src != having[0].source:
+                        filled[src] = filled.get(src, 0) + 1
+                    break
+            setattr(s, ch, value)
+        for src in filled:
+            provenance[f"fill:{ch}:{src}"] = src
 
     # Leave out stretches that weren't riding (a bike computer left on in a car).
     full = samples
@@ -140,6 +172,8 @@ def merge(group_: list[Recording]) -> Ride:
 
     if excluded:
         _totals_without_cuts(totals, provenance, full, samples, cuts)
+    elif added:
+        _totals_for_added(totals, provenance, samples, added, group_, all(r.indoor for r in group_))
 
     # Heart-rate and power summaries come from the merged channels, over the base window; a ride
     # that is one recording keeps that device's own heart-rate figures (they leave out pauses).
@@ -170,7 +204,99 @@ def merge(group_: list[Recording]) -> Ride:
 
     return Ride(start=samples[0].t, end=samples[-1].t, sport=base.sport,
                 indoor=all(r.indoor for r in group_), samples=samples, totals=totals,
-                provenance=provenance, recordings=[r.origin for r in group_], excluded=excluded)
+                provenance=provenance, recordings=[r.origin for r in group_], excluded=excluded, added=added)
+
+
+def _riding_samples(rec: Recording) -> list[Sample]:
+    """A recording's samples that carry more than heart rate (a wearable stores heart rate between them)."""
+    return [s for s in rec.samples if any(getattr(s, c) is not None for c in CHANNELS if c != "hr")]
+
+
+def _riding_flags(samples: list[Sample]) -> list[bool]:
+    """Whether each sample is riding: pedalling (power or cadence), or 30 s of speed at a riding pace."""
+    ts = [s.t for s in samples if s.speed is not None]
+    cs = [0.0]
+    for s in samples:
+        if s.speed is not None:
+            cs.append(cs[-1] + s.speed)
+    out = []
+    for s in samples:
+        if (s.power or 0) >= RIDING_W or (s.cadence or 0) >= RIDING_RPM:
+            out.append(True)
+            continue
+        a, b = bisect.bisect_left(ts, s.t - 15), bisect.bisect_right(ts, s.t + 15)
+        out.append(b - a >= 3 and (cs[b] - cs[a]) / (b - a) >= RIDING_MS)
+    return out
+
+
+def _stretch(group_: list[Recording], base: Recording, t0: float, t1: float, where: str):
+    """(recording, samples) of the riding another device recorded before t0 or after t1: the one that reaches
+    furthest out, from its first (or to its last) moment of moving. None if there's under MIN_ADDED_S of it."""
+    best = None
+    for r in group_:
+        if r is base:
+            continue
+        own = [s for s in _riding_samples(r) if (s.t < t0 - 1 if where == "before" else s.t > t1 + 1)]
+        once: dict[int, Sample] = {}
+        for x in own:                       # one moment a second (a wearable stores each channel apart)
+            once.setdefault(int(x.t), x)
+        own = list(once.values())
+        flags = _riding_flags(own)
+        riding = [i for i, f in enumerate(flags) if f]
+        # Walk out from the base recording while the riding carries on without a long stop.
+        order = riding[::-1] if where == "before" else riding
+        edge, last = None, t0 if where == "before" else t1
+        for i in order:
+            if abs(last - own[i].t) > MAX_STOP_S:
+                break
+            edge, last = i, own[i].t
+        if edge is None:
+            continue
+        lo, hi = (edge, len(own)) if where == "before" else (0, edge + 1)
+        own, flags = own[lo:hi], flags[lo:hi]
+        ridden = sum(min(b.t - a.t, 5) for a, b, f in zip(own, own[1:], flags) if f)
+        if ridden < MIN_ADDED_S:
+            continue
+        reach = t0 - own[0].t if where == "before" else own[-1].t - t1
+        if best is None or reach > best[0]:
+            best = (reach, r, own)
+    return (best[1], best[2]) if best else None
+
+
+def _covers(group_: list[Recording], source: str, a: float, b: float) -> bool:
+    return any(r.source == source and r.start <= a + 5 and r.end >= b - 5 for r in group_)
+
+
+def _speed_distance(samples: list[Sample]) -> float:
+    return sum(a.speed * min(b.t - a.t, 5) for a, b in zip(samples, samples[1:]) if a.speed is not None)
+
+
+def _totals_for_added(totals: dict, provenance: dict, samples: list[Sample], added: list[dict],
+                      group_: list[Recording], indoor: bool) -> None:
+    """A total from a device that didn't record an added stretch gets that stretch's share, worked out from the
+    merged samples there (the next best source's): distance, moving and elapsed time, climbing outdoors (indoors
+    only a ride game's climbing counts), and energy from power for calories. Recorded as "extra:<total>"."""
+    for a in added:
+        seg = [s for s in samples if a["start"] <= s.t <= a["end"]]
+        if len(seg) < 2:
+            continue
+        gap = (seg[0].t if a["where"] == "after" else samples[samples.index(seg[-1]) + 1].t) - \
+              (samples[samples.index(seg[0]) - 1].t if a["where"] == "after" else seg[-1].t)
+        with_pos = sum(s.lat is not None for s in seg) > len(seg) / 2
+        dist = track_distance(seg) if with_pos else _speed_distance(seg)
+        a["km"] = round(dist / 1000, 1)
+        extra = {"distance_m": dist, "moving_s": clean.moving_seconds(seg), "elapsed_s": seg[-1].t - seg[0].t + gap}
+        if not indoor and any(s.ele is not None for s in seg):
+            extra["ascent_m"] = elevation_gain(seg)
+        if any(s.power is not None for s in seg):
+            extra["calories"] = _energy_kj(seg)
+        for key, value in extra.items():
+            src = provenance.get(f"total:{key}", "")
+            if key not in totals or src.startswith("derived") or _covers(group_, src, a["start"], a["end"]):
+                continue
+            if value:
+                totals[key] = round(totals[key] + value, 1 if key.endswith("_m") else 0)
+                provenance[f"extra:{key}"] = a["source"]
 
 
 def power_stats(samples: list[Sample]) -> dict:

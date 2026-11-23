@@ -39,6 +39,13 @@ COOL_LEVEL = 0.7
 PUSH_SHARE = 1.12        # a push: 30 s power (or torque: same watts, lower cadence) this far above the riding's median ...
 PUSH_MIN_S = 45          # ... for at least this long
 SERIES_STEP_S = 15
+# Interval sets: hard efforts repeated with easy riding between ("5 x 1 min hard, 2 min easy"), ridden freely
+# or set by the trainer. Found without knowing the rider's FTP, by contrast with the riding around each effort.
+SET_CAND = 1.15          # a candidate effort: 10 s power at least this share of the ride's 40th percentile ...
+SET_MIN_S = 12           # ... for at least this long
+SET_CONTRAST = 1.3       # ... and this much harder than the riding either side of it
+SET_REP_MAX_S = 20 * 60
+NICE_S = [10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480, 600, 720, 900, 1200]
 
 
 # --- grouping ---------------------------------------------------------------------------------------
@@ -148,6 +155,123 @@ def _avg(xs, lo, hi, positive=False):
     return sum(v) / len(v) if v else None
 
 
+# --- interval sets ----------------------------------------------------------------------------------
+
+def nice(seconds: float) -> int:
+    """The planned-looking length nearest to a measured one (64 s -> 60 s, 33 s -> 30 s)."""
+    return min(NICE_S, key=lambda x: abs(math.log(max(seconds, 1) / x)))
+
+
+def find_sets(power: list, paused: list, cad: list | None = None, hr: list | None = None) -> list[dict]:
+    """Interval sets in per-second power: at least three hard efforts of about the same length with about the
+    same easy riding between (two will do for efforts of 5 minutes or more). Each set:
+    {"start_s", "end_s", "repeat", "seconds", "rest_s" (both rounded to a planned-looking length), "power"
+    (the efforts' average), "rest_power", "reps": [{"start_s", "seconds", "power", "cadence", "hr_max"}]}."""
+    n = len(power)
+    ped = [None if paused[k] or power[k] is None or power[k] < 20 else power[k] for k in range(n)]
+    vals = sorted(v for v in ped if v is not None)
+    if len(vals) < 600:
+        return []
+    base = vals[int(len(vals) * 0.4)]
+    S = _Sums(ped)
+    s10 = [S.mean(k - 5, k + 5) for k in range(n)]
+    s3 = [S.mean(k - 1, k + 2) for k in range(n)]
+    runs = _runs([v is not None and v >= SET_CAND * base for v in s10], SET_MIN_S)
+    merged: list[list[int]] = []
+    for a, b in runs:
+        if merged and a - merged[-1][1] <= 4:
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    efforts = []
+    for i, (a, b) in enumerate(merged):
+        if b - a > SET_REP_MAX_S:
+            continue
+        lo = merged[i - 1][1] if i else 0
+        hi = merged[i + 1][0] if i + 1 < len(merged) else n
+        around = [x for x in (S.mean(max(lo, a - 120), a) if a - max(lo, a - 120) >= 10 else None,
+                              S.mean(b, min(hi, b + 120)) if min(hi, b + 120) - b >= 10 else None) if x is not None]
+        core = S.mean(a, b)
+        if not around or core is None or core < SET_CONTRAST * (sum(around) / len(around)):
+            continue
+        # Sharpen the edges: where 3 s power crosses halfway between the effort and the riding around it.
+        mid = (core + sum(around) / len(around)) / 2
+        o = max(lo, a - 15)
+        span = _runs([s3[k] is not None and s3[k] >= mid for k in range(o, min(hi, b + 15))], 1)
+        if span:
+            x, y = max(span, key=lambda r: r[1] - r[0])
+            a, b = o + x, o + y
+        efforts.append({"a": a, "b": b, "power": S.mean(a, b)})
+
+    def close(st, out):
+        secs = sorted(e["b"] - e["a"] for e in st)
+        med = secs[len(secs) // 2]
+        if len(st) >= 3 or (len(st) == 2 and med >= 300):
+            out.append(st)
+
+    groups: list[list[dict]] = []
+    cur: list[dict] = []
+    for e in efforts:
+        if cur:
+            secs = sorted(x["b"] - x["a"] for x in cur)
+            med = secs[len(secs) // 2]
+            gaps = [cur[j + 1]["a"] - cur[j]["b"] for j in range(len(cur) - 1)]
+            gap = e["a"] - cur[-1]["b"]
+            avg_w = sum(x["power"] for x in cur) / len(cur)
+            same = (abs((e["b"] - e["a"]) - med) <= 0.35 * med + 8 and gap <= min(max(3.5 * med, 60), 600)
+                    and (not gaps or abs(gap - sorted(gaps)[len(gaps) // 2]) <= 0.5 * sorted(gaps)[len(gaps) // 2] + 10)
+                    and 0.75 * avg_w <= e["power"] <= 1.33 * avg_w)
+            if same:
+                cur.append(e)
+                continue
+            close(cur, groups)
+        cur = [e]
+    if cur:
+        close(cur, groups)
+
+    def avg(xs, a, b):
+        v = [x for x in (xs or [])[a:b] if x is not None and x > 0]
+        return sum(v) / len(v) if v else None
+
+    out = []
+    for st in groups:
+        secs = sorted(e["b"] - e["a"] for e in st)
+        gaps = sorted(st[j + 1]["a"] - st[j]["b"] for j in range(len(st) - 1))
+        rest_w = [S.mean(st[j]["b"], st[j + 1]["a"]) for j in range(len(st) - 1)]
+        reps = [{"start_s": e["a"], "seconds": e["b"] - e["a"], "power": round(e["power"]),
+                 "cadence": round(c) if (c := avg(cad, e["a"], e["b"])) else None,
+                 "hr_max": round(max(h)) if (h := [x for x in (hr or [])[e["a"]:e["b"] + 30] if x]) else None}
+                for e in st]
+        # Harder with the cadence well down is the trainer's climbs on a virtual course, not intervals.
+        rc = [c for j in range(len(st) - 1) if (c := avg(cad, st[j]["b"], st[j + 1]["a"]))]
+        ec = [r["cadence"] for r in reps if r["cadence"]]
+        if rc and ec and sum(ec) / len(ec) < sum(rc) / len(rc) - 10:
+            continue
+        inner = [S.sd(e["a"] + 8, e["b"] - 8) for e in st if e["b"] - e["a"] >= 40]
+        held = bool(inner) and all(x is not None and x <= max(STEADY_SD_W, 0.04 * e["power"]) * 1.5
+                                   for x, e in zip(inner, st))
+        out.append({"start_s": st[0]["a"], "end_s": st[-1]["b"], "repeat": len(st), "held": held,
+                    "seconds": nice(secs[len(secs) // 2]), "rest_s": nice(gaps[len(gaps) // 2]),
+                    "power": round(sum(r["power"] * r["seconds"] for r in reps) / sum(r["seconds"] for r in reps)),
+                    "rest_power": round(sum(w for w in rest_w if w) / max(1, sum(1 for w in rest_w if w))),
+                    "reps": reps})
+    return out
+
+
+def say_length(seconds: int) -> str:
+    return f"{seconds} s" if seconds < 60 else f"{seconds // 60} min" if seconds % 60 == 0 else f"{seconds / 60:g} min"
+
+
+def say_set(s: dict, hard_word: str = "hard") -> str:
+    """'5 × 1 min hard at 188–229 W (211 on average), 2 min easy between'."""
+    ws = [r["power"] for r in s["reps"]]
+    watts = f"at {min(ws)}–{max(ws)} W ({s['power']} on average)" if max(ws) - min(ws) >= 5 else f"at {s['power']} W"
+    if s["seconds"] >= 300:
+        hard_word = "steady"
+    return (f"{s['repeat']} × {say_length(s['seconds'])} {hard_word} {watts}, "
+            f"{say_length(s['rest_s'])} easy between")
+
+
 # --- phases -----------------------------------------------------------------------------------------
 
 def phases(ride) -> dict:
@@ -174,7 +298,7 @@ def phases(ride) -> dict:
             paused[k] = True
     working = [sig[k] for k in range(n) if not paused[k] and sig[k] is not None]
     if len(working) < 120:
-        return {"basis": basis, "phases": [], "pushes": [], "drift": None, "lines": [], "series": []}
+        return {"basis": basis, "phases": [], "pushes": [], "drift": None, "lines": [], "series": [], "sets": []}
     level = median(working)
     sums = _Sums([None if paused[k] else sig[k] for k in range(n)])
     first = next(k for k in range(n) if not paused[k] and sig[k] is not None)
@@ -233,6 +357,15 @@ def phases(ride) -> dict:
         if len(st) >= STRUCTURED_MIN_BLOCKS and span >= STRUCTURED_MIN_S and held >= 0.6 * span:
             structured.append(st)
 
+    # Interval sets (power only), ridden freely or set by the trainer: where one overlaps a workout of steady
+    # blocks, the set tells it better ("5 x 1 min hard, 2 min easy between").
+    sets = find_sets(power, paused, cad, hr) if with_power else []
+    free_sets = [x for x in sets if x["start_s"] >= warm_end - 60 and x["end_s"] <= cool_start + 60]
+    structured = [st for st in structured
+                  if not any(x["start_s"] < st[-1]["end"] and st[0]["start"] < x["end_s"] for x in free_sets)]
+    if free_sets and free_sets[0]["start_s"] - first <= 25 * 60 and warm_end > first:
+        warm_end = free_sets[0]["start_s"]      # the easy riding before the first set is the warm-up
+
     # Label every second, then cut into phases.
     label = ["riding"] * n
     for k in range(n):
@@ -245,6 +378,9 @@ def phases(ride) -> dict:
     for st in structured:
         for k in range(st[0]["start"], st[-1]["end"]):
             label[k] = "structured"
+    for x in free_sets:
+        for k in range(x["start_s"], x["end_s"]):
+            label[k] = "intervals"
     for a, b in pauses:
         if b - a < PAUSE_PHASE_S:
             continue
@@ -281,6 +417,8 @@ def phases(ride) -> dict:
         if kind == "structured":
             out["blocks"] = [{"start_s": b_["start"], "seconds": b_["end"] - b_["start"], "power": round(b_["power"])}
                              for st in structured for b_ in st if a <= b_["start"] < b]
+        if kind == "intervals":
+            out["sets"] = [x for x in free_sets if a <= x["start_s"] < b]
         return out
 
     found = [stats(k, a, b) for k, a, b in tidy]
@@ -318,6 +456,7 @@ def phases(ride) -> dict:
         climbs = [{k: c[k] for k in ("km_into_ride", "length_m", "gain_m", "grade", "seconds", "avg_hr", "avg_power")}
                   | {"start_s": round(c["date_t"] - ride.start)} for c in find_climbs(ride)]
     out = {"basis": basis, "indoor": ride.indoor, "phases": found, "pushes": pushes, "drift": drift, "series": series,
+           "sets": sets,
            "climbs": climbs, "short_pauses": {"count": len(short), "seconds": sum(b - a for a, b in short)}}
     out["lines"] = lines(out)
     return out
@@ -374,6 +513,8 @@ def _joined(found: list[dict]) -> list[dict]:
             merged["hr_max"] = max(x for x in (a.get("hr_max"), f.get("hr_max"), 0) if x is not None) or None
             if "blocks" in a:
                 merged["blocks"] = a["blocks"] + f.get("blocks", [])
+            if "sets" in a:
+                merged["sets"] = a["sets"] + f.get("sets", [])
             out[-1] = merged
         else:
             out.append(dict(f))
@@ -397,7 +538,7 @@ def lines(p: dict) -> list[str]:
     found = _joined(p["phases"])
     watts = p["basis"] == "power"
     work = [f for f in found if f["kind"] in ("structured", "riding")]
-    for f in found:
+    for i, f in enumerate(found):
         k = f["kind"]
         if k == "warm_up":
             out.append(f"Warm-up, {_min(f['minutes'])}" + (f", at about {f['power']} W." if watts and f["power"]
@@ -417,8 +558,17 @@ def lines(p: dict) -> list[str]:
                 text += f"{len(bl)} steady blocks of {_length([b['seconds'] for b in bl])} at {_range(ws, 'W')}"
             out.append(text + f", each held within a few watts (the trainer setting the power), at {f['cadence']} rpm. "
                               f"Heart rate {f['hr']} on average, up to {f['hr_max']}.")
+        elif k == "intervals":
+            for x in f.get("sets", []):
+                cs = [r["cadence"] for r in x["reps"] if r["cadence"]]
+                out.append(say_set(x) + (", each held within a few watts (the trainer setting the power)" if x["held"] else "")
+                           + (f", at {round(sum(cs) / len(cs))} rpm." if cs else "."))
+        elif k == "riding" and f["minutes"] >= 2 and i + 1 < len(found) and found[i + 1]["kind"] == "intervals" \
+                and i and found[i - 1]["kind"] == "intervals":
+            out.append(f"Easy between the sets, {_min(f['minutes'])}" +
+                       (f" at {f['power']} W." if watts and f["power"] else "."))
         elif k == "riding" and f["minutes"] >= 2:
-            after = any(w["kind"] == "structured" and w["end_s"] <= f["start_s"] for w in work)
+            after = any(w["kind"] in ("structured", "intervals") and w["end_s"] <= f["start_s"] for w in found)
             head = "Then your own riding" if after else "Riding"
             if watts and f["power"]:
                 text = f"{head}, {_min(f['minutes'])} at {f['power']} W, {f['cadence']} rpm, heart rate {f['hr']}"

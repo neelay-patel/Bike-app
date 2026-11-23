@@ -351,8 +351,25 @@ class Backend:
                 self.db.execute("INSERT OR REPLACE INTO rides (user_id, ride_id, start_t, end_t, data, brief) "
                                 "VALUES (?, ?, ?, ?, ?, ?)", (user_id, rid, r.start, r.end, db.pack(r.to_json()),
                                                               json.dumps(brief(rid, r))))
+            # A ride's id is its start, which moves when another device's recording joins it (one started
+            # earlier): what the rider said about the ride moves with it.
+            new_ids = {str(int(r.start)): r for r in rides}
+            for old in removed:
+                if old in new_ids:
+                    continue
+                hit = next((rid for rid, r in new_ids.items() if r.start - 60 <= float(old) <= r.end), None)
+                if hit:
+                    self._move_ride_refs(user_id, old, hit)
             self.insights.rides_changed(user_id, removed, rides)
         return rides
+
+    def _move_ride_refs(self, user_id: int, old: str, new: str) -> None:
+        """The rider's own words about a ride (how it felt, which session it counts as) and the coach's saved
+        story follow it to its new id. Where the new id already has its own, that one stays."""
+        for table, col, a, b in (("ride_feel", "ride_id", old, new), ("plan_matches", "ride_id", old, new),
+                                 ("coach_texts", "key", f"ride:{old}", f"ride:{new}")):
+            self.db.execute(f"UPDATE OR IGNORE {table} SET {col} = ? WHERE user_id = ? AND {col} = ?", (b, user_id, a))
+            self.db.execute(f"DELETE FROM {table} WHERE user_id = ? AND {col} = ?", (user_id, a))
 
     def rebuild_all(self, user_id: int) -> int:
         """Re-merge every ride from the stored recordings (after the engine changes). Returns rides."""
@@ -436,7 +453,17 @@ class Backend:
                 at = datetime.fromtimestamp(part["summary"]["start"], self.insights.tz(user_id)).strftime("%H:%M")
                 lines.append(f"Part {n + 1}, from {at}:")
             lines += part["phases"]["lines"]
-        return {"effort_id": ids[e["main"]], "parts": parts, "folded": folded, "lines": lines,
+        # The session this ride counts as, planned against ridden (the same words as the ride note in Train).
+        plan = None
+        from rideengine.analysis import train
+        for k in e["parts"]:
+            s_ = self._counted_session(user_id, ids[k])
+            if s_:
+                a = self._ridden_against(user_id, self._plan_context(user_id), s_, train.work(rides[k]), ids[k])
+                plan = {"session_id": s_["id"], "title": s_["title"], "summary": a["summary"] if a else None,
+                        "lines": a["lines"] if a else [], "sets": a["sets"] if a else []}
+                break
+        return {"effort_id": ids[e["main"]], "parts": parts, "folded": folded, "lines": lines, "plan": plan,
                 "use": parts[0]["use"] if len(parts) == 1 else {
                     u: {"allowed": all(p["use"][u]["allowed"] for p in parts),
                         "blocked_by": sorted({b for p in parts for b in p["use"][u]["blocked_by"]})} for u in ("ai", "share")}}
@@ -576,9 +603,39 @@ class Backend:
         me = self.me(user_id)
         rest = self.recovery(user_id)["resting_hr"].get("usual")
         max_hr = p.max_hr_estimate([f.get("max_hr") for f in recent])
+        ftp = p.ftp_estimate(me.get("ftp"), power)
         return {"user_id": user_id, "tz": tz, "today": today, "feats": vfeats, "starts": starts,
-                "ftp": p.ftp_estimate(me.get("ftp"), power), "hr_zones": p.hr_zones(max_hr, rest),
+                "ftp": ftp, "aim": self._aim(user_id, ftp, tz), "hr_zones": p.hr_zones(max_hr, rest),
                 "max_hr": max_hr, "resting_hr": rest}
+
+    AIM_STEP = 0.05          # a hard session that felt easy raises the targets this much ...
+    AIM_MAX = 0.15           # ... up to this far above the estimate
+
+    def _aim(self, user_id: int, ftp: dict, tz, skip: Optional[str] = None, before: Optional[str] = None) -> dict:
+        """The watts the session targets start from: what the rider could hold for about an hour (`ftp`: their
+        own number or the estimate), adjusted by how the last hard session felt. Felt easy: 5% above what that
+        session's targets started from; good or hard: kept there; wrecked: 5% below. Never below the
+        estimate, never more than 15% above it. Worked out from the stored taps, so changing a tap undoes it."""
+        est = ftp.get("watts")
+        with self.lock:
+            rows = self.db.execute("SELECT ride_id, feel, ftp_w FROM ride_feel WHERE user_id = ? AND ftp_w IS NOT NULL",
+                                   (user_id,)).fetchall()
+        rows = sorted((r for r in rows if r["ride_id"] != skip and (before is None or int(r["ride_id"]) < int(before))),
+                      key=lambda r: int(r["ride_id"]))
+        if not est or not rows:
+            return {**ftp, "base": est}
+        r = rows[-1]
+        floor = r["ftp_w"] * {"easy": 1 + self.AIM_STEP, "wrecked": 1 - self.AIM_STEP}.get(r["feel"], 1.0)
+        aim = round(max(est, min(floor, est * (1 + self.AIM_MAX))))
+        if aim == est:
+            return {**ftp, "base": est}
+        day = datetime.fromtimestamp(int(r["ride_id"]), tz).strftime("%A")
+        why = (f"{day}'s hard session felt easy" if r["feel"] == "easy" else
+               f"{day}'s hard session felt about right at these watts")
+        raised = f"raised from {est} W because {why}"
+        return {"watts": aim, "base": est, "raised": raised,
+                "source": ftp["source"] if ftp.get("source") == "yours" else f"{ftp['source']}, {raised}",
+                "because": {"ride_id": r["ride_id"], "feel": r["feel"]}}
 
     def _active_plan(self, user_id: int) -> Optional[dict]:
         with self.lock:
@@ -645,7 +702,7 @@ class Backend:
             counted = self._count_week(c, w, moved)
             sessions = []
             for s in w["sessions"]:
-                t = p.targets(s, c["ftp"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
+                t = p.targets(s, c["aim"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
                 # Plans made before 21 Nov 2026 named winter sessions for the trainer; indoors or out is the
                 # rider's choice.
                 t["title"] = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}.get(t["title"], t["title"])
@@ -662,7 +719,7 @@ class Backend:
                           (date.fromisoformat(w["week_start"]) + timedelta(days=7)).isoformat()), None)
         return {"plan_id": plan["plan_id"], "goal_id": plan.get("goal_id"), "start": plan["start"],
                 "ready_by": plan["ready_by"], "days": plan["days"], "times": plan["times"],
-                "weekly_hours": plan["weekly_hours"], "ftp": c["ftp"], "hr_zones": c["hr_zones"],
+                "weekly_hours": plan["weekly_hours"], "ftp": c["aim"], "hr_zones": c["hr_zones"],
                 "max_hr": c["max_hr"], "resting_hr": c["resting_hr"],
                 "zones": {z: {"name": v["name"], "pct_ftp": [round(v["ftp"][0] * 100), round(v["ftp"][1] * 100)]}
                           for z, v in p.ZONES.items()},
@@ -791,30 +848,28 @@ class Backend:
                     "session": None, "why": f"Your plan starts {when}. Until then, ride as you like.",
                     "feel": None, "then": (f"{td.WEEKDAY[date.fromisoformat(nxt['date']).weekday()]}: {td.short(nxt)}."
                                            if nxt else ""),
-                    "moved": [], "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": None}
+                    "moved": [], "next": [self._next_item(nxt, c["today"])] if nxt else [],
+                    "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": None}
         t = td.plan_today(week["sessions"], recent, c["today"], date.fromisoformat(week["week_start"]), readiness)
         session = next((s for s in week["sessions"] if s["id"] == t["session_id"]), None)
-        feel = None
-        if session:
-            feel = td.FEEL.get(session["kind"])
-            hard = [x for st in session["steps"] for x in (st.get("steps") or [st])
-                    if (x.get("target") or {}).get("watts") and x.get("zone") not in ("Z1", "Z2")]
-            if hard and feel:
-                lo = min(x["target"]["watts"][0] for x in hard)
-                hi = max(x["target"]["watts"][1] for x in hard)
-                watts = f"about {lo}–{hi} W" if lo != hi else f"about {lo} W"
-                head, sep, rest = feel.partition(";") if ";" in feel else feel.rstrip(".").partition("\0")
-                feel = f"{head} ({watts}){sep}{rest}" + ("" if sep else ".")
+        feel = _feel(session) if session else None
         latest = None
         rides_back = sorted((r for r in recent if r["date"] >= c["today"] - timedelta(days=2)),
                             key=lambda r: r["date"], reverse=True)
         if rides_back:
             latest = self.train_ride_note(user_id, rides_back[0]["ride_id"], _today=t)
+        # The sessions What's Next names (tomorrow's and the one after it), so each can open its own page.
+        by_id = {s["id"]: s for s in week["sessions"]}
+        upcoming = [by_id[sid] for sid, d in sorted(t["schedule"].items(), key=lambda x: x[1])
+                    if d > c["today"].isoformat() and sid in by_id and not by_id[sid].get("off_bike")]
+        tomorrow = (c["today"] + timedelta(days=1)).isoformat()
+        upcoming = upcoming[:2] if upcoming and t["schedule"].get(upcoming[0]["id"]) == tomorrow else upcoming[:1]
         if t["then"].startswith("A new week starts tomorrow"):      # name the new week's first session
             nxt = next((w for w in view["weeks"] if date.fromisoformat(w["week_start"]) > c["today"]), None)
             first = min((s for s in nxt["sessions"] if not s["off_bike"]), key=lambda s: s["date"], default=None) if nxt else None
             if first:
                 t["then"] = f"A new week starts tomorrow, with {td.short(first)}."
+                upcoming.append(first)
         # The week, day by day, for the strip on Today: ridden, a session expected, or rest.
         ws = date.fromisoformat(week["week_start"])
         titles = {s["id"]: s["title"] for s in week["sessions"]}
@@ -835,8 +890,27 @@ class Backend:
                 "days": days, "done": week["done"], "total": week["total"],
                 "phase": week["phase"], "state": t["state"], "greeting": td.greeting(recent, c["today"], readiness, t["state"]),
                 "session": session, "why": t["why"], "feel": feel, "where": td.WHERE.get(session["kind"]) if session else None,
-                "then": t["then"], "moved": t["moved"],
+                "then": t["then"], "moved": t["moved"], "next": [self._next_item(x, c["today"], t["schedule"].get(x["id"])) for x in upcoming],
+                "next_note": next((f"{x['title']} is still open this week." for x in week["sessions"]
+                                   if x.get("off_bike") and x.get("status") != "done"), None),
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
+
+    @staticmethod
+    def _next_item(session: dict, today: date, on: Optional[str] = None) -> dict:
+        """One session What's Next names: on its day this week (it may have moved from its planned day)."""
+        from rideengine.analysis import today as td
+        d = date.fromisoformat(on or session["date"])
+        return {"date": d.isoformat(), "when": td._day_name(d, today) if d - today < timedelta(days=7)
+                else d.strftime("%A %-d %B"), "session": session}
+
+    def session_brief(self, user_id: int, session_id: str) -> Optional[dict]:
+        """A session with how to ride it (td.guide) and how it should feel, with the watts when known: the
+        session's own page in the app."""
+        from rideengine.analysis import today as td
+        s = self.plan_session(user_id, session_id)
+        if s is None:
+            return None
+        return {**s, "guide": {**td.guide(s), "feel": _feel(s)}}
 
     BRIEF_AT = (7, 30)       # the morning brief, the rider's local time
     REVIEW_AT = (18, 0)      # the Sunday review, from this time on Sunday
@@ -979,6 +1053,24 @@ class Backend:
             out.update(schedule=t["schedule"], moved=t["moved"])
         return out
 
+    def _ridden_against(self, user_id: int, c: dict, session: dict, work: Optional[dict], ride_id: str) -> Optional[dict]:
+        """Planned against ridden, judged by the targets the ride was ridden to (not ones raised since)."""
+        from rideengine.analysis import plan as p
+        from rideengine.analysis import train
+        if not work:
+            return None
+        feel = self.ride_feel(user_id, ride_id)
+        then = (feel or {}).get("from_w") or self._aim(user_id, c["ftp"], c["tz"], before=ride_id)["watts"]
+        if then and session.get("steps"):
+            session = p.targets(session, then, c["hr_zones"])
+        return train.against(session, work)
+
+    def _counted_session(self, user_id: int, ride_id: str) -> Optional[dict]:
+        """The planned session (targets filled in) this ride counts as, if any."""
+        view = self.plan_view(user_id)
+        return next((s for w in (view or {}).get("weeks", []) for s in w["sessions"]
+                     if (s.get("counted") or {}).get("ride_id") == ride_id), None)
+
     def train_ride_note(self, user_id: int, ride_id: str, _today: Optional[dict] = None) -> Optional[dict]:
         """After a ride (docs/train-words.md): what you did, what it counted as, what it means for the goal,
         what's next, and one thing to try. Every number comes from the engine."""
@@ -992,12 +1084,13 @@ class Backend:
         ftp = c["ftp"]["watts"]
         cls = (train.classify(f["work"], ftp, c["max_hr"], c["resting_hr"]) if f.get("work")
                else {"kind": None, "confidence": 0, "reason": "", "facts": {}})
-        counted, intent = None, None
+        counted, intent, against = None, None, None
         view = self.plan_view(user_id)
         if view:
             for w in view["weeks"]:
                 for s in w["sessions"]:
                     if (s.get("counted") or {}).get("ride_id") == ride_id:
+                        against = self._ridden_against(user_id, c, s, f.get("work"), ride_id)
                         planned = date.fromisoformat(s["date"])
                         counted = {"session_id": s["id"], "title": s["title"], "kind": s["kind"],
                                    "planned_for": td.WEEKDAY[planned.weekday()] if planned != d else None,
@@ -1032,8 +1125,11 @@ class Backend:
         feel = self.ride_feel(user_id, ride_id)
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
-                "reason": cls.get("reason"), "counted": counted, "means": means, "load": contrib["load"],
-                "next": nxt, "try": tips[0] if tips else None, "tips": tips, "feel": feel}
+                "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
+                "load": contrib["load"],
+                "next": nxt, "try": tips[0] if tips else None, "tips": tips,
+                "feel": {"feel": feel["feel"], "hurts": feel["hurts"]} if feel else None,
+                "feel_note": self._feel_note(c["aim"], ride_id, feel, *self._next_hard(view, c["today"], _today))}
         # The AI coach's words (backend/coach.py), from facts the engine made: only for riders with the
         # personal-use setting on; the engine's words above stay as the fallback.
         if self.coach.allowed(user_id):
@@ -1071,14 +1167,49 @@ class Backend:
                                   for m in goal.get("markers", [])]} if goal else None),
             "rides_in_the_two_weeks_before": recent,
             "one_thing_to_try_shown_separately": note["tips"][0]["title"] if note["tips"] else None,
-            "how_it_felt": note["feel"],
+            "how_it_felt": (note["feel"] or {}).get("feel"),
+            "what_changed_because_of_how_it_felt": note.get("feel_note"),
+            "against_the_plan": ({"summary": note["against"]["summary"], "sets": note["against"]["lines"]}
+                                 if note.get("against") else None),
         }
 
     def ride_feel(self, user_id: int, ride_id: str) -> Optional[dict]:
         with self.lock:
-            row = self.db.execute("SELECT feel, hurts FROM ride_feel WHERE user_id = ? AND ride_id = ?",
+            row = self.db.execute("SELECT feel, hurts, ftp_w FROM ride_feel WHERE user_id = ? AND ride_id = ?",
                                   (user_id, ride_id)).fetchone()
-        return {"feel": row["feel"], "hurts": bool(row["hurts"])} if row else None
+        return {"feel": row["feel"], "hurts": bool(row["hurts"]), "from_w": row["ftp_w"]} if row else None
+
+    @staticmethod
+    def _next_hard(view: Optional[dict], today: date, t: Optional[dict] = None) -> tuple[Optional[dict], Optional[str]]:
+        """The next hard session still to ride (targets filled in), and the day it's on: as What's Next has it
+        (sessions move to fit the week), else its planned day."""
+        from rideengine.analysis import today as td
+        for n in (t or {}).get("next") or []:
+            if td.hard(n["session"]["kind"]) and n["session"].get("steps"):
+                return n["session"], n["when"]
+        s = next((s for w in (view or {}).get("weeks", []) for s in w["sessions"]
+                  if s["date"] > today.isoformat() and s["status"] in ("upcoming", "open", "today")
+                  and td.hard(s["kind"]) and s.get("steps")), None)
+        return s, td.WEEKDAY[date.fromisoformat(s["date"]).weekday()] if s else None
+
+    @staticmethod
+    def _feel_note(aim: dict, ride_id: str, feel: Optional[dict], nxt: Optional[dict] = None,
+                   when: Optional[str] = None) -> Optional[str]:
+        """What the rider's tap changed, when it changed the targets: said with the next hard session's watts,
+        not as a new number for what they could hold for an hour (that stays the estimate)."""
+        if not feel or (aim.get("because") or {}).get("ride_id") != ride_id or feel["feel"] != "easy":
+            return None
+        was = feel.get("from_w") or aim["base"]
+        if aim["watts"] <= was:
+            return None
+        pct = round((aim["watts"] / was - 1) * 100)
+        text = f"You said it felt easy, so I've raised the watts of your hard sessions by {pct}%."
+        hard = [x for st in (nxt or {}).get("steps") or [] for x in (st.get("steps") or [st])
+                if (x.get("target") or {}).get("watts") and x.get("zone") not in ("Z1", "Z2")]
+        if hard and when:
+            lo, hi = min(x["target"]["watts"][0] for x in hard), max(x["target"]["watts"][1] for x in hard)
+            text += f" {when}'s {nxt['title'].lower()}: about {lo}–{hi} W."
+        return text + " Tell me how that one feels."
 
     FEELS = ("easy", "good", "hard", "wrecked")
 
@@ -1090,9 +1221,27 @@ class Backend:
         with self.lock:
             if self.db.execute("SELECT 1 FROM rides WHERE user_id = ? AND ride_id = ?", (user_id, ride_id)).fetchone() is None:
                 return False
-            self.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at) VALUES (?, ?, ?, ?, ?)",
-                            (user_id, ride_id, feel, 1 if hurts else 0, db.now()))
+            old = self.db.execute("SELECT ftp_w FROM ride_feel WHERE user_id = ? AND ride_id = ?",
+                                  (user_id, ride_id)).fetchone()
+        # A hard ride keeps the watts its targets started from (the first tap's), so how it felt can move them.
+        ftp_w = old["ftp_w"] if old and old["ftp_w"] else self._hard_ride_aim(user_id, ride_id)
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at, ftp_w) "
+                            "VALUES (?, ?, ?, ?, ?, ?)", (user_id, ride_id, feel, 1 if hurts else 0, db.now(), ftp_w))
         return True
+
+    def _hard_ride_aim(self, user_id: int, ride_id: str) -> Optional[float]:
+        """For a hard ride with power: the watts the targets started from before this ride's tap."""
+        from rideengine.analysis import train
+        from rideengine.analysis import today as td
+        c = self._plan_context(user_id)
+        f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None)
+        if not f or not f.get("work") or f["work"].get("basis") != "power" or not c["ftp"]["watts"]:
+            return None
+        kind = train.classify(f["work"], c["ftp"]["watts"], c["max_hr"], c["resting_hr"])["kind"]
+        if not td.hard(kind) or kind == "mixed":
+            return None
+        return self._aim(user_id, c["ftp"], c["tz"], skip=ride_id)["watts"]
 
     def plan_session(self, user_id: int, session_id: str) -> Optional[dict]:
         view = self.plan_view(user_id)
@@ -1304,8 +1453,16 @@ class Backend:
             if on and f and f.get("first"):
                 loop = repeats.haversine(*f["first"], *f["last"]) <= repeats.LOOP_M
                 name = f"{on[0]['name']} {'loop' if loop else 'ride'}"
+        # A ride that counts as a planned session says so: its name indoors, and what was ridden of it.
+        session = self._counted_session(user_id, ride_id) if (name is None and ride.indoor) or headline is None else None
+        if session and name is None and ride.indoor:
+            name = session["title"]
         if headline is None:
             headline = records.headline(self.notes(user_id, ride_id))
+        if headline is None and session:
+            from rideengine.analysis import train
+            a = self._ridden_against(user_id, self._plan_context(user_id), session, train.work(ride), ride_id)
+            headline = a["short"] if a and a.get("short") else None
         home = self.home_point(user_id, [f for f in feats if f["ride_id"] in visible]) if privacy else None
         from rideengine.analysis.collection import is_holo
         return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,
@@ -1817,7 +1974,7 @@ def _shape(points: list, n: int = 64) -> list[list[float]]:
     return [[round((x - min(xs) + ox) / span, 3), round((y - min(ys) + oy) / span, 3)] for x, y in xy]
 
 
-BRIEF_VERSION = 1   # bump when describe() or summary() change what they return: briefs are then redone
+BRIEF_VERSION = 2   # bump when describe() or summary() change what they return: briefs are then redone
 
 
 class _Shape:
@@ -1840,7 +1997,7 @@ def brief(ride_id: str, ride: Ride) -> dict:
 def describe(ride_id: str, ride: Ride) -> dict:
     """A ride without its samples: summary, where each value came from, what it may be used for."""
     return {"ride_id": ride_id, "summary": summary(ride), "sources": sorted(sources_used(ride.provenance)),
-            "provenance": ride.provenance, "recordings": ride.recordings, "excluded": ride.excluded,
+            "provenance": ride.provenance, "recordings": ride.recordings, "excluded": ride.excluded, "added": ride.added,
             "use": {u: {"allowed": allowed(ride.provenance, u),
                         "blocked_by": sorted(blocked_sources(ride.provenance, u))} for u in ("ai", "share")}}
 
@@ -1848,3 +2005,18 @@ def describe(ride_id: str, ride: Ride) -> dict:
 def records_entries(feats: list[dict], tz):
     from rideengine.analysis import records
     return records.entries_from_features(feats, tz)
+
+
+def _feel(session: dict) -> Optional[str]:
+    """How a session should feel (today.FEEL), with the hard parts' watts when they're known."""
+    from rideengine.analysis import today as td
+    feel = td.FEEL.get(session.get("kind"))
+    hard = [x for st in session.get("steps") or [] for x in (st.get("steps") or [st])
+            if (x.get("target") or {}).get("watts") and x.get("zone") not in ("Z1", "Z2")]
+    if hard and feel:
+        lo = min(x["target"]["watts"][0] for x in hard)
+        hi = max(x["target"]["watts"][1] for x in hard)
+        watts = f"about {lo}–{hi} W" if lo != hi else f"about {lo} W"
+        head, sep, rest = feel.partition(";") if ";" in feel else feel.rstrip(".").partition("\0")
+        feel = f"{head} ({watts}){sep}{rest}" + ("" if sep else ".")
+    return feel

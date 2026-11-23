@@ -140,6 +140,25 @@ def test_contribution_new_bests():
 
 # --- the endpoints ------------------------------------------------------------------------------------
 
+def w_first(client):
+    return next(s for s in client.get("/v1/train/week").json()["sessions"] if not s["off_bike"])
+
+
+def test_guide_and_cadence():
+    from rideengine.analysis import plan
+    w = plan.targets(plan.workout("surges", 0, 60, True), 300, None)
+    hard = w["steps"][1]["steps"][0]["target"]
+    assert hard["rpm"] == [95, 105] and "rpm" in w["steps"][0]["target"]
+    sprint = plan.targets(plan.workout("sprint", 0, 60, True), 300, None)
+    assert "rpm" not in sprint["steps"][1]["steps"][0]["target"]          # wind it up: no cadence for a sprint
+    g = td.guide({**w, "id": "x"})
+    assert g["warm"].startswith("Start easy") and g["cool"] and len(g["main"]) == 3 and g["after"]
+    long = td.guide(plan.targets(plan.workout("long", 0, 150, False), None, None))
+    assert any("carbs" in b for b in long["bring"]) and long["after"] is None
+    for words in (g, long):
+        assert not any(bad in json.dumps(words) for bad in ("FTP", "TSS", "ERG", "load", "Z2"))
+
+
 def test_train_endpoints(env):
     be, uid, client, _ = env
     assert client.get("/v1/train/today").json() == {"state": "no_plan"}
@@ -149,6 +168,15 @@ def test_train_endpoints(env):
     t = client.get("/v1/train/today").json()
     assert t["state"] in ("session", "rest", "done") and t["greeting"] and t["goal"]["title"]
     assert {m["id"] for m in t["goal"]["markers"]} <= {"sustained", "punch"}
+    # What's Next names its sessions, and each opens its own page: how to ride it, part by part.
+    for n in t["next"]:
+        assert n["when"] and n["session"]["steps"] and n["date"] > t["date"]
+    sid = (t["next"][0]["session"] if t["next"] else t["session"] or w_first(client))["id"]
+    brief = client.get(f"/v1/plan/sessions/{sid}").json()
+    g = brief["guide"]
+    assert g["why"] and g["bring"] and (g["main"] or brief["off_bike"])
+    if not brief["off_bike"]:
+        assert g["feel"] and "FTP" not in json.dumps(g)
     w = client.get("/v1/train/week").json()
     assert w["sessions"] and "rides" in w and "schedule" in w
     rid = json.loads(be.db.execute("SELECT data FROM ride_features WHERE user_id = ? LIMIT 1", (uid,)).fetchone()[0])["ride_id"] \
@@ -173,3 +201,35 @@ def test_coach_inbox(env):
     for m in box["items"] + box["scheduled"]:
         words = (m["title"] + " " + m["body"]).lower()
         assert "hrv" not in words and "bpm" not in words and "resting heart" not in words
+
+
+def test_how_a_hard_session_felt_moves_the_targets(env):
+    """Felt easy: the next hard sessions start 5% higher than that session did; good or hard keeps them there;
+    wrecked eases them back; never below the estimate or more than 15% above it. Changing the tap undoes it."""
+    from zoneinfo import ZoneInfo
+    be, uid, _, _ = env
+    tz = ZoneInfo("America/Toronto")
+    est = {"watts": 151, "source": "estimated from your best 20 minutes"}
+    assert be._aim(uid, est, tz)["watts"] == 151
+
+    def tap(ride_id, feel, ftp_w):
+        be.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at, ftp_w) VALUES (?, ?, ?, 0, 0, ?)",
+                      (uid, ride_id, feel, ftp_w))
+
+    tap("1795444201", "easy", 151)                        # Monday 23 Nov 2026
+    a = be._aim(uid, est, tz)
+    assert a["watts"] == 159 and a["base"] == 151 and "Monday's hard session felt easy" in a["source"] and a["source"].startswith("estimated")
+    nxt = {"date": "2026-11-25", "title": "Sweet spot", "steps": [
+        {"zone": "Z1", "target": {"watts": [64, 87]}},
+        {"set": "2 × 10 min", "steps": [{"zone": "SS", "target": {"watts": [140, 149]}}, {"zone": "Z1"}]}]}
+    note = be._feel_note(a, "1795444201", {"feel": "easy", "hurts": False, "from_w": 151}, nxt, "Wednesday")
+    assert note == ("You said it felt easy, so I've raised the watts of your hard sessions by 5%. "
+                    "Wednesday's sweet spot: about 140–149 W. Tell me how that one feels.")
+    tap("1795617001", "good", 159)                        # Wednesday: felt right at the raised watts
+    assert be._aim(uid, est, tz)["watts"] == 159
+    tap("1795617001", "wrecked", 159)
+    assert be._aim(uid, est, tz)["watts"] == 151          # 5% below 159, but never below the estimate
+    tap("1795617001", "easy", 170)
+    assert be._aim(uid, est, tz)["watts"] == round(151 * 1.15)
+    be.db.execute("DELETE FROM ride_feel WHERE user_id = ?", (uid,))
+    assert be._aim(uid, est, tz)["watts"] == 151

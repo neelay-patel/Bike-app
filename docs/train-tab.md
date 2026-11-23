@@ -55,6 +55,24 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
   `GET /v1/train/week?start=`, `GET /v1/train/rides/{id}` (the ride note: what you did, counted as, what it means,
   what's next, one thing to try). Before the plan's first week, Today says when it starts. Not yet: the change log
   stored over time (moves are worked out fresh each day), and "how did it feel" feeding back (step 5).
+- **Each session's own page** (Neelay, 22 Nov 2026: "Surges, 5 × 1 min. Not much to work with"): What's Next lists
+  the sessions it names (`next` on `/v1/train/today`), each a tap away from its page (`SessionView.swift`, also from
+  Today and the week): why, how it should feel with watts, the shape with a time scale (tap Warm up, Main set or Cool
+  down to light it up), then each part with how to ride it (`today.guide`) and every step's targets (watts, heart
+  rate for efforts over 2 minutes, cadence from `plan.CADENCE`, effort out of 10), where, and what to bring. No "FTP"
+  or "load" on it.
+- **One reading of what was ridden** (Neelay, 23 Nov 2026, after the first surges: "I would expect the ride card
+  analysis and the Training analysis to be aligned"): `effort.find_sets` finds interval sets in the power (hard
+  efforts of about the same length with about the same easy riding between, by contrast with the riding around them,
+  no FTP needed; harder with cadence well down is the trainer's climbs, not intervals). The ride's page (phases
+  "intervals", its lines), Train's reason (`train.classify`) and planned against ridden (`train.against`: set by
+  set, done of planned, watts against the targets the ride was ridden to, and the riding after the sets) all use
+  them; the ride card takes the session's name indoors and "5 × 1 min and 5 × 30 s hard, as planned."
+- **How a hard session felt moves the watts** (same day): "easy" on a hard session raises the targets 5% above what
+  that session's started from (stored with the tap, `ride_feel.ftp_w`); good or hard keeps them there; wrecked eases
+  back 5%; never below the estimate, never more than 15% above it (`service._aim`). The estimate itself (what you
+  could hold for an hour) is unchanged; the ride note says what changed with the next hard session's watts, and the
+  AI coach is told.
 - **Feedback that makes a better rider** (Neelay, 21 Nov 2026): after every ride, one constructive thing to try,
   from what the ride contained (cadence, pacing, easy days too hard, fuelling), in `docs/train-words.md`'s format.
   His Saturday Zwift ride, counted as endurance: "Keep easy days easy" (43 of 81 minutes near his limit), then

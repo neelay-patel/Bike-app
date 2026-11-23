@@ -30,6 +30,10 @@ ZONES = {
     "Z7": {"name": "Sprint", "ftp": (1.51, 2.50), "hrr": None, "rpe": 10},
 }
 SHORT_EFFORT_S = 120   # heart rate lags short efforts: ride them by power or feel, not heart rate
+# Cadence to aim for, in rpm: smooth and quick for steady work, a touch quicker for the hard efforts. A sprint has
+# none: wind it up as fast as you can.
+CADENCE = {"Z1": (85, 95), "Z2": (85, 95), "Z3": (85, 95), "SS": (85, 95), "Z4": (85, 95), "Z5": (90, 100),
+           "Z6": (95, 105)}
 
 
 def ftp_estimate(manual: float | None, power_curve: dict | None) -> dict:
@@ -173,6 +177,8 @@ def targets(w: dict, ftp: float | None, hrz: dict | None) -> dict:
         if s.get("ramp_to"):
             hi = ZONES[s["ramp_to"]]["ftp"][1]
         t = {"pct_ftp": [round(lo * 100), round(hi * 100)], "zone_name": z["name"], "rpe": z["rpe"]}
+        if s["zone"] in CADENCE:
+            t["rpm"] = list(CADENCE[s["zone"]])
         if ftp:
             t["watts"] = [round(lo * ftp), round(hi * ftp)]
         if hrz and s["zone"] in hrz and s["seconds"] > SHORT_EFFORT_S:

@@ -75,6 +75,10 @@ class Ride:
     # Stretches left out of the ride because they weren't riding (see clean.py), e.g.
     # [{"reason": "vehicle", "start": ..., "end": ..., "km": 41.3, "minutes": 52, "peak_kmh": 115.1}]
     excluded: list = field(default_factory=list)
+    # Stretches added before or after the base recording, where another device was already (or still)
+    # recording the riding (merge.py), e.g. a Watch started before Zwift:
+    # [{"where": "before", "source": "apple_watch", "start": ..., "end": ..., "minutes": 4.7, "km": 2.3}]
+    added: list = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))

@@ -232,6 +232,7 @@ MIGRATIONS = [
     ("users", "home", "TEXT"),          # home the rider set, JSON {"lat", "lon", "label"}; else from their rides        # generated routes: what was asked and why this one, JSON
     ("rides", "brief", "TEXT"),         # the ride without its samples (service.brief): what the ride list needs
     ("users", "ai_personal", "INTEGER DEFAULT 0"),  # personal-use AI: this rider's data may go to the AI coach
+    ("ride_feel", "ftp_w", "REAL"),     # hard rides: the watts the targets started from when it was ridden
 ]
 
 

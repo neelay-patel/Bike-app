@@ -219,7 +219,7 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
 
     @app.get("/v1/plan/sessions/{session_id}")
     def plan_session(session_id: str, uid: int = Depends(user)):
-        s = be.plan_session(uid, session_id)
+        s = be.session_brief(uid, session_id)
         if s is None:
             raise HTTPException(404, "No such session")
         return s
