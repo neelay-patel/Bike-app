@@ -276,6 +276,12 @@ private struct DoneHero: View {
                             .font(Theme.text(15, .medium)).foregroundStyle(.white)
                     }
                 }
+                if let did = note.jobs?.summary {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        MonoLabel("Did", color: summit)
+                        Text(did).font(Theme.text(15, .medium)).foregroundStyle(.white)
+                    }
+                }
                 if let tip = note.tips.first {
                     HStack(spacing: 8) {
                         MonoLabel("Try", color: Theme.inkSoft)
@@ -415,6 +421,12 @@ struct LatestRideCard: View {
                 }
                 Text(note.counted.map { "Counted as \($0.title)" } ?? note.kindTitle ?? "Your ride")
                     .font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink)
+                if let did = note.jobs?.summary {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        MonoLabel("Did", color: summit)
+                        Text(did).font(Theme.text(15, .medium)).foregroundStyle(.white)
+                    }
+                }
                 if let tip = note.tips.first {
                     HStack(spacing: 8) {
                         MonoLabel("Try", color: Theme.inkSoft)
@@ -814,6 +826,9 @@ struct RideNoteView: View {
                 if let a = n.against {
                     PlannedVsRidden(summary: a.summary, lines: a.lines, sets: a.sets).padding(.top, 6)
                 }
+                if let j = n.jobs, !(j.jobs.isEmpty && j.also.isEmpty) {
+                    JobsDone(jobs: j).padding(.top, 8)
+                }
                 if n.counted == nil, let k = n.kindTitle {
                     Text("It was \(k.lowercased()) riding, but no open session this week needed it.")
                         .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
@@ -905,6 +920,36 @@ private struct CountAsSheet: View {
     private func automatic() async {
         do { try await APIClient().countRide(note.rideId, as: nil, automatic: true); await changed(); dismiss() }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Which of the week's jobs the ride did (docs/train-method.md): one line each, done in full or how much is
+/// left; work a short ride did on top is said, muted.
+struct JobsDone: View {
+    let jobs: TrainNote.Jobs
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MonoLabel("Jobs it did")
+            ForEach(jobs.jobs) { j in row(j, icon: icon(j.status), color: j.status == "part" ? Theme.inkSoft : Theme.cobalt) }
+            ForEach(jobs.also) { j in row(j, icon: "plus.circle", color: Theme.inkMuted) }
+        }
+    }
+
+    private func icon(_ status: String) -> String {
+        switch status {
+        case "more": return "arrow.up.circle.fill"
+        case "part": return "circle.lefthalf.filled"
+        default: return "checkmark.circle.fill"
+        }
+    }
+
+    private func row(_ j: TrainNote.Job, icon: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
+            Text(j.line).font(Theme.text(14)).foregroundStyle(j.status == "also" ? Theme.inkMuted : Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

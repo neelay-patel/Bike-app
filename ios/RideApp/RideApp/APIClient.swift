@@ -458,6 +458,22 @@ struct TrainNote: Decodable, Identifiable {
     let against: Against?
     /// What the rider's "how did it feel" changed (the targets going up after a hard session felt easy).
     let feelNote: String?
+    /// Which of the week's jobs the ride did, and how much of each (docs/train-method.md).
+    let jobs: Jobs?
+
+    struct Jobs: Decodable {
+        let summary: String?
+        let jobs: [Job]
+        let also: [Job]
+    }
+    struct Job: Decodable, Identifiable {
+        var id: String { job }
+        let job: String
+        let title: String
+        /// done | more | part | also
+        let status: String
+        let line: String
+    }
 
     struct Against: Decodable { let summary: String; let lines: [String]; let sets: [PlannedSet] }
     struct Story: Decodable { let headline: String; let story: String }

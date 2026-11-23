@@ -16,6 +16,8 @@ Existing apps keep one recording per ride and give thin, boastful summaries. Kov
 2. **Tells the ride's story** in a beautiful, insight-led card. `docs/share-card.md`.
 3. **Gives real post-ride value**, around what riders want: **ride faster, ride further**, fed by **more power** and
    **climbing faster**. `docs/app-and-insights-plan.md`.
+4. **Coaches like a good coach**: the plan follows the riding (a week of jobs any fitting ride can do), and every
+   rule serves growth first, then earned encouragement, then teaching why. `docs/train-method.md`.
 
 Order of work (`docs/roadmap.md`): data from every source automatically (`docs/connectors.md`; direct integrations,
 not an aggregator), insight and tallies, fun (`docs/fun.md`), training and coaching (`docs/coaching.md`: goals in the

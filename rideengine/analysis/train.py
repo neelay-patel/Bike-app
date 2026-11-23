@@ -125,7 +125,8 @@ def _runs(flags: list[bool]) -> list[tuple[int, int]]:
 
 
 def _efforts(p30: list, ftp: float) -> list[dict]:
-    """Hard efforts: 30 s power reaches HARD x FTP, lasting while it stays above HARD_HOLD x FTP."""
+    """Hard efforts: 30 s power reaches HARD x FTP, lasting while it stays above HARD_HOLD x FTP.
+    Each {"start_s", "seconds", "watts"}."""
     out = []
     k, n = 0, len(p30)
     while k < n:
@@ -137,7 +138,7 @@ def _efforts(p30: list, ftp: float) -> list[dict]:
             while b < n and p30[b] is not None and p30[b] >= HARD_HOLD * ftp:
                 b += 1
             vals = [v for v in p30[a:b] if v is not None]
-            out.append({"seconds": (b - a) * STEP_S, "watts": round(sum(vals) / len(vals))})
+            out.append({"start_s": a * STEP_S, "seconds": (b - a) * STEP_S, "watts": round(sum(vals) / len(vals))})
             k = b
         else:
             k += 1
@@ -296,6 +297,244 @@ def _by_heart_rate(w: dict, max_hr: float | None, rest_hr: float | None, minutes
     return {"kind": "mixed", "confidence": 0.45, "facts": facts,
             "reason": f"{minutes} minutes of harder riding by heart rate ({round(hard)} minutes near your limit); "
                       f"without power the efforts themselves can't be seen."}
+
+
+# --- which jobs a ride did (docs/train-method.md) -------------------------------------------------------
+# A week is a set of jobs, and any ride that fits can do one. This reads which jobs a ride did and how much of
+# each, from what it contained; the week's plan (step 2) says how much of each job it wants.
+
+JOBS = ("punch", "top_end", "hold", "long", "easy")
+JOB_TITLES = {"punch": "Punch", "top_end": "Top end", "hold": "Hold", "long": "Long", "easy": "Easy"}
+# What each job builds, in the rider's words (docs/train-method.md, the jobs table).
+JOB_BUILDS = {"punch": "answering accelerations and closing gaps",
+              "top_end": "the hardest few minutes: a long climb, a breakaway",
+              "hold": "the power you can keep for the whole ride",
+              "long": "endurance for long rides",
+              "easy": "the base everything sits on, and recovery"}
+JOB_WANT_MIN = {"punch": 5, "top_end": 10, "hold": 20}   # minutes of the job's work that make it done
+PUNCH_S = (10, 149)      # punch: hard efforts this long (sprints too) ...
+TOP_END_S = (150, 480)   # ... top end: these, at VO2_LEVEL or more
+HOLD = (0.84, 1.08)      # hold: steady work in this band of FTP (sweet spot to threshold) ...
+HOLD_STEADY = (0.75, 1.15)  # ... with 30 s power staying in this one (steady, not surging) ...
+HOLD_RUN_S = 180         # ... for at least this long at a time
+LONG_SHARE = 0.8         # a ride of 80% of the week's long-ride time does the long job
+LONG_DEFAULT_MIN = 150   # the long ride's time when there's no plan to say
+LONG_FLOOR_MIN = 90      # and never less than this: an hour's ride isn't a long one
+TWO_HARD_MIN = 90        # a ride does a second hard job only when it's this long and the second is done in full
+EASY_MIN = 20
+SHOW = 0.2               # less of a job than this isn't mentioned
+MORE = 1.5               # this much of a job or more: "and then some"
+HR_PUNCH = 0.85          # rides with heart rate only: rises to this share of heart-rate reserve count as punch ...
+HR_TOP_END = 0.9         # ... and long ones at this share as top end
+
+
+def _hm(minutes: float) -> str:
+    m = int(round(minutes))
+    return f"{m} min" if m < 60 else f"{m // 60} h" + (f" {m % 60:02d}" if m % 60 else "")
+
+
+def _mins(seconds: float) -> str:
+    """Minutes of work, to the half minute: '7.5 min', '12 min', '45 s'."""
+    s = round(seconds / 30) * 30
+    return say_length(int(s)) if s >= 60 else f"{round(seconds)} s"
+
+
+def _and(parts: list[str]) -> str:
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _in_sets(t: int, sets: list[dict]) -> bool:
+    return any(x["start_s"] - STEP_S <= t <= x["end_s"] + STEP_S for x in sets)
+
+
+def _hard_work(w: dict, ftp: float) -> dict:
+    """Seconds of punch and top-end work, with what they were: the ride's interval sets (effort.find_sets), then
+    hard efforts outside them."""
+    sets = w.get("sets") or []
+    out = {"punch": {"s": 0.0, "parts": []}, "top_end": {"s": 0.0, "parts": []}}
+    for x in sets:
+        reps = [r for r in x["reps"] if r[1] >= HARD_HOLD * ftp]
+        if not reps or _over_unders(x, ftp):
+            continue
+        job = ("punch" if x["seconds"] <= PUNCH_S[1] else
+               "top_end" if x["seconds"] <= TOP_END_S[1] and x["power"] >= VO2_LEVEL * ftp else None)
+        if job:
+            out[job]["s"] += sum(r[0] for r in reps)
+            out[job]["parts"].append(f"{len(reps)} × {say_length(x['seconds'])}")
+    loose = {"punch": [], "top_end": []}
+    for e in _efforts(w.get("p30") or [], ftp):
+        if _in_sets(e["start_s"], sets):
+            continue
+        if PUNCH_S[0] <= e["seconds"] <= PUNCH_S[1]:
+            loose["punch"].append(e)
+        elif TOP_END_S[0] <= e["seconds"] <= TOP_END_S[1] and e["watts"] >= VO2_LEVEL * ftp:
+            loose["top_end"].append(e)
+    for job, es in loose.items():
+        if es:
+            out[job]["s"] += sum(e["seconds"] for e in es)
+            out[job]["parts"].append(f"{len(es)} hard effort{'s' if len(es) > 1 else ''} of "
+                                     f"{_span([e['seconds'] for e in es])}")
+            out[job]["loose"] = True
+    return out
+
+
+def _over_unders(x: dict, ftp: float) -> bool:
+    """A set whose easy part is still at sweet spot: over-unders, hold work all the way through."""
+    return x.get("rest_power") is not None and x["rest_power"] >= HOLD[0] * ftp
+
+
+def _hold_work(w: dict, ftp: float) -> dict:
+    """Seconds of steady work just below or at what the rider could hold for an hour: held sets, the trainer's
+    steady blocks, and steady stretches of the rider's own riding (at least 3 minutes each)."""
+    sets = w.get("sets") or []
+    held = [x for x in sets if x["seconds"] >= 300 and HOLD[0] * ftp <= x["power"] < HOLD[1] * ftp]
+    ou = [x for x in sets if _over_unders(x, ftp) and x not in held]
+    set_s = sum(x["repeat"] * x["seconds"] for x in held) + sum(x["repeat"] * (x["seconds"] + x["rest_s"]) for x in ou)
+    blocks = [b for b in w.get("blocks") or [] if BLOCK_SS[0] * ftp <= b[1] < BLOCK_THR[1] * ftp]
+    block_s = sum(b[0] for b in blocks)
+    p30 = w.get("p30") or []
+    r5 = _rolling(p30, 15)
+    flags = [p is not None and r is not None and HOLD[0] * ftp <= r < HOLD[1] * ftp
+             and HOLD_STEADY[0] * ftp <= p < HOLD_STEADY[1] * ftp and not _in_sets(k * STEP_S, sets)
+             for k, (p, r) in enumerate(zip(p30, r5))]
+    runs = [(a, b) for a, b in _runs(flags) if (b - a) * STEP_S >= HOLD_RUN_S]
+    free_s = sum(b - a for a, b in runs) * STEP_S
+    free_w = [p30[k] for a, b in runs for k in range(a, b)]
+    parts, ws = [], []          # ws: (seconds, watts) for the average
+    if held:
+        parts.append(say_sets(held))
+        ws += [(x["repeat"] * x["seconds"], x["power"]) for x in held]
+    for x in ou:
+        parts.append(f"{x['repeat']} × {say_length(x['seconds'])} over, {say_length(x['rest_s'])} under")
+        ws += [(x["repeat"] * x["seconds"], x["power"]), (x["repeat"] * x["rest_s"], x["rest_power"])]
+    if max(block_s, free_s) > 0:
+        if block_s >= free_s:
+            bw = round(sum(b[0] * b[1] for b in blocks) / block_s)
+            parts.append(f"{len(blocks)} steady block{'s' if len(blocks) > 1 else ''} on the trainer, "
+                         f"{_mins(block_s)} at about {bw} W")
+            ws += [(b[0], b[1]) for b in blocks]
+        else:
+            fw = round(sum(free_w) / len(free_w))
+            parts.append(f"{_mins(free_s)} of steady riding at about {fw} W")
+            ws += [(STEP_S, v) for v in free_w]
+    total = sum(t for t, _ in ws)
+    return {"s": set_s + max(block_s, free_s), "parts": parts,
+            "watts": round(sum(t * v for t, v in ws) / total) if total else None}
+
+
+def _hr_work(w: dict, max_hr: float | None, rest_hr: float | None) -> dict:
+    """Rides with heart rate only: a rough read. Rises to near the limit stand in for hard efforts (heart rate
+    lags, so it can't see their shape); steady stretches in the sweet-spot-to-threshold band for hold."""
+    out = {"punch": {"s": 0.0, "parts": []}, "top_end": {"s": 0.0, "parts": []}, "hold": {"s": 0.0, "parts": []}}
+    h30 = w.get("h30") or []
+    if not h30 or not max_hr or not rest_hr or max_hr <= rest_hr:
+        return out
+    def res(v):
+        return None if v is None else (v - rest_hr) / (max_hr - rest_hr)
+    for a, b in _runs([res(v) is not None and res(v) >= HR_PUNCH for v in h30]):
+        s = (b - a) * STEP_S
+        vals = [res(v) for v in h30[a:b]]
+        if s >= TOP_END_S[0] and sum(vals) / len(vals) >= HR_TOP_END:
+            out["top_end"]["s"] += min(s, TOP_END_S[1])
+        elif s >= PUNCH_S[0]:
+            out["punch"]["s"] += min(s, PUNCH_S[1])
+    # Heart rate drifts up over long rides, so steady work is only read from it on shorter ones.
+    if len(h30) * STEP_S < LONG_MIN * 60:
+        hs5 = _rolling(h30, 15)
+        flags = [v is not None and HR_SS[0] <= res(v) < HR_THR[1] for v in hs5]
+        out["hold"]["s"] = sum(b - a for a, b in _runs(flags) if (b - a) * STEP_S >= 300) * STEP_S
+    return out
+
+
+def jobs_done(w: dict, ftp: float | None, max_hr: float | None = None, rest_hr: float | None = None,
+              minutes: float | None = None, long_min: float | None = None, want: dict | None = None) -> dict:
+    """Which jobs a ride did, and how much of each. w: the ride's stored work; minutes: its moving time (default:
+    the work's own minutes); long_min: the week's long-ride time; want: minutes of each hard job that make it
+    done (default JOB_WANT_MIN; the week's plan sets them as the rider grows).
+    {"jobs": [{"job", "title", "status": done|more|part, "have_min", "want_min", "left_min", "line", "basis"}],
+     "also": [jobs also done in full that a short ride doesn't count], "summary", "basis"}. One ride does at most two hard jobs (the second only on a long ride, in full), plus the
+    long job; easy only when it did nothing hard."""
+    want = {**JOB_WANT_MIN, **(want or {})}
+    minutes = minutes if minutes is not None else (w.get("minutes") or 0)
+    out = {"jobs": [], "also": [], "summary": None, "basis": w.get("basis")}
+    if minutes < MIN_MINUTES:
+        return out
+    basis = w.get("basis")
+    if basis == "power" and ftp:
+        work = _hard_work(w, ftp) | {"hold": _hold_work(w, ftp)}
+        vals = [v for v in w.get("p30") or [] if v is not None]
+        easy_ride = bool(vals) and sum(vals) / len(vals) <= ENDURANCE_AP * ftp
+    else:
+        work = _hr_work(w, max_hr, rest_hr)
+        hs = [v for v in w.get("h30") or [] if v is not None]
+        easy_ride = (not hs or not max_hr or not rest_hr or max_hr <= rest_hr or
+                     (sum(hs) / len(hs) - rest_hr) / (max_hr - rest_hr) < 0.75)
+    by = " (judged by heart rate: a rough read without power)" if basis != "power" else ""
+
+    def entry(job, have, target, detail):
+        frac = have / target if target else 0
+        left = max(0.0, target - have)
+        if frac >= MORE:
+            t = _mins(target * 60)
+            line = f"{JOB_TITLES[job]}, and then some: {detail}, where the week asked for {t[:-4] if t.endswith(' min') else t}."
+            status = "more"
+        elif frac >= 1:
+            line = f"{JOB_TITLES[job]}: done. {detail}."
+            status = "done"
+        else:
+            a, b = _mins(have * 60), _mins(target * 60)
+            if a.endswith(" min") and b.endswith(" min"):
+                a = a[:-4]
+            line = f"{JOB_TITLES[job]}: {a} of {b} done. {_mins(left * 60)} more finishes it."
+            status = "part"
+        return {"job": job, "title": JOB_TITLES[job], "status": status, "have_min": round(have, 1),
+                "want_min": target, "left_min": round(left, 1), "line": line + (by if job != "long" else ""),
+                "basis": basis, "detail": detail}
+
+    hard = []
+    for job in ("punch", "top_end", "hold"):
+        have = work[job]["s"] / 60
+        if have / want[job] < SHOW:
+            continue
+        parts = work[job]["parts"]
+        total = _mins(have * 60)
+        if job == "hold":
+            watts = work[job].get("watts")
+            detail = ("; ".join(parts) + (f", {total} in all" if len(parts) > 1 else "") if parts else
+                      f"{total} of steady work" + (f" at about {watts} W" if watts else ""))
+        elif work[job].get("loose") or not parts:
+            detail = (_and(parts) + f", {total} in all") if parts else f"{total} of hard efforts"
+        else:
+            detail = _and(parts) + f", {total} of hard efforts"
+        hard.append((have / want[job], entry(job, have, want[job], detail)))
+    # The job the ride did in full leads; between two done in full, the harder (punch or top end over hold).
+    hard.sort(key=lambda x: (x[0] < 1, x[0] >= 1 and x[1]["job"] == "hold", -x[0]))
+    jobs = [e for _, e in hard[:1]]
+    also = []
+    for frac, e in hard[1:]:
+        if frac >= 1 and minutes >= TWO_HARD_MIN and len(jobs) < 2:
+            jobs.append(e)
+        elif frac >= 1:
+            # Good work, but a short ride does one hard job: the week still has this one to come (we lean
+            # toward more, docs/train-method.md).
+            also.append({**e, "status": "also",
+                         "line": f"Also {e['detail']}: good {e['title'].lower()} work on top; the week's "
+                                 f"{e['title'].lower()} job is still to come{by}."})
+    long_want = max(LONG_FLOOR_MIN, round(LONG_SHARE * (long_min or LONG_DEFAULT_MIN) / 5) * 5)
+    if minutes >= long_want:
+        jobs.append({"job": "long", "title": "Long", "status": "done", "have_min": round(minutes),
+                     "want_min": long_want, "left_min": 0,
+                     "line": f"Long: done. {_hm(minutes)} in the saddle.", "basis": basis})
+    if not hard and not jobs and easy_ride and minutes >= EASY_MIN:
+        jobs.append({"job": "easy", "title": "Easy", "status": "done", "have_min": round(minutes), "want_min": EASY_MIN,
+                     "left_min": 0, "line": f"Easy: done. {_hm(minutes)} of easy riding.", "basis": basis})
+    out["jobs"] = jobs
+    out["also"] = also
+    if jobs:
+        words = {"done": "done", "more": "and then some", "part": "partly done"}
+        said = [f"{j['title']}, {words[j['status']]}" for j in jobs]
+        out["summary"] = "; ".join(said[:1] + [s[0].lower() + s[1:] for s in said[1:]]) + "."
+    return out
 
 
 # --- which session each ride counts as -----------------------------------------------------------------

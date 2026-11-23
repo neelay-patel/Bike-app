@@ -745,7 +745,7 @@ class Backend:
                        "reason": f"{minutes} minutes of riding.", "facts": {"minutes": minutes}}
             rides.append({"ride_id": f["ride_id"], "start": f["start"], "date": d.isoformat(),
                           "minutes": cls["facts"].get("minutes") or round((f.get("moving_s") or 0) / 60),
-                          "indoor": f.get("indoor"), "class": cls,
+                          "indoor": f.get("indoor"), "class": cls, "jobs": Backend._jobs(c, f, week),
                           "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None})
         m = train.match_week(week["sessions"], rides, {r: s for r, s in moved.items()})
         by_ride = {r["ride_id"]: r for r in rides}
@@ -756,6 +756,33 @@ class Backend:
         return {"counted": counted, "rides": rides,
                 "extra": [{"ride_id": r, "kind_title": by_ride[r]["kind_title"], "reason": by_ride[r]["class"]["reason"]}
                           for r in m["extra"]]}
+
+    @staticmethod
+    def _job_wants(week: Optional[dict]) -> tuple[dict, Optional[float]]:
+        """How much of each job the week's suggested workouts ask (docs/train-method.md), and its long-ride
+        minutes: what a ride's jobs are judged against."""
+        from rideengine.analysis import plan as p
+        want: dict = {}
+        long_min = None
+        for s in (week or {}).get("sessions", []):
+            for job, mins in p.job_minutes(s).items():
+                if job == "long":
+                    long_min = max(long_min or 0, mins)
+                else:
+                    want[job] = max(want.get(job, 0), mins)
+        return want, long_min
+
+    @staticmethod
+    def _jobs(c: dict, f: dict, week: Optional[dict]) -> Optional[dict]:
+        """Which jobs the ride did and how much of each (train.jobs_done), against the week's plan."""
+        from rideengine.analysis import train
+        if not f.get("work"):
+            return None
+        want, long_min = Backend._job_wants(week)
+        minutes = round((f.get("moving_s") or 0) / 60) or None
+        j = train.jobs_done(f["work"], c["ftp"]["watts"], c["max_hr"], c["resting_hr"], minutes=minutes,
+                            long_min=long_min, want=want)
+        return {"summary": j["summary"], "jobs": j["jobs"], "also": j["also"]}
 
     @staticmethod
     def _session_status(s: dict, counted: dict, done: set, week: dict, today: date) -> str:
@@ -1084,9 +1111,11 @@ class Backend:
         ftp = c["ftp"]["watts"]
         cls = (train.classify(f["work"], ftp, c["max_hr"], c["resting_hr"]) if f.get("work")
                else {"kind": None, "confidence": 0, "reason": "", "facts": {}})
-        counted, intent, against = None, None, None
+        counted, intent, against, ride_week = None, None, None, None
         view = self.plan_view(user_id)
         if view:
+            ride_week = next((w for w in view["weeks"] if date.fromisoformat(w["week_start"]) <= d <
+                              date.fromisoformat(w["week_start"]) + timedelta(days=7)), None)
             for w in view["weeks"]:
                 for s in w["sessions"]:
                     if (s.get("counted") or {}).get("ride_id") == ride_id:
@@ -1126,6 +1155,7 @@ class Backend:
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
+                "jobs": self._jobs(c, f, ride_week),
                 "load": contrib["load"],
                 "next": nxt, "try": tips[0] if tips else None, "tips": tips,
                 "feel": {"feel": feel["feel"], "hurts": feel["hurts"]} if feel else None,

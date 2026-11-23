@@ -2,6 +2,7 @@
 import json
 from datetime import date, timedelta
 
+from backend.service import Backend
 from rideengine.analysis import feedback, train
 from rideengine.analysis import today as td
 from test_backend import env, line_ride, T0  # noqa: F401  (pytest fixture)
@@ -183,7 +184,7 @@ def test_train_endpoints(env):
         if be.db.execute("SELECT 1 FROM ride_features WHERE user_id = ?", (uid,)).fetchone() else None
     if rid:
         n = client.get(f"/v1/train/rides/{rid}").json()
-        assert {"did", "kind", "counted", "means", "next", "try"} <= set(n)
+        assert {"did", "kind", "counted", "means", "next", "try", "jobs"} <= set(n)
     assert client.get("/v1/train/rides/nope").status_code == 404
 
 
@@ -233,3 +234,13 @@ def test_how_a_hard_session_felt_moves_the_targets(env):
     assert be._aim(uid, est, tz)["watts"] == round(151 * 1.15)
     be.db.execute("DELETE FROM ride_feel WHERE user_id = ?", (uid,))
     assert be._aim(uid, est, tz)["watts"] == 151
+
+
+def test_jobs_are_judged_against_the_weeks_plan():
+    from rideengine.analysis import plan as p
+    week = {"sessions": [{"id": "a", **p.workout("surges", 0.0, 55, True)},
+                         {"id": "b", **p.workout("steady", 0.0, 55, True)},
+                         {"id": "c", **p.workout("group", 0.0, 120, True)}]}
+    want, long_min = Backend._job_wants(week)
+    assert want == {"punch": 7.5, "hold": 20.0} and long_min == 120
+    assert Backend._job_wants(None) == ({}, None)

@@ -161,6 +161,9 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - **Edge 840:** Garmin Training API with the business tier (`docs/hosting.md`); the Edge can drive the KICKR too.
 
 ### Method: the credential (alongside, any time)
+- `docs/train-method.md` (draft 23 Nov 2026, for Neelay to edit): the philosophy and rules. The plan follows the
+  riding: a week of jobs that any fitting ride can do, re-planned after every ride within fixed limits; the AI
+  proposes inside the rules, the engine checks.
 - `docs/training-science.md`: every rule in steps 1-2 with the published research behind it, in plain words
   (intensity distribution, progressive overload and easier weeks, fitness/fatigue load models, HRV-guided training,
   interval formats with evidence).

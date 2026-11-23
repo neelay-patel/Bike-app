@@ -213,6 +213,34 @@ BASE_SWAP = {"over_unders": "endurance", "vo2": "threshold"}
 SHARE = {"group": 0.32, "long": 0.36}  # the long session's share of the week's time
 
 
+# The job each workout does (docs/train-method.md): a week is a set of jobs, a workout one good way to do one.
+JOB_OF = {"surges": "punch", "sprint": "punch", "vo2": "top_end", "steady": "hold", "threshold": "hold",
+          "over_unders": "hold", "long": "long", "group": "long", "endurance": "easy", "easy": "easy",
+          "strength": "strength"}
+_JOB_ZONE = {"Z6": "punch", "Z7": "punch", "Z5": "top_end", "SS": "hold", "Z4": "hold"}
+
+
+def job_minutes(w: dict) -> dict:
+    """Minutes of each job's work the workout asks for: {"punch": 7.5} for the lightest surges. Over-unders count
+    whole (over and under are both hold work); long rides their whole time."""
+    out: dict[str, float] = {}
+    if w.get("kind") in ("long", "group"):
+        return {"long": round(w.get("seconds", 0) / 60)}
+
+    def walk(steps, mult=1, whole=None):
+        for st in steps:
+            if st.get("steps"):
+                ou = whole or (w.get("kind") == "over_unders")
+                walk(st["steps"], mult * st.get("repeat", 1), "hold" if ou else None)
+            elif whole and st.get("zone") != "Z1":
+                out[whole] = out.get(whole, 0) + mult * st["seconds"] / 60
+            elif not whole and st.get("zone") in _JOB_ZONE and mult > 1:
+                job = _JOB_ZONE[st["zone"]]
+                out[job] = out.get(job, 0) + mult * st["seconds"] / 60
+    walk(w.get("steps") or [])
+    return {k: round(v, 1) for k, v in out.items()}
+
+
 def usual_days(starts: list[datetime], n: int) -> list[str]:
     """The rider's n most-ridden weekdays, spread out (not back to back) where possible."""
     count = {d: 0 for d in WEEKDAYS}

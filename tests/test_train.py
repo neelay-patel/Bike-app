@@ -191,3 +191,97 @@ def test_ride_against_the_session():
     a = train.against(s, train.work(trainer(T0, parts)))
     assert a["sets"][0]["done"] == 3 and a["lines"][0].startswith("5 × 1 min hard: 3 of 5")
     assert a["summary"].startswith("Part of the session") and a["short"].endswith(": 3 of the 10 planned.")
+
+
+# --- which jobs a ride did (docs/train-method.md) -------------------------------------------------------
+
+def jobs(ride, ftp=FTP, **kw):
+    return train.jobs_done(train.work(ride), ftp, 180, 50, **kw)
+
+
+def test_jobs_from_the_sessions_as_ridden():
+    from rideengine.analysis import plan as p
+    # The surges as planned do the punch job, exactly as much as the lightest surges ask: done, not more.
+    want = p.job_minutes(p.workout("surges", 0.0, 55, True))
+    assert want == {"punch": 7.5}
+    j = jobs(surges_as_planned(), want=want)
+    assert [(x["job"], x["status"]) for x in j["jobs"]] == [("punch", "done")]
+    assert j["jobs"][0]["line"] == "Punch: done. 5 × 1 min and 5 × 30 s, 7.5 min of hard efforts."
+    assert j["summary"] == "Punch, done."
+    # Sweet spot blocks: hold.
+    parts = warm()
+    for _ in range(3):
+        parts += [(12 * 60, 135, 90, 1.5), (5 * 60, 85, 88, 1.5)]
+    j = jobs(trainer(T0, parts + [(8 * 60, 80, 80, 10)]))
+    assert j["jobs"][0]["job"] == "hold" and j["jobs"][0]["line"].startswith("Hold, and then some: 3 × 12 min at about 135 W")
+    # 3-minute efforts: top end.
+    parts = warm(12)
+    for _ in range(5):
+        parts += [(180, 185, 95, 6), (180, 90, 85, 6)]
+    j = jobs(trainer(T0, parts + [(10 * 60, 100, 85, 8)]))
+    assert [x["job"] for x in j["jobs"]] == ["top_end"] and "5 × 3 min" in j["jobs"][0]["line"]
+    # Over-unders: the "under" is still sweet spot, so it's hold work all the way through.
+    parts = warm(12)
+    for _ in range(3):
+        for _ in range(4):
+            parts += [(60, 175, 92, 3), (60, 135, 90, 3)]
+        parts += [(5 * 60, 85, 85, 5)]
+    j = jobs(trainer(T0, parts + [(8 * 60, 80, 80, 5)]))
+    assert [x["job"] for x in j["jobs"]] == ["hold"] and j["jobs"][0]["have_min"] == 24
+    # Easy riding, and a long ride.
+    assert [x["job"] for x in jobs(trainer(T0, [(40 * 60, 80, 80, 10)]))["jobs"]] == ["easy"]
+    assert [x["job"] for x in jobs(trainer(T0, [(170 * 60, 105, 85, 20)]))["jobs"]] == ["long"]
+
+
+def test_partly_done_leaves_the_rest_open():
+    parts = warm(8, 90)
+    for _ in range(3):
+        parts += [(60, 220, 95, 8), (120, 110, 88, 8)]
+    j = jobs(trainer(T0, parts + [(30 * 60, 110, 88, 8)]))
+    (x,) = j["jobs"]
+    assert x["job"] == "punch" and x["status"] == "part" and x["left_min"] == 2.0
+    assert x["line"] == "Punch: 3 of 5 min done. 2 min more finishes it."
+    assert j["summary"] == "Punch, partly done."
+
+
+def test_one_ride_two_jobs_when_long_enough():
+    # A long group ride with hard surges: punch, and the long job.
+    parts = warm()
+    for _ in range(12):
+        parts += [(45, 240, 95, 10), (8 * 60, 120, 88, 15)]
+    j = jobs(trainer(T0, parts + [(60 * 60, 115, 88, 15)]), long_min=130)
+    assert [(x["job"], x["status"]) for x in j["jobs"]] == [("punch", "more"), ("long", "done")]
+    assert j["jobs"][0]["line"].endswith("12 min in all, where the week asked for 5.")
+    assert j["summary"] == "Punch, and then some; long, done."
+    # The same surges in 90 minutes: punch only, the ride isn't long enough for the long job.
+    parts = warm()
+    for _ in range(8):
+        parts += [(45, 240, 95, 10), (8 * 60, 120, 88, 15)]
+    j = jobs(trainer(T0, parts + [(10 * 60, 100, 85, 10)]), long_min=130)
+    assert [x["job"] for x in j["jobs"]] == ["punch"]
+    # Easy never comes with a hard job; too short counts as nothing.
+    assert jobs(trainer(T0, [(10 * 60, 200, 90, 10)]))["jobs"] == []
+
+
+def test_jobs_by_heart_rate_are_said_to_be_rough():
+    j = train.jobs_done(train.work(hr_ride(60, 165)), FTP, 180, 50)
+    assert j["jobs"][0]["job"] == "hold" and "judged by heart rate" in j["jobs"][0]["line"]
+    assert [x["job"] for x in train.jobs_done(train.work(hr_ride(80, 125)), FTP, 180, 50)["jobs"]] == ["easy"]
+    assert [x["job"] for x in train.jobs_done(train.work(hr_ride(200, 135)), FTP, 180, 50)["jobs"]] == ["long"]
+
+
+def test_every_workout_names_its_job():
+    from rideengine.analysis import plan as p
+    for k in ("surges", "sprint", "vo2", "steady", "threshold", "over_unders", "long", "group", "endurance", "easy"):
+        assert k in p.JOB_OF and p.JOB_OF[k] in train.JOBS
+        mins = p.job_minutes(p.workout(k, 0.5, 130 if k in ("long", "group") else 60, True))
+        assert set(mins) <= {p.JOB_OF[k]}
+    assert p.job_minutes(p.workout("over_unders", 0.0, 60, True)) == {"hold": 24.0}
+
+
+def test_a_short_ride_does_one_hard_job_and_says_the_rest():
+    # Monday's surges, then 25 steady minutes: punch leads; the steady riding is said, the hold job stays open.
+    j = jobs(surges_as_planned(), want={"punch": 7.5})
+    assert [x["job"] for x in j["jobs"]] == ["punch"]
+    (a,) = j["also"]
+    assert a["job"] == "hold" and a["line"].startswith("Also ") and "the week's hold job is still to come" in a["line"]
