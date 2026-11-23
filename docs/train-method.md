@@ -184,7 +184,13 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
    The week view shows each session's job and how much is done. As planned: Plan weeks list jobs, each with its suggested workout and its shape;
    `match_week` counts jobs (two from one ride, partly done with the rest open); progression by evidence
    (`level` per job, stepped by done-and-felt). The week view in the app shows jobs done and left.
-3. **Re-plan after every ride** (engine and backend). Place the jobs left on the days left within the limits; fold
+3. **Re-plan after every ride** (engine and backend) **(built 23 Nov)**: `today.plan_today` lays the week out
+   again each time it's read (`Backend._replan` in the plan view): leftovers of half a job or less become a set
+   (`plan.leftover`) in the next hard day or the long ride, taking the place of its filler riding; when the open
+   sessions don't fit, the one that matters least for the goal is let go, one at a time. Each change is stored
+   with its evidence (`plan_snapshots`, `plan_changes`; `Backend._plan_changes`), e.g. "Moved: sweet spot to
+   Friday" because "Wednesday went by without a ride"; `changes` on Today, marked seen with
+   `POST v1/train/changes/seen`. As planned: Place the jobs left on the days left within the limits; fold
    small remainders; drop and say when there's no room; store each change with its reason.
 4. **What the rider sees** (app). The ride note's "what it did, what's left"; the card names what the ride was;
    planned vs ridden only when the sets line up; Today's shape line; the "Moved:" line and the marked days.

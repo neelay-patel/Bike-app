@@ -564,6 +564,14 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let progress: Progress?
     /// Why it's bigger (or smaller) than the last one of its kind: grown from the evidence.
     let grew: String?
+    /// Re-planned this week (docs/train-method.md): leftovers of other sessions added to this one ...
+    let added: [String]?
+    /// ... this session's leftover, added to another ride ...
+    let foldedInto: FoldedInto?
+    /// ... or let go: no room for it this week.
+    let dropped: String?
+
+    struct FoldedInto: Decodable, Hashable { let sessionId: String; let date: String; let line: String }
 
     struct Progress: Decodable, Hashable {
         let haveMin: Double

@@ -244,6 +244,38 @@ def job_minutes(w: dict) -> dict:
     return {k: round(v, 1) for k, v in out.items()}
 
 
+def leftover(job: str, left_min: float) -> dict | None:
+    """What's left of a partly done job, as a set to add near the end of a planned ride (docs/train-method.md):
+    the work in the shape its session had, rounded up so it finishes the job."""
+    import math
+    if job == "punch":
+        n = max(2, math.ceil(left_min))
+        return rep_set(n, step("Hard", 1, "Z6"), step("Recover", 2, "Z2"), f"Added: {n} × 1 min hard / 2 min easy")
+    if job == "top_end":
+        n = max(1, math.ceil(left_min / 3))
+        return rep_set(n, step("Hard", 3, "Z5"), step("Recover", 3, "Z1"), f"Added: {n} × 3 min hard / 3 min easy")
+    if job == "hold":
+        m = max(5, math.ceil(left_min))
+        return rep_set(1, step("Steady", m, "SS"), step("Recover", 3, "Z2"), f"Added: {m} min steady")
+    return None
+
+
+def with_leftover(session: dict, block: dict) -> dict:
+    """The session with a leftover set added before its cool-down (or at the end). It takes the place of easy
+    riding the session had to fill its time, where there is some, so the session stays as long as planned."""
+    steps = list(session.get("steps") or [])
+    at = len(steps) - 1 if steps and steps[-1].get("label") == "Cool down" else len(steps)
+    extra = _seconds(block)
+    fill = next((i for i in range(at - 1, -1, -1) if not steps[i].get("steps") and steps[i].get("zone") == "Z2"
+                 and steps[i].get("label") in ("Endurance", "Steady endurance")), None)
+    if fill is not None:
+        take = min(extra, max(0, steps[fill]["seconds"] - 300))      # leave at least 5 min of it
+        steps[fill] = {**steps[fill], "seconds": steps[fill]["seconds"] - take}
+        extra -= take
+    steps.insert(at, block)
+    return {**session, "steps": steps, "seconds": (session.get("seconds") or 0) + extra}
+
+
 # Growth by evidence (docs/train-method.md, progression): a job's sessions step up when the last one was done in
 # full and felt fine, stay when it felt hard or was partly done, step back when it wrecked the rider or hurt.
 GROW_STEP = 0.25                 # one step of `level` (surges: 5 -> 6 reps; sweet spot 2 x 10 -> 2 x 11 min)

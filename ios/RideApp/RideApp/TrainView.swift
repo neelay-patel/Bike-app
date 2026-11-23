@@ -1007,7 +1007,7 @@ struct TrainWeekView: View {
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         MonoLabel("If a week goes sideways", color: Theme.panelLabel)
-                        Text("A missed hard session moves to the next free day; a missed easy one just drops. Rest days stay between hard ones.")
+                        Text("What's left moves to the days left, with rest between hard days. A little left of a job joins a ride already planned; a session that doesn't fit is let go, and next week starts fresh.")
                             .font(Theme.text(14)).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -1056,7 +1056,12 @@ struct TrainWeekView: View {
                     Spacer()
                     MonoLabel(dayLine(s, w))
                 }
-                if let p = s.progress, !done {
+                if let d = s.dropped, !done {
+                    Text(d).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                } else if let f = s.foldedInto, !done {
+                    Text(f.line).font(Theme.text(13, .medium)).foregroundStyle(Theme.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let p = s.progress, !done {
                     Text(p.line).font(Theme.text(13, .medium)).foregroundStyle(Theme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if let c = s.counted, let r = c.reason {

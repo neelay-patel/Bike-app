@@ -15,6 +15,10 @@ from datetime import date, timedelta
 
 HARD = {"surges", "steady", "threshold", "vo2", "over_unders", "sprint", "group", "mixed"}
 EASY = {"endurance", "long", "easy"}
+FOLD_SHARE = 0.5         # a partly done job with this share or less left is added to a planned ride, not redone
+HOSTS = {"surges", "steady", "threshold", "vo2", "over_unders", "sprint", "long"}   # rides a leftover can join
+JOB_WORDS = {"punch": "punch", "top_end": "top-end work", "hold": "steady work", "long": "long riding",
+             "easy": "easy riding"}
 STREAK_REST = 3          # after this many riding days in a row, rest if the week allows
 MAX_STREAK = 4           # never more than this many in a row
 # Which open session comes first when several could: the goal's key work, then the rest.
@@ -121,6 +125,17 @@ def hard(kind: str | None) -> bool:
     return kind in HARD
 
 
+def _mins_words(m: float) -> str:
+    s = round(m * 2) / 2
+    return f"{s:g} min"
+
+
+def _days(d: date, today: date) -> str:
+    """"today's", "tomorrow's", "Wednesday's"."""
+    n = _day_name(d, today)
+    return (n.lower() if n in ("Today", "Tomorrow") else n) + "'s"
+
+
 def _day_name(d: date, today: date) -> str:
     if d == today:
         return "Today"
@@ -190,6 +205,11 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
     recent: rides of the last 7 days and today, [{"date": date, "kind": str | None, "minutes": int}].
     readiness: good | watch | strained | unknown (wellness.readiness)."""
     end = week_start + timedelta(days=7)
+    # Partly done with little left (docs/train-method.md): the rest joins a ride already planned, so it's never
+    # redone as a whole session.
+    folding = [s for s in sessions if s.get("status") != "done" and not s.get("off_bike") and s.get("progress")
+               and s["progress"]["left_min"] <= FOLD_SHARE * s["progress"]["want_min"]]
+    sessions = [s for s in sessions if s not in folding]
     rides = [r for r in recent if r.get("kind") is not None or (r.get("minutes") or 0) >= 15]
     rode = {r["date"] for r in rides if r["date"] < today}
     hard_days = {r["date"] for r in rides if r["date"] < today and hard(r.get("kind"))}
@@ -198,7 +218,8 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
     off_bike = [s for s in sessions if s.get("status") != "done" and s.get("off_bike")]
     yesterday = today - timedelta(days=1)
     streak = _streak(rode, today)
-    out = {"state": "rest", "session_id": None, "why": "", "then": "", "moved": [], "schedule": {}}
+    out = {"state": "rest", "session_id": None, "why": "", "then": "", "moved": [], "schedule": {}, "folded": [],
+           "dropped": []}
 
     def finish(start_from: date, today_session: dict | None) -> dict:
         riding, harder = set(rode), set(hard_days)
@@ -211,9 +232,38 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
             riding.add(today)
             if hard(today_session["kind"]):
                 harder.add(today)
-        placed = schedule(rest, start_from, end, riding, harder) or {}
+        placed = schedule(rest, start_from, end, riding, harder)
+        # No room for everything: let go of what matters least for the goal, one at a time, and say so.
+        pool = sorted(rest, key=lambda s: -PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else -99)
+        while placed is None and pool:
+            gone = pool.pop(0)
+            rest.remove(gone)
+            out["dropped"].append({"id": gone["id"], "title": gone["title"], "kind": gone["kind"],
+                                   "line": f"No room for {gone['title'].lower()} this week, so it's let go."})
+            placed = schedule(rest, start_from, end, riding, harder)
+        placed = placed or {}
         if today_session:
             placed[today_session["id"]] = today
+        # The leftovers: onto the first planned ride that can take a few hard efforts (a hard day or the long
+        # ride, never an easy day), else let go.
+        by_id = {s["id"]: s for s in open_}
+        hosts = sorted(((d, by_id[sid]) for sid, d in placed.items() if sid in by_id and by_id[sid]["kind"] in HOSTS),
+                       key=lambda x: x[0])
+        for f in folding:
+            p = f["progress"]
+            left = _mins_words(p["left_min"])
+            what = JOB_WORDS.get(p.get("job") or "", "work")
+            host = hosts[0] if hosts else None
+            if host:
+                d, h = host
+                out["folded"].append({"id": f["id"], "into": h["id"], "date": d.isoformat(), "job": p.get("job"),
+                                      "left_min": p["left_min"],
+                                      "line": f"{left} of {what} left from {f['title'].lower()}: added to "
+                                              f"{_days(d, today)} {h['title'].lower()}."})
+            else:
+                out["dropped"].append({"id": f["id"], "title": f["title"], "kind": f["kind"],
+                                       "line": f"{left} of {what} left from {f['title'].lower()}, and no hard day "
+                                               f"left this week to add it to, so it's let go."})
         out["schedule"] = {sid: d.isoformat() for sid, d in placed.items()}
         out["moved"] = [{"id": s["id"], "title": s["title"], "from": s["date"], "to": placed[s["id"]].isoformat()}
                         for s in open_ if s["id"] in placed and placed[s["id"]].isoformat() != s["date"]]

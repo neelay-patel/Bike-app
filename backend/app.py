@@ -280,6 +280,13 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such ride")
         return be.train_ride_note(uid, ride_id)
 
+    @app.post("/v1/train/changes/seen")
+    def plan_changes_seen(body: dict = Body(...), uid: int = Depends(user)):
+        """{"ids": [1, 2]}: the rider has seen these plan changes (Today's "Moved:" line), so they're not shown
+        again."""
+        be.seen_plan_changes(uid, [int(i) for i in body.get("ids") or []])
+        return {"ok": True}
+
     @app.put("/v1/plan/rides/{ride_id}/counts-as")
     def ride_counts_as(ride_id: str, body: dict = Body(...), uid: int = Depends(user)):
         """{"session_id": "..."} counts the ride as that session; {"session_id": null} as none. Rides are

@@ -720,16 +720,21 @@ class Backend:
         score: dict[str, int] = {}
         last: dict[str, dict] = {}
         for w in plan["weeks"]:
+            # Plans made before 21 Nov 2026 named winter sessions for the trainer; indoors or out is the rider's
+            # choice.
+            names = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}
+            w = {**w, "sessions": [{**s, "title": names.get(s["title"], s["title"])} for s in w["sessions"]]}
             w = {**w, "sessions": [self._grow(s, w["phase"], score, last) if s["date"] >= plan["grow_from"] else s
                                    for s in w["sessions"]]}
             counted = self._count_week(c, w, moved)
             self._learn(w, counted, done, feels, today, score, last)
+            replan = None
+            ws = date.fromisoformat(w["week_start"])
+            if ws <= today < ws + timedelta(days=7):
+                w, replan = self._replan(user_id, c, w, counted, done)
             sessions = []
             for s in w["sessions"]:
                 t = p.targets(s, c["aim"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
-                # Plans made before 21 Nov 2026 named winter sessions for the trainer; indoors or out is the
-                # rider's choice.
-                t["title"] = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}.get(t["title"], t["title"])
                 if t["kind"] == "group" and "Zwift" not in t["purpose"]:
                     t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
                 t["status"] = self._session_status(s, counted, done, w, today)
@@ -738,9 +743,20 @@ class Backend:
                     t["counted"] = counted["counted"][s["id"]]
                 elif s["id"] in counted["progress"]:
                     t["progress"] = counted["progress"][s["id"]]
+                if replan:
+                    f = next((x for x in replan["folded"] if x["id"] == s["id"]), None)
+                    if f:
+                        t["folded_into"] = {"session_id": f["into"], "date": f["date"], "line": f["line"]}
+                    added = [x["line"] for x in replan["folded"] if x["into"] == s["id"]]
+                    if added:
+                        t["added"] = added
+                    gone = next((x for x in replan["dropped"] if x["id"] == s["id"]), None)
+                    if gone:
+                        t["dropped"] = gone["line"]
                 t["summary"] = p.describe(t) if s["steps"] else s["purpose"]
                 sessions.append(t)
             weeks.append({**w, "sessions": sessions, "rides": counted["rides"], "extra": counted["extra"],
+                          "replan": replan,
                           "done": sum(1 for s in sessions if s["status"] == "done"), "total": len(sessions)})
         this_week = next((w for w in weeks if w["week_start"] <= today.isoformat() <
                           (date.fromisoformat(w["week_start"]) + timedelta(days=7)).isoformat()), None)
@@ -751,6 +767,25 @@ class Backend:
                 "zones": {z: {"name": v["name"], "pct_ftp": [round(v["ftp"][0] * 100), round(v["ftp"][1] * 100)]}
                           for z, v in p.ZONES.items()},
                 "this_week": this_week["index"] if this_week else None, "weeks": weeks}
+
+    def _replan(self, user_id: int, c: dict, w: dict, counted: dict, done: set) -> tuple[dict, dict]:
+        """This week laid out again from what's left (docs/train-method.md, after every ride): the open sessions
+        on the days left within the limits, small leftovers added to a planned ride, and what doesn't fit let go.
+        The leftovers become a set in their host session, so its page, the Watch and the spoken cues have them."""
+        from rideengine.analysis import plan as p
+        from rideengine.analysis import today as td
+        light = [{**s, "status": self._session_status(s, counted, done, w, c["today"]),
+                  "progress": counted["progress"].get(s["id"])} for s in w["sessions"]]
+        readiness = (self.recovery(user_id).get("readiness") or {}).get("status", "unknown")
+        t = td.plan_today(light, self._recent_kinds(c), c["today"], date.fromisoformat(w["week_start"]), readiness)
+        if t["folded"]:
+            by_id = {s["id"]: s for s in w["sessions"]}
+            for f in t["folded"]:
+                block = p.leftover(f["job"], f["left_min"])
+                if block and f["into"] in by_id:
+                    by_id[f["into"]] = p.with_leftover(by_id[f["into"]], block)
+            w = {**w, "sessions": [by_id[s["id"]] for s in w["sessions"]]}
+        return w, t
 
     @staticmethod
     def _grow(s: dict, phase: str, score: dict, last: dict) -> dict:
@@ -961,7 +996,9 @@ class Backend:
                                            if nxt else ""),
                     "moved": [], "next": [self._next_item(nxt, c["today"])] if nxt else [],
                     "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": None}
-        t = td.plan_today(week["sessions"], recent, c["today"], date.fromisoformat(week["week_start"]), readiness)
+        t = week.get("replan") or td.plan_today(week["sessions"], recent, c["today"],
+                                                date.fromisoformat(week["week_start"]), readiness)
+        changes = self._plan_changes(user_id, c, week, t)
         session = next((s for s in week["sessions"] if s["id"] == t["session_id"]), None)
         feel = _feel(session) if session else None
         latest = None
@@ -1004,7 +1041,103 @@ class Backend:
                 "then": t["then"], "moved": t["moved"], "next": [self._next_item(x, c["today"], t["schedule"].get(x["id"])) for x in upcoming],
                 "next_note": next((f"{x['title']} is still open this week." for x in week["sessions"]
                                    if x.get("off_bike") and x.get("status") != "done"), None),
+                "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
+
+    def _plan_changes(self, user_id: int, c: dict, week: dict, t: dict) -> list[dict]:
+        """Store how the week is laid out now and, when that differs from last time, what changed and why
+        (docs/train-method.md "When the plan changes"): sessions moved to another day, leftovers added to a ride,
+        sessions let go. The reason names the evidence ("Tuesday's ride did the punch"), never a rule. Returns
+        this week's changes the rider hasn't seen, newest first."""
+        from rideengine.analysis import today as td
+        ws = week["week_start"]
+        now = {"schedule": t.get("schedule", {}), "folded": {f["id"]: f["into"] for f in t.get("folded", [])},
+               "dropped": [d["id"] for d in t.get("dropped", [])]}
+        titles = {s["id"]: s["title"] for s in week["sessions"]}
+        with self.lock:
+            row = self.db.execute("SELECT data, at FROM plan_snapshots WHERE user_id = ? AND week_start = ?",
+                                  (user_id, ws)).fetchone()
+        items = []
+        if row:
+            before = json.loads(row["data"])
+            for sid, d in now["schedule"].items():
+                was = before["schedule"].get(sid)
+                if was and was != d and sid not in before.get("dropped", []):
+                    items.append({"kind": "moved", "session_id": sid, "title": titles.get(sid, ""), "from": was, "to": d})
+            for f in t.get("folded", []):
+                if before.get("folded", {}).get(f["id"]) != f["into"]:
+                    items.append({"kind": "folded", "session_id": f["id"], "into": f["into"], "line": f["line"]})
+            for d in t.get("dropped", []):
+                if d["id"] not in before.get("dropped", []):
+                    items.append({"kind": "dropped", "session_id": d["id"], "title": d["title"], "line": d["line"]})
+        stamp = db.now()
+        with self.lock:
+            if row is None or json.loads(row["data"]) != now:
+                self.db.execute("INSERT OR REPLACE INTO plan_snapshots (user_id, week_start, data, at) VALUES (?, ?, ?, ?)",
+                                (user_id, ws, json.dumps(now), stamp))
+        if items:
+            reason = self._change_reason(c, week, t, row["at"] if row else None)
+            moved = [i for i in items if i["kind"] == "moved"]
+            parts = []
+            if moved:
+                parts.append("Moved: " + ", ".join(
+                    # Weekday names, not "tomorrow": the line is kept, and must stay true when read later.
+                    f"{i['title'].lower()} to {td.WEEKDAY[date.fromisoformat(i['to']).weekday()]}" for i in moved) + ".")
+            parts += [i["line"] for i in items if i["kind"] == "folded"]
+            gone = [i for i in items if i["kind"] == "dropped" and i["line"].startswith("No room for")]
+            parts += [i["line"] for i in items if i["kind"] == "dropped" and i not in gone]
+            if len(gone) > 1:
+                names = [i["title"].lower() for i in gone]
+                parts.append(f"No room for {', '.join(names[:-1])} and {names[-1]} this week, so they're let go.")
+            else:
+                parts += [i["line"] for i in gone]
+            if any(i["kind"] == "dropped" for i in items):
+                parts.append("Next week starts fresh.")
+            line = " ".join(parts)
+            line = line[0].upper() + line[1:] if line else line
+            with self.lock:
+                self.db.execute("INSERT INTO plan_changes (user_id, week_start, data, at) VALUES (?, ?, ?, ?)",
+                                (user_id, ws, json.dumps({"items": items, "line": line, "reason": reason}), stamp))
+        with self.lock:
+            rows = self.db.execute("SELECT id, data, at FROM plan_changes WHERE user_id = ? AND week_start = ? "
+                                   "AND seen = 0 ORDER BY id DESC LIMIT 3", (user_id, ws)).fetchall()
+        return [{"id": r["id"], "at": r["at"], **{k: v for k, v in json.loads(r["data"]).items() if k != "items"},
+                 "big": any(i["kind"] == "dropped" for i in json.loads(r["data"])["items"])} for r in rows]
+
+    @staticmethod
+    def _change_reason(c: dict, week: dict, t: dict, since: Optional[float]) -> str:
+        """The evidence behind a change, in a few words: the ride since the week was last laid out and the job it
+        did, how a ride felt or recovery (Today's own why), a day gone by without riding, or the days left."""
+        from rideengine.analysis import today as td
+        words = {"punch": "the punch", "top_end": "the top-end work", "hold": "the steady work",
+                 "long": "the long ride", "easy": "the easy riding"}
+        new = sorted((r for r in week.get("rides", []) if since is None or r["start"] > since),
+                     key=lambda r: r["start"])
+        if new:
+            r = new[-1]
+            day = td.WEEKDAY[date.fromisoformat(r["date"]).weekday()]
+            day = "Today" if r["date"] == c["today"].isoformat() else day
+            jobs = (r.get("jobs") or {}).get("jobs", [])
+            done = [j for j in jobs if j["status"] in ("done", "more")]
+            part = [j for j in jobs if j["status"] == "part"]
+            if done:
+                return f"{day}'s ride did {' and '.join(words.get(j['job'], j['job']) for j in done)}."
+            if part:
+                return f"{day}'s ride did part of {words.get(part[0]['job'], part[0]['job'])}."
+            return f"{day}'s ride."
+        why = t.get("why") or ""
+        if "wrecked" in why or "recovery" in why or "hurt" in why:
+            return why.split(". ")[0].rstrip(".") + "."
+        yesterday = c["today"] - timedelta(days=1)
+        if since is not None and datetime.fromtimestamp(since).date() <= yesterday and \
+                not any(r["date"] == yesterday.isoformat() for r in week.get("rides", [])):
+            return f"{td.WEEKDAY[yesterday.weekday()]} went by without a ride."
+        return "To fit the days left."
+
+    def seen_plan_changes(self, user_id: int, ids: list[int]) -> None:
+        with self.lock:
+            self.db.executemany("UPDATE plan_changes SET seen = 1 WHERE user_id = ? AND id = ?",
+                                [(user_id, i) for i in ids])
 
     @staticmethod
     def _next_item(session: dict, today: date, on: Optional[str] = None) -> dict:
@@ -1160,8 +1293,9 @@ class Backend:
         ws = date.fromisoformat(week["week_start"])
         if ws <= c["today"] < ws + timedelta(days=7):
             readiness = (self.recovery(user_id).get("readiness") or {}).get("status", "unknown")
-            t = td.plan_today(week["sessions"], self._recent_kinds(c), c["today"], ws, readiness)
-            out.update(schedule=t["schedule"], moved=t["moved"])
+            t = week.get("replan") or td.plan_today(week["sessions"], self._recent_kinds(c), c["today"], ws, readiness)
+            out.update(schedule=t["schedule"], moved=t["moved"], folded=t.get("folded", []),
+                       dropped=t.get("dropped", []))
         return out
 
     def _ridden_against(self, user_id: int, c: dict, session: dict, work: Optional[dict], ride_id: str) -> Optional[dict]:

@@ -275,3 +275,57 @@ def test_sessions_grow_from_the_evidence():
     # Base weeks grow at most halfway; easy, long and group rides don't grow.
     assert p.grown({"kind": "surges", "seconds": 3300, "indoor": True}, 8, "base")["level"] == 0.5
     assert p.grown({"kind": "long", "seconds": 7200}, 8, "build") is None
+
+
+def test_leftovers_join_a_planned_ride_and_what_doesnt_fit_is_let_go():
+    """Step 3 (docs/train-method.md): a job with half or less left joins the next hard day or the long ride;
+    when the week can't fit everything, what matters least for the goal goes, and both are said."""
+    ws = date(2026, 11, 23)
+    def s(sid, kind, day, status="upcoming", **kw):
+        return {"id": sid, "kind": kind, "title": {"surges": "Surges", "steady": "Sweet spot", "long": "Long ride",
+                                                   "endurance": "Endurance"}[kind],
+                "date": (ws + timedelta(days=day)).isoformat(), "status": status, "steps": [], **kw}
+    part = {"job": "punch", "have_min": 5.0, "want_min": 7.5, "left_min": 2.5, "line": "Punch: 5 of 7.5 min done."}
+    week = [s("mon", "surges", 0, "open", progress=part), s("wed", "steady", 2), s("sat", "long", 5),
+            s("sun", "endurance", 6)]
+    recent = [{"date": ws, "kind": "surges", "minutes": 60}]
+    t = td.plan_today(week, recent, ws + timedelta(days=1), ws)
+    assert "mon" not in t["schedule"]                         # not redone as a whole session
+    (f,) = t["folded"]
+    assert f["into"] == "wed" and f["line"] == "2.5 min of punch left from surges: added to tomorrow's sweet spot."
+    # More than half left: it stays a session of its own.
+    big = {**part, "have_min": 2.0, "left_min": 5.5}
+    t = td.plan_today([s("mon", "surges", 0, "open", progress=big)] + week[1:], recent, ws + timedelta(days=1), ws)
+    assert "mon" in t["schedule"] and not t["folded"]
+    # Saturday, three sessions left and two days: the endurance ride goes, and it's said.
+    late = [s("thu", "surges", 3, "open"), s("sat", "long", 5), s("sun", "endurance", 6)]
+    t = td.plan_today(late, [], ws + timedelta(days=5), ws)
+    assert [d["id"] for d in t["dropped"]] == ["sun"] and "let go" in t["dropped"][0]["line"]
+    assert set(t["schedule"]) == {"thu", "sat"} or set(t["schedule"]) == {"sat", "thu"}
+
+
+def test_plan_changes_are_stored_with_their_reason(env):
+    """The week laid out again after a ride: what moved, and why in the rider's terms, said once."""
+    be, uid, client, _ = env
+    ws = "2026-11-23"
+    week = {"week_start": ws, "sessions": [{"id": "wed", "title": "Sweet spot"}, {"id": "sun", "title": "Endurance"}],
+            "rides": []}
+    c = {"today": date(2026, 11, 24)}
+    t = {"schedule": {"wed": "2026-11-25", "sun": "2026-11-29"}, "folded": [], "dropped": []}
+    assert be._plan_changes(uid, c, week, t) == []                 # the first layout: nothing changed yet
+    assert be._plan_changes(uid, c, week, t) == []                 # the same again: still nothing
+    # Wednesday's ride did the punch; the sweet spot moves to Thursday.
+    week["rides"] = [{"ride_id": "r", "start": 4102444800, "date": "2026-11-25",
+                      "jobs": {"jobs": [{"job": "punch", "status": "done"}]}}]
+    t = {"schedule": {"wed": "2026-11-26", "sun": "2026-11-29"}, "folded": [], "dropped": []}
+    (ch,) = be._plan_changes(uid, {"today": date(2026, 11, 25)}, week, t)
+    assert ch["line"] == "Moved: sweet spot to Thursday." and ch["reason"] == "Today's ride did the punch."
+    assert not ch["big"]
+    # Seen: not shown again.
+    assert client.post("/v1/train/changes/seen", json={"ids": [ch["id"]]}).json() == {"ok": True}
+    assert be._plan_changes(uid, {"today": date(2026, 11, 25)}, week, t) == []
+    # Letting a session go is a bigger change.
+    t = {"schedule": {"wed": "2026-11-26"}, "folded": [],
+         "dropped": [{"id": "sun", "title": "Endurance", "line": "No room for endurance this week, so it's let go."}]}
+    (ch,) = be._plan_changes(uid, {"today": date(2026, 11, 28)}, week, t)
+    assert ch["big"] and ch["line"] == "No room for endurance this week, so it's let go. Next week starts fresh."

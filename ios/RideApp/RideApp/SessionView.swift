@@ -80,6 +80,17 @@ struct SessionDetail: View {
                 }
                 .padding(.top, 4)
             }
+            ForEach(s.added ?? [], id: \.self) { a in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "plus.circle").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.cobalt)
+                    Text(a).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 4)
+            }
+            if let d = s.dropped {
+                Text(d).font(Theme.text(14)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
             if let p = s.progress {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "circle.lefthalf.filled").font(.system(size: 13)).foregroundStyle(Theme.cobalt)

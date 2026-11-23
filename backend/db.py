@@ -219,6 +219,26 @@ CREATE TABLE IF NOT EXISTS insight_state (
     gen           INTEGER NOT NULL DEFAULT 0,   -- bumped on every ride change
     updated_at    REAL
 );
+
+-- The week as it was last laid out (train.plan_today: days, leftovers, sessions let go), to tell what changed.
+CREATE TABLE IF NOT EXISTS plan_snapshots (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    week_start    TEXT NOT NULL,
+    data          TEXT NOT NULL,
+    at            REAL NOT NULL,
+    PRIMARY KEY (user_id, week_start)
+);
+
+-- Each time the week re-plans itself after new information (docs/train-method.md "When the plan changes"):
+-- what changed and why, in a line the rider sees once.
+CREATE TABLE IF NOT EXISTS plan_changes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    week_start    TEXT NOT NULL,
+    data          TEXT NOT NULL,        -- {"items": [...], "line": "...", "reason": "..."}
+    at            REAL NOT NULL,
+    seen          INTEGER NOT NULL DEFAULT 0
+);
 """
 
 # Columns added after the first release of a table: (table, column, definition).
