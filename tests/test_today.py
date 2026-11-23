@@ -346,3 +346,56 @@ def test_what_the_rider_sees_after_re_planning(env):
     week["sessions"][1]["status"] = week["sessions"][2]["status"] = "done"
     week["replan"]["schedule"] = {}
     assert Backend._left_this_week({"today": date(2026, 11, 28)}, week) == "That's every job this week done."
+
+
+def test_review_changes_show_in_the_plan(env):
+    """Step 6: a change the review made (another way, a swap, an easier week) shows in the plan's sessions."""
+    be, uid, client, _ = env
+    client.post("/v1/sync/garmin_personal")
+    client.put("/v1/goals/current", json={"objective": "faster", "aspiration": "keep_up_group"})
+    view = be.plan_view(uid)
+    w1, w2 = view["weeks"][1], view["weeks"][2]
+    easy = next(s for s in w1["sessions"] if s["kind"] in ("endurance", "easy"))
+    be._apply_proposal(uid, {"apply": {"type": "swap", "session_id": easy["id"], "to_kind": "steady"}}, w1)
+    be._apply_proposal(uid, {"apply": {"type": "another_way", "job": "punch", "text": "a group ride"}}, w1)
+    be._apply_proposal(uid, {"apply": {"type": "ease", "week_start": w2["week_start"]}}, w2)
+    view = be.plan_view(uid)
+    s = next(x for x in view["weeks"][1]["sessions"] if x["id"] == easy["id"])
+    assert s["kind"] == "steady" and s["swapped_from"] == easy["title"] and s["job"] == "hold"
+    assert any(x.get("another_way") == "a group ride" for x in view["weeks"][1]["sessions"] if x["job"] == "punch")
+    eased = view["weeks"][2]
+    assert eased["eased"] and all(x["kind"] in ("easy", "endurance", "long") for x in eased["sessions"] if not x["off_bike"])
+    # A change that can't be made now is refused; an unknown week has no review.
+    assert client.post("/v1/train/review/proposals/nope:ease", json={"accept": True}).status_code == 409
+    assert client.get("/v1/train/review", params={"week": "1999-01-04"}).status_code == 404
+    r = client.get("/v1/train/review", params={"week": view["weeks"][0]["week_start"]}).json()
+    assert r["lines"] and isinstance(r["proposals"], list)
+
+
+def test_a_big_change_waits_for_the_rider_and_stays_on_the_review(env, monkeypatch):
+    from rideengine.analysis import review as rv
+    be, uid, client, _ = env
+    client.post("/v1/sync/garmin_personal")
+    client.put("/v1/goals/current", json={"objective": "faster", "aspiration": "keep_up_group"})
+    view = be.plan_view(uid)
+    w0, w1 = view["weeks"][0], view["weeks"][1]
+    real = rv.review
+
+    def fake(week, history, markers, feels, next_week, hours, strained_days=0):
+        out = real(week, history, markers, feels, next_week, hours)
+        if next_week and next_week.get("phase") not in ("recovery", "taper") and week["week_start"] == w0["week_start"]:
+            out["proposals"].append({"id": f"{w0['week_start']}:ease", "type": "ease", "size": "big",
+                                     "change": "Make next week an easier one.", "reason": "Something hurt.",
+                                     "rules": ["an easier week early when you're tired"],
+                                     "apply": {"type": "ease", "week_start": w1["week_start"]}})
+        return out
+    monkeypatch.setattr(rv, "review", fake)
+    r = client.get("/v1/train/review", params={"week": w0["week_start"]}).json()
+    (p,) = [x for x in r["proposals"] if x["type"] == "ease"]
+    assert p["status"] == "open"                                  # waits for the rider
+    assert not be.plan_view(uid)["weeks"][1].get("eased")
+    r = client.post(f"/v1/train/review/proposals/{p['id']}", json={"accept": True}).json()
+    assert be.plan_view(uid)["weeks"][1]["eased"]                 # applied
+    # The rule no longer fires (next week is easy now), but the decision stays on the review.
+    assert [x["status"] for x in r["proposals"] if x["type"] == "ease"] == ["accepted"]
+    assert client.post(f"/v1/train/review/proposals/{p['id']}", json={"accept": True}).status_code == 409

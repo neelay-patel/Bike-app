@@ -360,6 +360,28 @@ struct TrainingPlan: Decodable {
 // MARK: - Train (docs/train-tab.md): today, the week as counted, and a note for each ride
 
 /// GET /v1/train/today. state: session | rest | done | no_plan.
+/// The Sunday review (rideengine/analysis/review.py): the week in a few lines, and next week's changes.
+struct TrainReview: Decodable {
+    let weekStart: String
+    let index: Int
+    let lines: [String]
+    let proposals: [Proposal]
+    let done: Int
+    let total: Int
+    let story: Story?
+
+    struct Proposal: Decodable, Identifiable {
+        let id: String
+        let type: String
+        let size: String          // small (applied on its own) | big (waits for the rider)
+        let change: String
+        let reason: String
+        let rules: [String]
+        let status: String        // open | applied | accepted | declined
+    }
+    struct Story: Decodable { let summary: String; let proposals: [String: String] }
+}
+
 /// A line in the coach's voice, with the key of its research in docs/training-science.md.
 struct Learn: Decodable, Hashable { let key: String; let text: String }
 
@@ -383,7 +405,7 @@ struct TrainToday: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
-        case next, nextNote, changes, learn
+        case next, nextNote, changes, learn, review
         case where_ = "where"
     }
     let readiness: String?
@@ -397,6 +419,10 @@ struct TrainToday: Decodable {
     struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
     /// Why today's work works, in a line (its research: docs/training-science.md).
     let learn: Learn?
+    /// The week in review (Sunday evening to Tuesday, or while a change waits for the rider's OK).
+    let review: ReviewCard?
+
+    struct ReviewCard: Decodable { let weekStart: String; let index: Int; let line: String?; let open: Int }
     /// The week re-planned itself (docs/train-method.md "When the plan changes"): what changed and why, until seen.
     let changes: [Change]?
 
@@ -595,6 +621,10 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     let grew: String?
     /// The job's shape in words, so any workout can do it ("Or any ride with 7.5 min or more of hard efforts…").
     let shape: String?
+    /// From a Sunday review: another way to do this job, the session it replaced, or the one it eased.
+    let anotherWay: String?
+    let swappedFrom: String?
+    let easedFrom: String?
     /// Re-planned this week (docs/train-method.md): leftovers of other sessions added to this one ...
     let added: [String]?
     /// ... this session's leftover, added to another ride ...
@@ -1283,6 +1313,16 @@ struct APIClient {
 
     /// A session with how to ride it (its `guide`).
     func planSession(_ sessionId: String) async throws -> PlanSession { try await get("v1/plan/sessions/\(sessionId)") }
+
+    func trainReview(week: String? = nil) async throws -> TrainReview {
+        try await get("v1/train/review", query: week.map { [URLQueryItem(name: "week", value: $0)] } ?? [])
+    }
+
+    func decideProposal(_ id: String, accept: Bool) async throws -> TrainReview {
+        let body = try JSONSerialization.data(withJSONObject: ["accept": accept])
+        let path = "v1/train/review/proposals/" + (id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(.init(charactersIn: "/"))) ?? id)
+        return try Self.decoder.decode(TrainReview.self, from: await send(request("POST", path, body: body)))
+    }
 
     /// The rider has seen these plan changes: they're not shown again.
     func seenChanges(_ ids: [Int]) async throws {

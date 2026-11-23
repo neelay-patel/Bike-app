@@ -678,6 +678,10 @@ class Backend:
         new = p.build_plan(goal, c["today"], season, days, times, hours)
         # Sessions grow from the evidence from here on (sessions already shown keep their size).
         new["grow_from"] = (old.get("grow_from") if same_goal and old.get("grow_from") else c["today"].isoformat())
+        if same_goal:   # what the Sunday reviews changed stays
+            for k in ("alternatives", "swaps", "eased"):
+                if old.get(k):
+                    new[k] = old[k]
         if same_goal:  # keep the sessions before today
             kept = [s for w in old["weeks"] for s in w["sessions"] if s["date"] < c["today"].isoformat()]
             if kept and new["weeks"]:
@@ -724,6 +728,7 @@ class Backend:
             # choice.
             names = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}
             w = {**w, "sessions": [{**s, "title": names.get(s["title"], s["title"])} for s in w["sessions"]]}
+            w = self._reviewed(plan, w)
             w = {**w, "sessions": [self._grow(s, w["phase"], score, last) if s["date"] >= plan["grow_from"] else s
                                    for s in w["sessions"]]}
             counted = self._count_week(c, w, moved)
@@ -739,6 +744,9 @@ class Backend:
                     t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
                 t["status"] = self._session_status(s, counted, done, w, today)
                 t["job"] = p.JOB_OF.get(s["kind"])
+                alt = (plan.get("alternatives") or {}).get(t["job"] or "")
+                if alt and w["week_start"] >= alt["from"] and not s.get("off_bike"):
+                    t["another_way"] = alt["text"]
                 if s["id"] in counted["counted"]:
                     t["counted"] = counted["counted"][s["id"]]
                 elif s["id"] in counted["progress"]:
@@ -790,6 +798,164 @@ class Backend:
                     by_id[f["into"]] = p.with_leftover(by_id[f["into"]], block)
             w = {**w, "sessions": [by_id[s["id"]] for s in w["sessions"]]}
         return w, t
+
+    @staticmethod
+    def _reviewed(plan: dict, w: dict) -> dict:
+        """The week as the Sunday reviews changed it (rideengine/analysis/review.py): a session swapped for the
+        job a stalled goal number needs, or the whole week made easier."""
+        from rideengine.analysis import plan as p
+        swaps = plan.get("swaps") or {}
+        sessions = []
+        for s in w["sessions"]:
+            if s["id"] in swaps and not s.get("off_bike"):
+                new = p.workout(swaps[s["id"]], 0.0, max(30, round((s.get("seconds") or 0) / 60)), s.get("indoor", True))
+                s = {**s, **new, "swapped_from": s["title"]}
+            sessions.append(s)
+        if w["week_start"] in (plan.get("eased") or []):
+            easier = []
+            for s in sessions:
+                if not s.get("off_bike"):
+                    kind = "long" if s["kind"] == "long" else "endurance" if (s.get("seconds") or 0) >= 45 * 60 else "easy"
+                    mins = max(30, round((s.get("seconds") or 0) / 60 * 0.7 / 5) * 5)
+                    s = {**s, **p.workout(kind, 0.0, mins, s.get("indoor", True)), "eased_from": s["title"]}
+                easier.append(s)
+            return {**w, "sessions": easier, "phase": "recovery", "eased": True}
+        return {**w, "sessions": sessions}
+
+    def train_review(self, user_id: int, week_start: Optional[str] = None) -> Optional[dict]:
+        """The Sunday review (docs/train-method.md "Week to week"): the week in a few lines, and next week's
+        proposed changes, each checked against the limits. Small ones apply on their own; big ones wait for the
+        rider. The AI coach, when on, says it in its own words (it can't add or drop a change)."""
+        from rideengine.analysis import headline as hl
+        from rideengine.analysis import review as rv
+        view = self.plan_view(user_id)
+        if view is None:
+            return None
+        c = self._plan_context(user_id)
+        tz = c["tz"]
+        now = datetime.now(tz)
+        weeks = view["weeks"]
+        if week_start is None:
+            this = self._this_week(view, c["today"])
+            late_sunday = c["today"].weekday() == 6 and now.hour >= self.REVIEW_AT[0]
+            end = c["today"] + timedelta(days=1) if late_sunday else c["today"] - timedelta(days=c["today"].weekday())
+            past = [w for w in weeks if date.fromisoformat(w["week_start"]) + timedelta(days=7) <= end]
+            week = past[-1] if past else None
+            if late_sunday and this:
+                week = this
+        else:
+            week = next((w for w in weeks if w["week_start"] == week_start), None)
+        if week is None:
+            return None
+        i = weeks.index(week)
+        history, next_week = weeks[:i], (weeks[i + 1] if i + 1 < len(weeks) else None)
+        ws = date.fromisoformat(week["week_start"])
+        end_ts = datetime.combine(ws + timedelta(days=7), datetime.min.time(), tz).timestamp()
+        then_ts = end_ts - 28 * 86400
+        markers = []
+        row = self._active_goal_row(user_id)
+        if row is not None:
+            goal = json.loads(row["data"])
+            own = self.me(user_id).get("ftp")
+            now_m = hl.four([f for f in c["feats"] if f["start"] < end_ts], ws + timedelta(days=6), goal, own)
+            then_m = hl.four([f for f in c["feats"] if f["start"] < then_ts], ws - timedelta(days=22), goal, own)
+            before = {m["id"]: m["current"] for m in then_m["metrics"]}
+            markers = [{"id": m["id"], "name": m["label"], "unit": m["unit"], "current": m["current"],
+                        "then": before.get(m["id"]), "target": m.get("target")}
+                       for m in now_m["metrics"] if m.get("focus")]
+        feels = [f for f in (self.ride_feel(user_id, r["ride_id"]) for r in week.get("rides", [])) if f]
+        r = rv.review(week, history, markers, feels, next_week, view["weekly_hours"])
+        with self.lock:
+            stored = {x["id"]: x for x in self.db.execute(
+                "SELECT id, status, data FROM plan_proposals WHERE user_id = ? AND id LIKE ?",
+                (user_id, week["week_start"] + ":%"))}
+        proposals = []
+        for prop in r["proposals"]:
+            why_not = rv.check(prop, next_week, view["weekly_hours"])
+            st = stored[prop["id"]]["status"] if prop["id"] in stored else None
+            if why_not and st is None:
+                continue                              # outside the limits: never offered
+            if prop["size"] == "small" and st is None:
+                self._apply_proposal(user_id, prop, next_week)
+                st = self._set_proposal(user_id, prop, "applied")
+            proposals.append({**prop, "status": st or "open"})
+        # Changes already decided stay on the review, even once the rule that made them no longer fires (an easier
+        # week accepted makes next week easy, so "tired" no longer proposes it).
+        shown = {x["id"] for x in proposals}
+        for pid, row in stored.items():
+            if pid not in shown and row["data"]:
+                proposals.append({**json.loads(row["data"]), "status": row["status"]})
+        on_bike = [s for s in week["sessions"] if not s.get("off_bike")]
+        out = {"week_start": week["week_start"], "index": week["index"], "lines": r["lines"],
+               "proposals": proposals, "done": sum(1 for s in on_bike if s["status"] == "done"), "total": len(on_bike),
+               "story": None}
+        if self.coach.allowed(user_id):
+            facts = {"week": r["lines"], "goal": [{k: m[k] for k in ("name", "unit", "current", "then", "target")}
+                                                  for m in markers],
+                     "sessions": [{"title": s["title"], "job": s.get("job"), "status": s["status"]}
+                                  for s in week["sessions"]],
+                     "how_rides_felt": [f["feel"] for f in feels],
+                     "proposals": [{"id": x["id"], "change": x["change"], "reason": x["reason"], "size": x["size"]}
+                                   for x in proposals]}
+            out["story"] = self.coach.week_review(user_id, week["week_start"], facts)
+        return out
+
+    def _review_card(self, user_id: int, c: dict) -> Optional[dict]:
+        """On Today from Sunday evening to Tuesday (or while a change waits for the rider): the week in review."""
+        now = datetime.now(c["tz"])
+        wd = c["today"].weekday()
+        if not (wd in (0, 1) or (wd == 6 and now.hour >= self.REVIEW_AT[0])):
+            return None
+        r = self.train_review(user_id)
+        if r is None:
+            return None
+        ask = sum(1 for p in r["proposals"] if p["status"] == "open")
+        return {"week_start": r["week_start"], "index": r["index"], "line": r["lines"][0] if r["lines"] else None,
+                "open": ask}
+
+    def _set_proposal(self, user_id: int, prop: dict, status: str) -> str:
+        data = json.dumps({k: v for k, v in prop.items() if k != "status"})
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO plan_proposals (user_id, id, status, at, data) VALUES (?, ?, ?, ?, ?)",
+                            (user_id, prop["id"], status, db.now(), data))
+        return status
+
+    def _apply_proposal(self, user_id: int, prop: dict, next_week: Optional[dict]) -> None:
+        """Make the change in the stored plan. Hours rebuild the plan from next week (keeping what's past)."""
+        a = prop["apply"]
+        if a["type"] == "hours":
+            self.make_plan(user_id, weekly_hours=a["weekly_hours"])
+            return
+        plan = self._active_plan(user_id)
+        if plan is None:
+            return
+        if a["type"] == "another_way":
+            plan.setdefault("alternatives", {})[a["job"]] = {"text": a["text"],
+                                                             "from": next_week["week_start"] if next_week else ""}
+        elif a["type"] == "swap":
+            plan.setdefault("swaps", {})[a["session_id"]] = a["to_kind"]
+        elif a["type"] == "ease":
+            plan.setdefault("eased", []).append(a["week_start"])
+        with self.lock:
+            self.db.execute("UPDATE plans SET data = ? WHERE plan_id = ?",
+                            (json.dumps({k: v for k, v in plan.items() if k != "plan_id"}), plan["plan_id"]))
+
+    def decide_proposal(self, user_id: int, pid: str, accept: bool) -> Optional[dict]:
+        """The rider's OK (or not now) on a big change. Checked again against the limits before it applies."""
+        from rideengine.analysis import review as rv
+        r = self.train_review(user_id, pid.split(":")[0])
+        prop = next((x for x in (r or {}).get("proposals", []) if x["id"] == pid), None)
+        if prop is None or prop["status"] != "open":
+            return None
+        if accept:
+            view = self.plan_view(user_id)
+            i = next((k for k, w in enumerate(view["weeks"]) if w["week_start"] == r["week_start"]), None)
+            nxt = view["weeks"][i + 1] if i is not None and i + 1 < len(view["weeks"]) else None
+            if rv.check(prop, nxt, view["weekly_hours"]):
+                return None
+            self._apply_proposal(user_id, prop, nxt)
+        self._set_proposal(user_id, prop, "accepted" if accept else "declined")
+        return self.train_review(user_id, r["week_start"])
 
     @staticmethod
     def _grow(s: dict, phase: str, score: dict, last: dict) -> dict:
@@ -1048,7 +1214,7 @@ class Backend:
                 "next_note": next((f"{x['title']} is still open this week." for x in week["sessions"]
                                    if x.get("off_bike") and x.get("status") != "done"), None),
                 "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
-                "learn": today_learn,
+                "learn": today_learn, "review": self._review_card(user_id, c),
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
     @staticmethod
@@ -1264,17 +1430,17 @@ class Backend:
         else:
             review_week = None
         if review_week:
-            w = self.train_week(user_id, review_week.isoformat())
-            if w:
-                bests = sum(1 for r in w["rides"] if r.get("minutes", 0) >= 15 and any(
-                    "your best yet" in m for m in (self.train_ride_note(user_id, r["ride_id"], _today={}) or {}).get("means", [])))
-                body = [f"{w['done']} of {w['total']} sessions done."]
-                if bests:
-                    body.append(f"{bests} new best{'s' if bests > 1 else ''}.")
-                body.append("See how each ride counted, and what's next.")
+            r = self.train_review(user_id, review_week.isoformat())
+            if r:
+                body = [r["lines"][0]] if r["lines"] else []
+                ask = [p for p in r["proposals"] if p["status"] == "open"]
+                if ask:
+                    body.append(f"{len(ask)} change{'s' if len(ask) > 1 else ''} for next week to look at.")
+                else:
+                    body.append("See how the week went, and what's next.")
                 items.append({"id": f"review:{review_week}", "kind": "review",
-                              "title": "Your week: all done" if w["done"] >= w["total"] else f"Your week: {w['done']} of {w['total']}",
-                              "body": " ".join(body), "opens": {"screen": "week", "week_start": review_week.isoformat()},
+                              "title": "Your week in review",
+                              "body": " ".join(body), "opens": {"screen": "review", "week_start": review_week.isoformat()},
                               "at": at(review_week + timedelta(days=6), self.REVIEW_AT)})
 
         # The morning brief, for the phone to schedule: tomorrow (and today, if it's still early).

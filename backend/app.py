@@ -280,6 +280,23 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such ride")
         return be.train_ride_note(uid, ride_id)
 
+    @app.get("/v1/train/review")
+    def train_review(week: Optional[str] = None, uid: int = Depends(user)):
+        """The Sunday review: the week in a few lines, and next week's proposed changes (small ones already
+        applied; big ones open for the rider's OK)."""
+        r = be.train_review(uid, week)
+        if r is None:
+            raise HTTPException(404, "No week to review yet")
+        return r
+
+    @app.post("/v1/train/review/proposals/{pid}")
+    def review_proposal(pid: str, body: dict = Body(...), uid: int = Depends(user)):
+        """{"accept": true} applies a proposed change (checked again first); false says not now."""
+        r = be.decide_proposal(uid, pid, bool(body.get("accept")))
+        if r is None:
+            raise HTTPException(409, "That change can't be made now")
+        return r
+
     @app.post("/v1/train/changes/seen")
     def plan_changes_seen(body: dict = Body(...), uid: int = Depends(user)):
         """{"ids": [1, 2]}: the rider has seen these plan changes (Today's "Moved:" line), so they're not shown

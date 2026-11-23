@@ -70,6 +70,37 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
+REVIEW_SYSTEM = """You are the coach in Kova, a cycling app. You write the Sunday review of a rider's week. The app's
+engine has already worked everything out: how the week went, and the changes it proposes for next week, each made by
+a fixed rule and checked against the plan's limits. You put it into words the rider reads right the first time.
+
+Write two things:
+- summary: two to four short sentences, about 60 words: how the week went, honestly, and what it means for the goal.
+  Praise only what's earned, and name it; never guilt about what was missed or let go.
+- proposals: for each proposed change in the facts, its id and one sentence on why it helps, in plain words. Keep
+  every proposal: you may not add a change, drop one, or change what it does.
+
+Rules (Kova's words guide):
+- Use only numbers that appear in the facts, written the same way. Never calculate new numbers.
+- Plain words. Never: FTP, TSS, CTL, zones by number, ERG, "load", "compliance". Say "what you could hold for about
+  an hour", "your best hard minute", "easy", "hard".
+- Never empty praise ("Great job!", "Crushed it"). Speak to the rider as "you"; "I" only for a decision the coach
+  made. Indoors or out is the rider's choice. No medical advice; never mention recovery numbers.
+"""
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "Two to four short sentences."},
+        "proposals": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}, "why": {"type": "string"}},
+            "required": ["id", "why"], "additionalProperties": False}},
+    },
+    "required": ["summary", "proposals"],
+    "additionalProperties": False,
+}
+
 _NUM = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?![\w])")
 
 
@@ -154,12 +185,13 @@ class Coach:
         return self._client
 
     # --- the ride story --------------------------------------------------------------------------------
-    def ride_story(self, user_id: int, ride_id: str, facts: dict, wait: bool = False) -> Optional[dict]:
+    def ride_story(self, user_id: int, ride_id: str, facts: dict, wait: bool = False,
+                   key: Optional[str] = None) -> Optional[dict]:
         """The saved story for these facts, or None. If there is none yet, it's written in the background (or
         now, with `wait`), so the screen shows the engine's words first and the coach's on the next look."""
         if not self.allowed(user_id):
             return None
-        key = f"ride:{ride_id}"
+        key = key or f"ride:{ride_id}"
         h = _hash(facts)
         with self.lock:
             row = self.db.execute("SELECT input_hash, output FROM coach_texts WHERE user_id = ? AND key = ?",
@@ -189,19 +221,26 @@ class Coach:
         import anthropic
         started = time.time()
         usage, out = None, {"ok": False}
+        review = key.startswith("review:")
         try:
             r = self.client().beta.messages.create(
                 model=MODEL,
                 max_tokens=2000,
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
-                output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
-                system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": "Facts about this ride (JSON):\n" + json.dumps(facts, sort_keys=True)}],
+                output_config={"effort": "low", "format": {"type": "json_schema",
+                                                           "schema": REVIEW_SCHEMA if review else SCHEMA}},
+                system=[{"type": "text", "text": REVIEW_SYSTEM if review else SYSTEM,
+                         "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": f"Facts about this {'week' if review else 'ride'} (JSON):\n"
+                                                      + json.dumps(facts, sort_keys=True)}],
             )
             usage = r.usage
             if r.stop_reason == "refusal":
                 out = {"ok": False, "why": "refusal"}
+            elif review:
+                data = json.loads(next((b.text for b in r.content if b.type == "text"), ""))
+                out = _check_review(data, facts) | {"model": r.model}
             else:
                 text = next((b.text for b in r.content if b.type == "text"), "")
                 data = json.loads(text)
@@ -223,11 +262,29 @@ class Coach:
                              1 if out.get("ok") else 0, time.time()))
         return out if out.get("ok") else None
 
+    def week_review(self, user_id: int, week_start: str, facts: dict) -> Optional[dict]:
+        """The Sunday review in the coach's words, for these facts (written in the background the first time, like
+        a ride story). The engine's words stay when there's none."""
+        return self.ride_story(user_id, week_start, facts, key=f"review:{week_start}")
+
     def spend(self, user_id: int) -> dict:
         with self.lock:
             row = self.db.execute("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS usd, COALESCE(SUM(ok), 0) AS ok "
                                   "FROM coach_usage WHERE user_id = ?", (user_id,)).fetchone()
         return {"calls": row["n"], "ok": row["ok"], "usd": round(row["usd"], 4)}
+
+
+def _check_review(data: dict, facts: dict) -> dict:
+    """The review's words pass only if every number is in the facts and every proposal is there, unchanged in
+    number: the AI words the engine's changes, it never adds or drops one."""
+    want = [p["id"] for p in facts.get("proposals", [])]
+    got = {p["id"]: p["why"].strip() for p in data.get("proposals", [])}
+    if sorted(got) != sorted(want):
+        return {"ok": False, "why": "proposals"}
+    bad = check_numbers(data["summary"] + " " + " ".join(got.values()), facts)
+    if bad:
+        return {"ok": False, "why": "numbers", "bad": bad}
+    return {"ok": True, "summary": data["summary"].strip(), "proposals": got, "by": "ai"}
 
 
 def _hash(facts: dict) -> str:

@@ -104,22 +104,25 @@ On Neelay's iPhone, all pushed to origin/main:
   each time it opens. Needs the home Wi-Fi until the backend is hosted; the Mac's server is a login service.
 - **Kova:** name, "the climb" icon, opening screen (KOVA's letters rise in after the climb), About Kova.
 - **Efforts:** new efforts lead as their full ride card, this month in one line, then the collection by month.
-- **Train** (replaced Plan, 21 Nov; `docs/train-tab.md` steps 1-3 built): every ride classified by what it
-  contained and counted against the week's sessions whatever the day; Today picks the session or rest (why, how it
-  should feel, what's next); after each ride one constructive thing to try and which jobs it did
-  (`docs/train-method.md`); following a session without the phone: spoken cues with a lock-screen countdown, or
-  the session on the Apple Watch; the week as counted; the goal; the plan
-  ahead (calendar feed, Zwift export). The coach's notifications (after a ride, 07:30 brief, plan changes, Sunday
-  review). Indoors or out is always the rider's choice. Words: `docs/train-words.md`.
+- **Train** (replaced Plan, 21 Nov; the method `docs/train-method.md`, build steps 1-6 done 23 Nov): the plan
+  follows the riding. A week is a set of jobs (punch, top end, hold, long, easy) any fitting ride can do, counted
+  whatever the workout and the day; partly done leaves the rest open; sessions grow from the evidence; the week
+  re-plans after every ride (leftovers join a planned ride, what doesn't fit is let go) and says so in a "Moved:"
+  line. Today picks the session or rest with the job's shape for any workout; each ride says what it did, what's
+  left, one thing to try, what it did well and why the work works (research: `docs/training-science.md`, to be
+  reviewed by a coach). The Sunday review proposes next week's changes by fixed rules, checked by the engine;
+  bigger ones wait for the rider's OK. Following a session without the phone: spoken cues with a lock-screen
+  countdown, or the session on the Apple Watch. Indoors or out is always the rider's choice. Words:
+  `docs/train-words.md`.
 - **You:** rider card, the four headline numbers, fitness and recovery, badges, bests, tallies, home loop.
 - **Routes:** check a GPX, tune it, the Route Generator (describe a ride, now with a climbing target), send to Edge.
 
 ## Next steps (detail: `docs/roadmap.md`)
 1. **Reinstall the app by 28 Nov 2026** (free 7-day profile). The paid developer account is waiting on Apple support.
-2. **Live with Train** (first session day Mon 23 Nov) and adjust the counting, picking and words from real use.
-3. **Train steps 5-7** (`docs/train-tab.md`; notifications and the AI ride story built 21 Nov): the coach's
-   morning brief and Sunday review, changing the plan by talking, sending sessions to the bike; and the Method (the
-   research behind each rule, a coach's review). Goal: keep up with the fast group by 1 May 2027.
+2. **Live with Train** (the jobs model went live 23 Nov) and adjust the thresholds, growth and words from real use.
+3. **Train next** (`docs/train-tab.md`): the morning brief, changing the plan by talking, Garmin workouts; and the
+   Method's credential (a coach reviews `docs/training-science.md`, each reference checked). Goal: keep up with
+   the fast group by 1 May 2027.
 4. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
 5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).

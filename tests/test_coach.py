@@ -106,3 +106,15 @@ def test_feel_shapes_the_next_days():
     hurt = [{**r, "hurts": True} for r in rides((0, "surges"))]
     t = td.plan_today(w, hurt, MON + timedelta(days=1), MON, "good")
     assert t["state"] == "rest" and "see a physio or doctor" in t["why"]
+
+
+def test_the_review_words_keep_every_change_and_only_the_facts_numbers():
+    from backend.coach import _check_review
+    facts = {"week": ["3 of 4 jobs done.", "3 h 25 ridden, against 4 h planned."],
+             "proposals": [{"id": "w:ease", "change": "Make next week an easier one.", "reason": "Rides felt wrecked."}]}
+    ok = _check_review({"summary": "Three of four done, 3 h 25 in all.", "proposals": [{"id": "w:ease", "why": "Rest builds it."}]}, facts)
+    assert ok["ok"] and ok["proposals"] == {"w:ease": "Rest builds it."}
+    assert _check_review({"summary": "Fine.", "proposals": []}, facts)["why"] == "proposals"      # can't drop one
+    assert _check_review({"summary": "Fine.", "proposals": [{"id": "w:ease", "why": "x"}, {"id": "w:more", "why": "y"}]},
+                         facts)["why"] == "proposals"                                              # can't add one
+    assert _check_review({"summary": "You rode 5 h.", "proposals": [{"id": "w:ease", "why": "x"}]}, facts)["why"] == "numbers"

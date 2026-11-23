@@ -35,6 +35,7 @@ struct CoachMessage: Decodable, Identifiable {
 enum CoachRoute: Hashable {
     case ride(String)
     case week(String)
+    case review(String)
     case today
 }
 
@@ -129,6 +130,7 @@ final class CoachNotifier: NSObject, ObservableObject, UNUserNotificationCenterD
             switch screen {
             case "ride" where !ride.isEmpty: CoachNotifier.shared.route = .ride(ride)
             case "week" where !week.isEmpty: CoachNotifier.shared.route = .week(week)
+            case "review" where !week.isEmpty: CoachNotifier.shared.route = .review(week)
             default: CoachNotifier.shared.route = .today
             }
             completionHandler()

@@ -32,6 +32,10 @@ struct TrainView: View {
                             }
                         }
                         if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
+                        if let r = t.review {
+                            NavigationLink { ReviewView(week: r.weekStart) } label: { ReviewCardView(card: r) }
+                                .buttonStyle(.plain).arrive(4)
+                        }
                         if let c = t.changes?.first { PlanChangeLine(change: c, all: t.changes ?? []).arrive(4) }
                         if let days = t.days, !days.isEmpty {
                             NavigationLink { TrainWeekView() } label: {
@@ -70,6 +74,7 @@ struct TrainView: View {
                 switch route {
                 case .ride(let id): RideNoteView(rideId: id)
                 case .week(let start): TrainWeekView(start: start)
+                case .review(let start): ReviewView(week: start)
                 case .today: EmptyView()
                 }
             }
@@ -1103,6 +1108,134 @@ struct JobsDone: View {
             Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
             Text(j.line).font(Theme.text(14)).foregroundStyle(j.status == "also" ? Theme.inkMuted : Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - The Sunday review
+
+/// On Today, Sunday evening to Tuesday: the week in a line, and how many changes wait for the rider.
+struct ReviewCardView: View {
+    let card: TrainToday.ReviewCard
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                MonoLabel("Week \(card.index) in review", color: Theme.panelLabel)
+                if let l = card.line { Text(l).font(Theme.text(16, .semibold)).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true) }
+                if card.open > 0 {
+                    Text("\(card.open) change\(card.open > 1 ? "s" : "") for next week to look at")
+                        .font(Theme.text(14, .medium)).foregroundStyle(Theme.stripes[3])
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.panelLabel)
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(Rectangle())
+    }
+}
+
+/// The Sunday review (docs/train-method.md "Week to week"): how the week went, and what next week changes. Small
+/// changes are already made and said; bigger ones (the week's hours, the mix of jobs, an easier week) wait here for
+/// a yes or a not now. Every change says why, and the rule it keeps to.
+struct ReviewView: View {
+    @EnvironmentObject var model: AppModel
+    var week: String?
+    @State private var review: TrainReview?
+    @State private var error: String?
+    @State private var busy: String?
+
+    var body: some View {
+        ScrollView {
+            if let r = review {
+                VStack(alignment: .leading, spacing: 14) {
+                    MonoLabel("Week \(r.index) in review").padding(.horizontal, 4)
+                    Text(r.done >= r.total ? "All done" : "\(r.done) of \(r.total) done")
+                        .font(Theme.heading(42)).foregroundStyle(Theme.ink).padding(.horizontal, 4)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let s = r.story {
+                            Text(s.summary).font(Theme.text(16)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                        }
+                        ForEach(r.lines, id: \.self) { l in
+                            Text(l).font(Theme.text(r.story == nil ? 16 : 14)).foregroundStyle(r.story == nil ? Theme.ink : Theme.inkSoft)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+                    if !r.proposals.isEmpty {
+                        MonoLabel("Next week").padding(.horizontal, 4).padding(.top, 4)
+                        ForEach(r.proposals) { p in proposal(p, why: r.story?.proposals[p.id]) }
+                    } else {
+                        Text("Next week stays as planned.").font(Theme.text(15)).foregroundStyle(Theme.inkSoft).padding(.horizontal, 4)
+                    }
+                    if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart).padding(.horizontal, 4) }
+                }
+                .padding(16)
+            } else if let error {
+                Text(error).font(Theme.text(14)).foregroundStyle(Theme.heart).padding(16)
+            } else {
+                ProgressView().padding(40)
+            }
+        }
+        .background(Theme.ground.ignoresSafeArea())
+        .navigationTitle("Your week")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .task {
+            do { review = try await APIClient().trainReview(week: week) } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func proposal(_ p: TrainReview.Proposal, why: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: icon(p)).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.cobalt)
+                Text(p.change).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(why ?? p.reason).font(Theme.text(14)).foregroundStyle(Theme.inkSoft).fixedSize(horizontal: false, vertical: true)
+            if why != nil { Text(p.reason).font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true) }
+            Text("Keeps to: " + p.rules.joined(separator: "; ") + ".").font(Theme.mono(11)).foregroundStyle(Theme.label)
+                .fixedSize(horizontal: false, vertical: true)
+            switch p.status {
+            case "open":
+                HStack(spacing: 10) {
+                    Button(busy == p.id ? "…" : "Yes, do it") { decide(p, true) }.buttonStyle(PrimaryButton())
+                    Button("Not now") { decide(p, false) }.buttonStyle(SecondaryButton())
+                }
+                .disabled(busy != nil).padding(.top, 2)
+            case "applied": tag("Done: a small change, made for you")
+            case "accepted": tag("Done")
+            default: tag("Not now: next week stays as it was")
+            }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+    }
+
+    private func tag(_ s: String) -> some View {
+        Label(s, systemImage: "checkmark").font(Theme.text(13, .medium)).foregroundStyle(Theme.cobalt)
+    }
+
+    private func icon(_ p: TrainReview.Proposal) -> String {
+        switch p.type {
+        case "ease": "leaf"
+        case "hours": "clock.arrow.circlepath"
+        case "swap": "arrow.triangle.swap"
+        default: "lightbulb"
+        }
+    }
+
+    private func decide(_ p: TrainReview.Proposal, _ yes: Bool) {
+        busy = p.id
+        Task {
+            do {
+                review = try await APIClient().decideProposal(p.id, accept: yes)
+                await model.refresh()
+            } catch {
+                self.error = "Couldn't make that change: \(error.localizedDescription)"
+            }
+            busy = nil
         }
     }
 }

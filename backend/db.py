@@ -229,6 +229,16 @@ CREATE TABLE IF NOT EXISTS plan_snapshots (
     PRIMARY KEY (user_id, week_start)
 );
 
+-- The Sunday review's proposed changes and what became of them (rideengine/analysis/review.py): small ones apply
+-- on their own ("applied"); big ones wait for the rider ("accepted" and applied, or "declined").
+CREATE TABLE IF NOT EXISTS plan_proposals (
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    id            TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    at            REAL NOT NULL,
+    PRIMARY KEY (user_id, id)
+);
+
 -- Each time the week re-plans itself after new information (docs/train-method.md "When the plan changes"):
 -- what changed and why, in a line the rider sees once.
 CREATE TABLE IF NOT EXISTS plan_changes (
@@ -253,6 +263,7 @@ MIGRATIONS = [
     ("rides", "brief", "TEXT"),         # the ride without its samples (service.brief): what the ride list needs
     ("users", "ai_personal", "INTEGER DEFAULT 0"),  # personal-use AI: this rider's data may go to the AI coach
     ("ride_feel", "ftp_w", "REAL"),     # hard rides: the watts the targets started from when it was ridden
+    ("plan_proposals", "data", "TEXT"),  # the proposal as it was decided, so the review keeps showing it
 ]
 
 

@@ -42,7 +42,8 @@ struct SessionDetail: View {
                     }
                 }
                 if let shape = s.shape, !s.offBike {
-                    Note(label: "Any workout that does the same job", text: String(shape.dropFirst(3)).capitalizedFirst)
+                    Note(label: "Any workout that does the same job",
+                         text: String(shape.dropFirst(3)).capitalizedFirst + (s.anotherWay.map { " Or another way: \($0)." } ?? ""))
                 }
                 if let g = guide {
                     if let w = g.where_ { Note(label: "Where", text: w) }
@@ -82,6 +83,12 @@ struct SessionDetail: View {
                     Text(g).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 4)
+            }
+            if let w = s.swappedFrom ?? s.easedFrom {
+                Text(s.swappedFrom != nil ? "In place of \(w.lowercased()), from your Sunday review." :
+                     "Easier than planned (\(w.lowercased())), from your Sunday review.")
+                    .font(Theme.text(14, .medium)).foregroundStyle(Theme.cobalt).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
             }
             ForEach(s.added ?? [], id: \.self) { a in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {

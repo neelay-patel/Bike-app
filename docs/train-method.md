@@ -205,6 +205,12 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
    the words in `docs/train-words.md`. The AI gets `done_well` as the only praise it may give. As planned: The "why it works" line and the specific praise, from the engine's facts,
    in the AI's words when it's on and from `docs/train-words.md` when it's off; the research for each in
    `docs/training-science.md`.
-6. **The Sunday review** (with step 5 of `docs/train-tab.md`): skipped jobs offered another way, emphasis shifted
+6. **The Sunday review** **(built 23 Nov)**: `rideengine/analysis/review.py` (`review`, `check`), the backend's
+   `train_review` / `decide_proposal` (`GET v1/train/review`, `POST v1/train/review/proposals/{id}`), the review
+   screen and a card on Today from Sunday evening to Tuesday; the Sunday notification opens it. Proposals come only
+   from the rules below and are checked before they apply; the AI coach (when on) writes the summary and each
+   change's why, and its reply is refused if it adds or drops a change or uses a number not in the facts.
+   Free-form proposals from the AI wait for "changing the plan by talking". As planned (with step 5 of
+   `docs/train-tab.md`): skipped jobs offered another way, emphasis shifted
    when a goal number stalls, the week grown or eased; the AI proposes in a fixed format, the engine checks, bigger
    changes wait for the rider's OK.
