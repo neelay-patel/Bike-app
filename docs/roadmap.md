@@ -90,7 +90,7 @@ Our own drawing style, not a copy of any existing card game's art.
 
 
 ## Next steps in detail (21 Nov 2026)
-1. **Reinstall the app by 28 Nov 2026** (free Personal Team, 7-day profile; renewed 21 Nov). Neelay is considering
+1. **Reinstall the app by 30 Nov 2026** (free Personal Team, 7-day profile; renewed 23 Nov). Neelay is considering
    the paid Apple Developer Program (individual): one-year builds, TestFlight, then Sign in with Apple in place of
    the dev token.
 2. **Live with Kova, the cleaner Efforts and You** (18-20 Nov) and adjust from real use: is the full-size card too

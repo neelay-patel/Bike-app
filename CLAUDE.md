@@ -118,7 +118,7 @@ On Neelay's iPhone, all pushed to origin/main:
 - **Routes:** check a GPX, tune it, the Route Generator (describe a ride, now with a climbing target), send to Edge.
 
 ## Next steps (detail: `docs/roadmap.md`)
-1. **Reinstall the app by 28 Nov 2026** (free 7-day profile). The paid developer account is waiting on Apple support.
+1. **Reinstall the app by 30 Nov 2026** (free 7-day profile; renewed 23 Nov). The paid developer account is waiting on Apple support.
 2. **Live with Train** (the jobs model went live 23 Nov) and adjust the thresholds, growth and words from real use.
 3. **Train next** (`docs/train-tab.md`): the morning brief, changing the plan by talking, Garmin workouts; and the
    Method's credential (a coach reviews `docs/training-science.md`, each reference checked). Goal: keep up with
