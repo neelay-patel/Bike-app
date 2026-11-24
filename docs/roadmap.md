@@ -94,6 +94,16 @@ Our own drawing style, not a copy of any existing card game's art.
 `docs/training-science.md`. 4. Garmin integration (workouts to the Edge, Courses API). 5. Other riders and TestFlight.
 6. The fun engagement model and prizes. Later: routes, more sources. The list below is the earlier detail.
 
+**Zone 2 for other riders** (part of step 5, 24 Nov 2026). Today the range is the rider's own, else 60-70% of heart
+rate reserve, which needs Apple Health's resting heart rate and ten rides with heart rate (`docs/train-method.md`,
+"Zone 2"). Before TestFlight:
+- **Ask for it at setup:** one optional question, with where to copy it from (Watch: Settings › Workout › Heart Rate
+  Zones; Garmin Connect: heart rate zones).
+- **Resting heart rate from Garmin** (the Health API's daily summaries), so riders without an Apple Watch get an
+  estimate. One more permission: check it against "request only the data a ride needs".
+- **A rough range from the first ride,** labelled as rough, rather than waiting for ten. Max heart rate from rides is
+  only as high as the hardest efforts, so a new rider's range starts low; the drift check helps correct it.
+
 ## Next steps in detail (21 Nov 2026)
 1. **Reinstall the app by 30 Nov 2026** (free Personal Team, 7-day profile; renewed 23 Nov). Neelay is considering
    the paid Apple Developer Program (individual): one-year builds, TestFlight, then Sign in with Apple in place of
@@ -116,6 +126,7 @@ Our own drawing style, not a copy of any existing card game's art.
 6. **Other riders and TestFlight** (planned in `docs/hosting.md`, 18 Nov 2026): Apple Developer Program, slim the store
    (done 20 Nov: compressed storage and a brief per ride; was 1.7 s for `GET /v1/rides`, the app's blank first
    second or two), delete account, Sign in with Apple, host the backend (also ends the home Wi-Fi limit), Garmin
-   Starter tier (OAuth + push webhook, apply early), privacy policy, a trademark check on Kova, TestFlight.
+   Starter tier (OAuth + push webhook, apply early), privacy policy, a trademark check on Kova, zone 2 for other
+   riders (above), TestFlight.
 7. **More sources:** Wahoo cloud, Whoop, Oura, Google Health; Hammerhead once access is agreed. Read each provider's
    terms in full and fill in `SOURCE_POLICY`.
