@@ -82,8 +82,12 @@ final class RideAlong: NSObject, ObservableObject {
 
     // MARK: Controls
 
+    /// The voice for this ride, chosen when it starts: a voice downloaded since the last ride is used.
+    private var chosenVoice: AVSpeechSynthesisVoice?
+
     func start() {
         guard !cues.isEmpty else { return }
+        chosenVoice = Self.bestVoice
         running = true
         paused = false
         finished = false
@@ -266,8 +270,34 @@ final class RideAlong: NSObject, ObservableObject {
     private func say(_ text: String) {
         let u = AVSpeechUtterance(string: text)
         u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.02
-        u.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        u.voice = chosenVoice ?? Self.bestVoice
         voice.speak(u)
+    }
+
+    /// The most natural voice on this phone for its language (23 Nov 2026): a Premium voice if the rider has
+    /// downloaded one, else an Enhanced one, else the default. Apps can't use Siri's voices or download voices
+    /// themselves; the ride-along screen says where to get a better one. Novelty voices and Personal Voice
+    /// (which needs its own permission) are left out.
+    static var bestVoice: AVSpeechSynthesisVoice? {
+        let code = AVSpeechSynthesisVoice.currentLanguageCode()          // "en-CA"
+        let lang = String(code.prefix(2))
+        let candidates = AVSpeechSynthesisVoice.speechVoices().filter { v in
+            v.language.hasPrefix(lang) && !v.voiceTraits.contains(.isNoveltyVoice)
+                && !v.voiceTraits.contains(.isPersonalVoice)
+        }
+        func rank(_ v: AVSpeechSynthesisVoice) -> (Int, Int) {
+            let q = v.quality == .premium ? 3 : v.quality == .enhanced ? 2 : 1
+            let place = v.language == code ? 2 : v.language.hasPrefix(lang) ? 1 : 0   // the rider's own accent first
+            return (q, place)
+        }
+        return candidates.max { rank($0) < rank($1) } ?? AVSpeechSynthesisVoice(language: code)
+    }
+
+    /// "Ava (Premium)", and whether a better voice could be downloaded.
+    static var voiceLine: (name: String, canImprove: Bool) {
+        guard let v = bestVoice else { return ("the phone's voice", true) }
+        let q = v.quality == .premium ? "Premium" : v.quality == .enhanced ? "Enhanced" : nil
+        return (q.map { "\(v.name) (\($0))" } ?? v.name, v.quality != .premium)
     }
 
     // MARK: Lock screen
@@ -361,8 +391,16 @@ struct RideAlongView: View {
                 .font(Theme.text(16)).foregroundStyle(Theme.panelLabel).fixedSize(horizontal: false, vertical: true)
             Text("Lock the phone if you like: it keeps going, and the lock screen shows the step and a countdown. Record the ride as you always do, on your Watch or head unit.")
                 .font(Theme.text(16)).foregroundStyle(Theme.panelLabel).fixedSize(horizontal: false, vertical: true)
+            let v = RideAlong.voiceLine
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Voice: \(v.name)").font(Theme.mono(12)).foregroundStyle(Theme.panelLabel)
+                if v.canImprove {
+                    Text("For a more natural voice, download a Premium one in Settings › Accessibility › Read & Speak › Voices › English (Ava or Zoe sound good). Kova uses it next time.")
+                        .font(Theme.text(13)).foregroundStyle(Theme.panelLabel.opacity(0.8)).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer()
-            Text("\(ride.cues.count) steps · \(Int((ride.totalSeconds / 60).rounded())) min")
+            Text("\(ride.cues.count) step\(ride.cues.count == 1 ? "" : "s") · \(Int((ride.totalSeconds / 60).rounded())) min")
                 .font(Theme.mono(13)).foregroundStyle(Theme.panelLabel)
             Button { ride.start() } label: {
                 Text("Start").font(Theme.text(20, .semibold)).foregroundStyle(Theme.ink)
