@@ -11,6 +11,8 @@ RUN pip install "fastapi>=0.115" "uvicorn>=0.30" "httpx>=0.27" "anthropic>=2.12"
 
 COPY rideengine ./rideengine
 COPY backend ./backend
+# The card's colours and fonts (rideengine/card reads them from here).
+COPY design/tokens.json ./design/tokens.json
 COPY scripts/host-start.sh ./scripts/host-start.sh
 
 EXPOSE 8080

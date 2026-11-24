@@ -18,9 +18,28 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
     /// The page as last drawn, to draw it again if iOS throws the web view's content away in the background.
     private var page: String?
 
+    /// Whether the page's real height has been taken (else the frame is still the 640 pt it started at).
+    private(set) var measured = false
+
     override init() {
-        webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: WKWebViewConfiguration())
+        let config = WKWebViewConfiguration()
+        // The page reports its own height whenever it changes (fonts arriving, the name fitted), so the frame
+        // always fits the card, even when the load finished while the app was in the background and a one-off
+        // measurement couldn't run (23 Nov 2026: a tall gap under the card on Efforts).
+        let report = WKUserScript(source: """
+            (function () {
+              function send() { window.webkit.messageHandlers.cardHeight.postMessage(document.body.scrollHeight); }
+              new ResizeObserver(send).observe(document.body);
+              if (document.fonts) { document.fonts.ready.then(send); }
+              send();
+            })();
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        config.userContentController.addUserScript(report)
+        let relay = HeightRelay()
+        config.userContentController.add(relay, name: "cardHeight")
+        webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: config)
         super.init()
+        relay.owner = self
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
@@ -47,16 +66,37 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task {
-            // The page's height once its fonts are in (the name is fitted to the header then too).
-            let height = try? await webView.callAsyncJavaScript(
-                "await document.fonts.ready; return document.body.scrollHeight", contentWorld: .page) as? Double
-            if let height, height > 100, abs(height - size.height) > 0.5 {
-                size = CGSize(width: Self.size.width, height: height.rounded(.up))
-                webView.frame.size = size
-                onResize?(size)
-            }
+            await measure()
             isLoaded = true
         }
+    }
+
+    /// Take the page's height once its fonts are in (the name is fitted to the header then too); tried a few
+    /// times, since it can't run while the app is in the background.
+    func measure() async {
+        for attempt in 0..<4 {
+            if let h = try? await webView.callAsyncJavaScript(
+                "await document.fonts.ready; return document.body.scrollHeight", contentWorld: .page) as? Double {
+                apply(height: h)
+                if measured { return }
+            }
+            try? await Task.sleep(nanoseconds: UInt64(300_000_000 * (attempt + 1)))
+        }
+    }
+
+    /// Measure again if it never worked (the screen calls this when the card appears).
+    func remeasureIfNeeded() {
+        guard isLoaded, !measured else { return }
+        Task { await measure() }
+    }
+
+    fileprivate func apply(height: Double) {
+        guard height > 100 else { return }
+        measured = true
+        guard abs(height - size.height) > 0.5 else { return }
+        size = CGSize(width: Self.size.width, height: height.rounded(.up))
+        webView.frame.size = size
+        onResize?(size)
     }
 
     /// iOS can end a web view's content process (in the background, short of memory), leaving it blank
@@ -111,6 +151,17 @@ final class CardRenderer: NSObject, ObservableObject, WKNavigationDelegate {
     }()
 }
 
+/// Passes the page's height reports to the renderer without the web view holding on to it (the content controller
+/// keeps its handlers alive).
+private final class HeightRelay: NSObject, WKScriptMessageHandler {
+    weak var owner: CardRenderer?
+
+    func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let h = (message.body as? NSNumber)?.doubleValue else { return }
+        Task { @MainActor [weak owner] in owner?.apply(height: h) }
+    }
+}
+
 private struct CardWebView: UIViewRepresentable {
     let renderer: CardRenderer
     func makeUIView(context: Context) -> WKWebView { renderer.webView }
@@ -162,6 +213,7 @@ struct CardFrame: View {
         .aspectRatio(renderer.size.width / renderer.size.height, contentMode: .fit)
         .frame(maxWidth: CardRenderer.size.width)
         .frame(maxWidth: .infinity)
+        .onAppear { renderer.remeasureIfNeeded() }
         .accessibilityLabel("Card")
     }
 }

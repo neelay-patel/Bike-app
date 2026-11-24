@@ -5,6 +5,7 @@ data/
 ios/
 docs/
 design/
+!design/tokens.json
 examples/
 tests/
 **/__pycache__/
