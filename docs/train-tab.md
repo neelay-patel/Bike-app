@@ -50,7 +50,7 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 
 ### 2. Engine: today's session, rest, adapting, and feedback on every ride (built 21 Nov 2026)
 - Built: `rideengine/analysis/today.py` (`plan_today`: today's session, rest or done, why, how it should feel, what's
-  next, sessions moved; `greeting`), `rideengine/analysis/feedback.py` (`pointers`: one thing to try; `contribution`:
+  next, the week laid out from what's open; `greeting`), `rideengine/analysis/feedback.py` (`pointers`: one thing to try; `contribution`:
   load and new bests), features v11 (cadence, the climbs' pushes, heart-rate drift). API: `GET /v1/train/today`,
   `GET /v1/train/week?start=`, `GET /v1/train/rides/{id}` (the ride note: what you did, counted as, what it means,
   what's next, one thing to try). Before the plan's first week, Today says when it starts. Not yet: the change log
@@ -90,7 +90,7 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 
 ### 3. App: the Train tab, with rule-based words (built 21 Nov 2026)
 - Built: `ios/RideApp/RideApp/TrainView.swift`. The Train tab replaces Plan: Today (the coach's line; the session
-  big with How it should feel and Why, or Rest, or Ride's in), What's next (with sessions moved), the latest ride's
+  big with How it should feel and Why, or Rest, or Ride's in), What's next, the latest ride's
   note in brief, This week, the goal with its numbers; the calendar icon opens the plan ahead (the old Plan screen,
   `PlanView(embedded: true)`). The ride note (What you did, Counted as with Change, What it means, What's next, One
   thing to try) and the week as counted (each session with the ride that counted and why; open ones open their
@@ -109,13 +109,13 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 
 ### 4. The coach speaks up: events and notifications (built 21 Nov 2026)
 - Built: `GET /v1/train/inbox` (`service.train_inbox`): messages worked out fresh with stable ids (ride:<id>,
-  change:<date>, review:<week>) plus the morning brief as `scheduled` (07:30 local, the phone schedules it itself).
+  change:<date>, review:<week>) plus the morning brief as `scheduled` (06:00 local unless the rider picks a time in Settings; the phone schedules it itself).
   App: `CoachNotifications.swift` shows new messages as local notifications when Apple Health wakes Kova for a ride,
   on background refresh (`com.neelaypatel.rideapp.coach`) or when it opens (then just marked seen); tapping opens
   the ride's note, the week, or Today; Settings › When the coach speaks up turns each kind off. Ride messages cover
   today and yesterday only (older "best yet" news may no longer be true). Checked in the Simulator (posting and
   tapping); the background wake-up itself can only be seen on the phone. No change log stored yet.
-- Backend events: a ride arrives (Garmin poll or Apple Health upload), the morning (07:30 his time), Sunday evening.
+- Backend events: a ride arrives (Garmin poll or Apple Health upload), the morning (06:00, or the rider's own time), Sunday evening.
   Each makes an **inbox item** (`GET /v1/train/inbox`): kind, title, text, the screen it opens, read or not.
 - **Until the paid developer account:** local notifications. The app wakes on Apple Health background delivery
   (already on for workouts) and background refresh, fetches the inbox and posts what's new. Garmin-only rides reach

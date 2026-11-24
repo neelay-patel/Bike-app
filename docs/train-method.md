@@ -102,8 +102,9 @@ suggested way to do a job.
 4. Re-pick the suggestion for each job to fit the day: shorter on a busy day, indoors when the rider usually rides
    indoors that day.
 5. Never carry a missed job into next week as a debt. The Sunday review decides next week afresh.
-6. **Say what changed, lightly.** The week moves on its own (decided 23 Nov), so the rider always sees that it moved
-   and why, in a line, without having to approve anything. See "When the plan changes" below.
+6. **Say what changed, lightly.** The week lays itself out again on its own (decided 23 Nov), so the rider always
+   sees when it looks different and why, in a line, without having to approve anything. See "When the plan
+   changes" below.
 
 ### Week to week (the Sunday review; a bigger change needs the rider's OK)
 - How hard sessions felt moves the watts **(built)**: easy raises them 5%, good or hard keeps them, wrecked eases
@@ -143,14 +144,20 @@ suggested way to do a job.
   next. Never "great job!" on its own, never a comparison that shames.
 
 ### When the plan changes
-The week re-plans itself; the rider should notice without being interrupted.
-- **One line at the top of the week**, shown until seen: what moved and the reason in a few words. "Moved: hold to
-  Thursday. Tuesday's ride did the punch." Tap it for the before and after.
-- **The days that changed** get a small mark in the week strip, and slide to their new place once when the rider
-  next opens Train (motion that's seen, per the 21 Nov feedback; replayed until seen, then still).
-- **A notification only for a bigger change** (a job dropped for the week, the long ride moved to another weekend
-  day); small shuffles stay in the app **(the plan-change notification is built)**.
+The week is laid out fresh from what's still open each time it's read: nothing is "moved", and no history of
+moves is kept (simplified 24 Nov 2026). A session done sits on the day it was ridden; one still open sits on the day
+the fresh layout puts it. The plan's dates are only its first sketch, never shown as "planned Wednesday".
+The rider should notice a new layout without being interrupted:
+- **One line on Today**, shown until seen, when a session still to ride lands on another day than last shown:
+  the week as it is now, and the reason in a few words. "Your week now: sweet spot Wednesday, group ride Friday.
+  Tuesday's ride did the punch." Tap it for the week. Only the last layout shown is kept, to compare with. A ride
+  that just did a session isn't news.
+- **A notification only for a bigger change** (a job let go for the week, the long ride on another day); the
+  rest stays in the app.
 - The line names the evidence, never the rule: "Tuesday's ride did the punch", not "re-planned per rule 3".
+- **The Apple Watch** has the coming 7 days' sessions on their days, all from the morning brief's time (06:00
+  unless the rider changes it): Apple asks for a time, but any of them can be started whenever the rider likes,
+  so a different session than the day's is always there too.
 
 ## What changes in what's built
 - `train.match_week`: from one ride to one session, to a ride doing one or more jobs, with how much of each.
@@ -187,19 +194,19 @@ Each step ships on its own, with tests on synthetic weeks and a check on Neelay'
 3. **Re-plan after every ride** (engine and backend) **(built 23 Nov)**: `today.plan_today` lays the week out
    again each time it's read (`Backend._replan` in the plan view): leftovers of half a job or less become a set
    (`plan.leftover`) in the next hard day or the long ride, taking the place of its filler riding; when the open
-   sessions don't fit, the one that matters least for the goal is let go, one at a time. Each change is stored
-   with its evidence (`plan_snapshots`, `plan_changes`; `Backend._plan_changes`), e.g. "Moved: sweet spot to
-   Friday" because "Wednesday went by without a ride"; `changes` on Today, marked seen with
-   `POST v1/train/changes/seen`. As planned: Place the jobs left on the days left within the limits; fold
+   sessions don't fit, the one that matters least for the goal is let go, one at a time. When the layout differs
+   from the last one shown (`plan_snapshots` keeps only that), a note is kept with its evidence (`plan_changes`;
+   `Backend._plan_changes`), e.g. "Your week now: sweet spot Friday" because "Wednesday went by without a ride";
+   `changes` on Today (the newest), marked seen with `POST v1/train/changes/seen`. Since 24 Nov each session has
+   `on`, the day it's on (ridden, or laid out), which the week, the calendar and the Watch use. As planned: Place the jobs left on the days left within the limits; fold
    small remainders; drop and say when there's no room; store each change with its reason.
-4. **What the rider sees** (app) **(built 23 Nov)**: the "Moved:" line on Today with its reason, shown until seen
-   (a few seconds on screen, or tapped for the before and after), and the moved days marked in the week strip,
-   their session sliding over from its old day; a notification only for a bigger change (a session let go, the
-   long ride moved). Every riding session carries its job's shape (`plan.shape`: "Or any ride with 7.5 min or
+4. **What the rider sees** (app) **(built 23 Nov; simplified 24 Nov)**: the "Your week now" line on Today with
+   its reason, shown until seen (a few seconds on screen, or tapped, which opens the week); a notification only
+   for a bigger change (a session let go, the long ride on another day). Every riding session carries its job's shape (`plan.shape`: "Or any ride with 7.5 min or
    more of hard efforts of 30 s to 2 min…"), on Today and the session's page. The ride note says what's left this
    week. Planned against ridden only when every planned set is in the ride (`Backend._ridden_against`); the card
    names the session then, else the kind of work ("Punch"). As planned: The ride note's "what it did, what's left"; the card names what the ride was;
-   planned vs ridden only when the sets line up; Today's shape line; the "Moved:" line and the marked days.
+   planned vs ridden only when the sets line up; Today's shape line; the line when the week's layout changes.
 5. **Coach's voice** (backend and AI) **(built 23 Nov)**: `rideengine/analysis/voice.py` (`learn`, `done_well`),
    the research in `docs/training-science.md` (a first pass, to be reviewed by a coach and each reference checked),
    the words in `docs/train-words.md`. The AI gets `done_well` as the only praise it may give. As planned: The "why it works" line and the specific praise, from the engine's facts,

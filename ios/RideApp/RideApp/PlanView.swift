@@ -156,7 +156,7 @@ private struct MonthCalendar: View {
     private let cal = Calendar(identifier: .iso8601)
 
     var body: some View {
-        let byDay = Dictionary(grouping: plan.sessions, by: \.date)
+        let byDay = Dictionary(grouping: plan.sessions, by: \.onDate)
         VStack(spacing: 10) {
             HStack {
                 Button { shift(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
@@ -270,7 +270,7 @@ private struct DaySessions: View {
 
     var body: some View {
         let key = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; return f.string(from: day) }()
-        let sessions = plan.sessions.filter { $0.date == key }
+        let sessions = plan.sessions.filter { $0.onDate == key }
         VStack(alignment: .leading, spacing: 8) {
             MonoLabel(day.formatted(.dateTime.weekday(.wide).day().month(.wide))).padding(.horizontal, 4)
             if sessions.isEmpty {

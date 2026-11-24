@@ -398,13 +398,12 @@ struct TrainToday: Decodable {
     /// Where to ride it: advice only, since indoors or out is the rider's choice.
     let where_: String?
     let then: String?
-    let moved: [Moved]?
     /// The sessions What's Next names (tomorrow's, and the one after), each opening its own page.
     let next: [NextSession]?
     let nextNote: String?
 
     enum CodingKeys: String, CodingKey {
-        case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
+        case state, date, week, weeks, phase, greeting, session, why, feel, then, readiness, goal, latest, days, done, total
         case next, nextNote, changes, learn, review, brief
         case where_ = "where"
     }
@@ -416,7 +415,6 @@ struct TrainToday: Decodable {
     let done: Int?
     let total: Int?
 
-    struct Moved: Decodable, Hashable { let id: String; let title: String; let from: String; let to: String }
     /// Why today's work works, in a line (its research: docs/training-science.md).
     let learn: Learn?
     /// The week in review (Sunday evening to Tuesday, or while a change waits for the rider's OK).
@@ -427,7 +425,8 @@ struct TrainToday: Decodable {
     struct Brief: Decodable { let title: String; let body: String }
 
     struct ReviewCard: Decodable { let weekStart: String; let index: Int; let line: String?; let open: Int }
-    /// The week re-planned itself (docs/train-method.md "When the plan changes"): what changed and why, until seen.
+    /// The week laid out differently since last shown (docs/train-method.md "When the plan changes"): the week
+    /// as it is now and why, in a line, until seen. The newest only.
     let changes: [Change]?
 
     struct Change: Decodable, Identifiable {
@@ -435,16 +434,6 @@ struct TrainToday: Decodable {
         let line: String
         let reason: String?
         let big: Bool?
-        let items: [Item]?
-
-        struct Item: Decodable, Hashable {
-            let kind: String          // moved | folded | dropped
-            let sessionId: String?
-            let title: String?
-            let from: String?
-            let to: String?
-            let line: String?
-        }
     }
     struct NextSession: Decodable, Identifiable {
         var id: String { session.id }
@@ -555,7 +544,6 @@ struct TrainNote: Decodable, Identifiable {
         let sessionId: String
         let title: String
         let kind: String
-        let plannedFor: String?
         let reason: String?
         let byHand: Bool
     }
@@ -577,7 +565,6 @@ struct TrainWeek: Decodable {
     let done: Int
     let total: Int
     let schedule: [String: String]
-    let moved: [TrainToday.Moved]
 
     struct WeekRide: Decodable, Identifiable {
         var id: String { rideId }
@@ -601,8 +588,11 @@ struct PlanSession: Decodable, Identifiable, Hashable {
     func hash(into h: inout Hasher) { h.combine(id) }
 
     let id: String
+    /// The plan's first sketch of its day, and the rider's usual time that day.
     let date: String
     let time: String
+    /// The day it's on (24 Nov 2026): the day it was ridden, else the day this week's fresh layout puts it on.
+    let on: String?
     let kind: String
     let title: String
     let purpose: String
@@ -658,7 +648,9 @@ struct PlanSession: Decodable, Identifiable, Hashable {
         let byHand: Bool?
     }
 
-    var day: Date? { GoalText.date(date) }
+    /// The day it's on, as the rider sees it everywhere (the week, the calendar, the Watch).
+    var onDate: String { on ?? date }
+    var day: Date? { GoalText.date(onDate) }
 }
 
 /// A step ("Hard, 1 min, Z6") or a set of repeated steps ("6 × 1 min hard / 2 min easy").
@@ -848,6 +840,8 @@ struct Me: Decodable {
     let tz: String?
     let name: String
     let avatar: [String: String]?
+    /// The morning brief's time, "HH:MM" in the rider's time zone (06:00 unless they changed it).
+    let briefAt: String?
 }
 
 /// GET /v1/avatar/options: every part, its choices, and colours for the swatches.
@@ -1357,6 +1351,12 @@ struct APIClient {
     }
 
     func me() async throws -> Me { try await get("v1/me") }
+
+    /// When the morning brief arrives, "HH:MM" from 04:00 to 12:00.
+    func setBriefAt(_ time: String) async throws -> Me {
+        let body = try JSONSerialization.data(withJSONObject: ["brief_at": time])
+        return try Self.decoder.decode(Me.self, from: await send(request("PUT", "v1/me", body: body)))
+    }
 
     /// Save the rider's name and avatar (nil avatar removes it).
     func updateMe(name: String, avatar: [String: String]?) async throws -> Me {

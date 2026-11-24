@@ -4,7 +4,9 @@ The plan's dates are a guide (the rider's usual days); what's still open this we
 next session is picked from it, given what's done, the last few days, recovery and the days left:
 
     plan_today(sessions, recent, today, week_start, readiness) ->
-        {"state": "session" | "rest" | "done", "session_id", "why", "then", "moved", "schedule"}
+        {"state": "session" | "rest" | "done", "session_id", "why", "then", "schedule", "folded", "dropped"}
+
+The week is laid out fresh each time from what's still open (24 Nov 2026): nothing is "moved" or remembered.
 
 Limits no plan change (and no AI) can cross: no hard days back to back, no more than MAX_STREAK riding days in a
 row, a rest day after STREAK_REST in a row when the week allows. Words follow docs/train-words.md.
@@ -218,7 +220,7 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
     off_bike = [s for s in sessions if s.get("status") != "done" and s.get("off_bike")]
     yesterday = today - timedelta(days=1)
     streak = _streak(rode, today)
-    out = {"state": "rest", "session_id": None, "why": "", "then": "", "moved": [], "schedule": {}, "folded": [],
+    out = {"state": "rest", "session_id": None, "why": "", "then": "", "schedule": {}, "folded": [],
            "dropped": []}
 
     def finish(start_from: date, today_session: dict | None) -> dict:
@@ -265,8 +267,6 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
                                        "line": f"{left} of {what} left from {f['title'].lower()}, and no hard day "
                                                f"left this week to add it to, so it's let go."})
         out["schedule"] = {sid: d.isoformat() for sid, d in placed.items()}
-        out["moved"] = [{"id": s["id"], "title": s["title"], "from": s["date"], "to": placed[s["id"]].isoformat()}
-                        for s in open_ if s["id"] in placed and placed[s["id"]].isoformat() != s["date"]]
         # What's next, in words: tomorrow (a session or rest), then the next session after it this week.
         by_day = {v: k for k, v in placed.items()}
         names = {s["id"]: s for s in open_}

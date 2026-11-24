@@ -569,12 +569,15 @@ class Backend:
     def me(self, user_id: int) -> dict:
         from rideengine.card.avatar import clean
         with self.lock:
-            row = self.db.execute("SELECT id, tz, display_name, avatar, ftp FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = self.db.execute("SELECT id, tz, display_name, avatar, ftp, brief_at FROM users WHERE id = ?",
+                                  (user_id,)).fetchone()
         return {"id": row["id"], "tz": row["tz"], "name": row["display_name"] or "Rider",
-                "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None, "ftp": row["ftp"]}
+                "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None, "ftp": row["ftp"],
+                "brief_at": row["brief_at"] or "%02d:%02d" % self.BRIEF_AT}
 
     def update_me(self, user_id: int, body: dict) -> dict:
-        """{"tz": ..., "name": ..., "avatar": {...}}: any of them. The avatar is cleaned to known parts."""
+        """{"tz": ..., "name": ..., "avatar": {...}, "brief_at": "06:00"}: any of them. The avatar is cleaned to
+        known parts; the brief's time is from 04:00 to 12:00."""
         from rideengine.card.avatar import clean
         if "tz" in body:
             self.insights.set_tz(user_id, str(body["tz"]))
@@ -590,6 +593,12 @@ class Backend:
                 if ftp is not None and not (50 <= float(ftp) <= 600):
                     raise ValueError("FTP must be between 50 and 600 watts")
                 self.db.execute("UPDATE users SET ftp = ? WHERE id = ?", (None if ftp is None else float(ftp), user_id))
+            if "brief_at" in body:
+                m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(body["brief_at"] or ""))
+                if not m or not (4 * 60 <= int(m[1]) * 60 + int(m[2]) <= 12 * 60) or int(m[2]) >= 60:
+                    raise ValueError("The morning brief's time must be between 04:00 and 12:00")
+                self.db.execute("UPDATE users SET brief_at = ? WHERE id = ?",
+                                ("%02d:%02d" % (int(m[1]), int(m[2])), user_id))
         return self.me(user_id)
 
     # --- training plan (rideengine/analysis/plan.py) -----------------------------------------------
@@ -742,7 +751,11 @@ class Backend:
                 t = p.targets(s, c["aim"]["watts"], c["hr_zones"]) if s["steps"] else dict(s)
                 if t["kind"] == "group" and "Zwift" not in t["purpose"]:
                     t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
-                t["status"] = self._session_status(s, counted, done, w, today)
+                # The day it's on (24 Nov 2026): the day it was ridden, else the day this week's fresh layout puts
+                # it on, else the plan's day. "date" is only the plan's first sketch.
+                x = counted["counted"].get(s["id"])
+                t["on"] = x["date"] if x else (replan or {}).get("schedule", {}).get(s["id"], s["date"])
+                t["status"] = self._session_status({**s, "date": t["on"]}, counted, done, w, today)
                 t["job"] = p.JOB_OF.get(s["kind"])
                 alt = (plan.get("alternatives") or {}).get(t["job"] or "")
                 if alt and w["week_start"] >= alt["from"] and not s.get("off_bike"):
@@ -974,14 +987,20 @@ class Backend:
             return g                                      # same as the one before it: nothing new to say
         if prev and now and prev["minutes"] and abs(now - prev["minutes"]) >= 0.5:
             what = "of hard efforts" if job in ("punch", "top_end") else "of steady work"
-            day = td.WEEKDAY[date.fromisoformat(prev["date"]).weekday()]
+            was = date.fromisoformat(prev["date"])
+            day = td.WEEKDAY[was.weekday()]
+            # Said from the session's own week: "Monday's", "last Wednesday's", "the 4 Nov".
+            monday = date.fromisoformat(s["date"]) - timedelta(days=date.fromisoformat(s["date"]).weekday())
+            title = prev["title"].lower()
+            that = (f"the {title} on {was.day} {was.strftime('%b')}" if was < monday - timedelta(days=7) else
+                    f"last {day}'s {title}" if was < monday else f"{day}'s {title}")
             if now > prev["minutes"]:
                 felt = {"easy": " and felt easy", "good": " and felt good"}.get(prev["feel"], "")
                 g["grew"] = (f"A step up: {train_mins(now)} {what}, from {train_mins(prev['minutes'])}, because "
-                             f"you did {day}'s {prev['title'].lower()} in full{felt}.")
+                             f"you did {that} in full{felt}.")
             elif prev["why"] in ("hurt", "felt wrecked"):
                 g["grew"] = (f"A step back: {train_mins(now)} {what}, from {train_mins(prev['minutes'])}, because "
-                             f"{day}'s {prev['title'].lower()} {prev['why']}.")
+                             f"{that} {prev['why']}.")
         return g
 
     @staticmethod
@@ -1143,7 +1162,7 @@ class Backend:
 
     def train_today(self, user_id: int) -> dict:
         """Today on the Train tab: the coach's opening line, today's session (or rest, or done), why, how it
-        should feel, what's next, sessions moved from their planned day, the goal, and the latest ride's note."""
+        should feel, what's next, the goal, and the latest ride's note."""
         from rideengine.analysis import today as td
         view = self.plan_view(user_id)
         if view is None:
@@ -1164,7 +1183,7 @@ class Backend:
                     "session": None, "why": f"Your plan starts {when}. Until then, ride as you like.",
                     "feel": None, "then": (f"{td.WEEKDAY[date.fromisoformat(nxt['date']).weekday()]}: {td.short(nxt)}."
                                            if nxt else ""),
-                    "moved": [], "next": [self._next_item(nxt, c["today"])] if nxt else [],
+                    "next": [self._next_item(nxt, c["today"])] if nxt else [],
                     "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": None}
         t = week.get("replan") or td.plan_today(week["sessions"], recent, c["today"],
                                                 date.fromisoformat(week["week_start"]), readiness)
@@ -1210,7 +1229,7 @@ class Backend:
                 "days": days, "done": week["done"], "total": week["total"],
                 "phase": week["phase"], "state": t["state"], "greeting": td.greeting(recent, c["today"], readiness, t["state"]),
                 "session": session, "why": t["why"], "feel": feel, "where": td.WHERE.get(session["kind"]) if session else None,
-                "then": t["then"], "moved": t["moved"], "next": [self._next_item(x, c["today"], t["schedule"].get(x["id"])) for x in upcoming],
+                "then": t["then"], "next": [self._next_item(x, c["today"], t["schedule"].get(x["id"])) for x in upcoming],
                 "next_note": next((f"{x['title']} is still open this week." for x in week["sessions"]
                                    if x.get("off_bike") and x.get("status") != "done"), None),
                 "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
@@ -1246,67 +1265,64 @@ class Backend:
         return f"Still to come this week: {text}."
 
     def _plan_changes(self, user_id: int, c: dict, week: dict, t: dict) -> list[dict]:
-        """Store how the week is laid out now and, when that differs from last time, what changed and why
-        (docs/train-method.md "When the plan changes"): sessions moved to another day, leftovers added to a ride,
-        sessions let go. The reason names the evidence ("Tuesday's ride did the punch"), never a rule. Returns
-        this week's changes the rider hasn't seen, newest first."""
+        """When this week's fresh layout differs from the last one the rider was shown, say so once, plainly
+        (docs/train-method.md "When the plan changes"): "Your week now: sweet spot Wednesday, group ride Friday.",
+        any leftover added to a ride or session let go, and the reason in a few words. Only the last layout is kept,
+        to compare with; nothing about where sessions were. Returns this week's notes the rider hasn't seen."""
         from rideengine.analysis import today as td
         ws = week["week_start"]
         now = {"schedule": t.get("schedule", {}), "folded": {f["id"]: f["into"] for f in t.get("folded", [])},
                "dropped": [d["id"] for d in t.get("dropped", [])]}
-        titles = {s["id"]: s["title"] for s in week["sessions"]}
-        kinds = {s["id"]: s.get("kind") for s in week["sessions"]}
+        by_id = {s["id"]: s for s in week["sessions"]}
         with self.lock:
             row = self.db.execute("SELECT data, at FROM plan_snapshots WHERE user_id = ? AND week_start = ?",
                                   (user_id, ws)).fetchone()
-        items = []
-        if row:
-            before = json.loads(row["data"])
-            for sid, d in now["schedule"].items():
-                was = before["schedule"].get(sid)
-                if was and was != d and sid not in before.get("dropped", []):
-                    items.append({"kind": "moved", "session_id": sid, "title": titles.get(sid, ""), "from": was, "to": d,
-                                  "long": kinds.get(sid) == "long"})
-            for f in t.get("folded", []):
-                if before.get("folded", {}).get(f["id"]) != f["into"]:
-                    items.append({"kind": "folded", "session_id": f["id"], "into": f["into"], "line": f["line"]})
-            for d in t.get("dropped", []):
-                if d["id"] not in before.get("dropped", []):
-                    items.append({"kind": "dropped", "session_id": d["id"], "title": d["title"], "line": d["line"]})
+        before = json.loads(row["data"]) if row else None
         stamp = db.now()
-        with self.lock:
-            if row is None or json.loads(row["data"]) != now:
+        if before != now:
+            with self.lock:
                 self.db.execute("INSERT OR REPLACE INTO plan_snapshots (user_id, week_start, data, at) VALUES (?, ?, ?, ?)",
                                 (user_id, ws, json.dumps(now), stamp))
-        if items:
-            reason = self._change_reason(c, week, t, row["at"] if row else None)
-            moved = [i for i in items if i["kind"] == "moved"]
+        if before is not None and before != now:
             parts = []
-            if moved:
-                parts.append("Moved: " + ", ".join(
-                    # Weekday names, not "tomorrow": the line is kept, and must stay true when read later.
-                    f"{i['title'].lower()} to {td.WEEKDAY[date.fromisoformat(i['to']).weekday()]}" for i in moved) + ".")
-            parts += [i["line"] for i in items if i["kind"] == "folded"]
-            gone = [i for i in items if i["kind"] == "dropped" and i["line"].startswith("No room for")]
-            parts += [i["line"] for i in items if i["kind"] == "dropped" and i not in gone]
-            if len(gone) > 1:
-                names = [i["title"].lower() for i in gone]
+            was = before.get("schedule", {})
+            # A ride that did a session just takes it off the layout: that's not news. A session on another day is.
+            if any(sid in was and was[sid] != d for sid, d in now["schedule"].items()):
+                days = sorted(now["schedule"].items(), key=lambda kv: kv[1])
+                # Weekday names, not "tomorrow": the line is kept, and must stay true when read later.
+                parts.append("Your week now: " + ", ".join(
+                    f"{by_id[sid]['title'].lower()} {td.WEEKDAY[date.fromisoformat(d).weekday()]}"
+                    for sid, d in days if sid in by_id) + ".")
+            parts += [f["line"] for f in t.get("folded", []) if before.get("folded", {}).get(f["id"]) != f["into"]]
+            gone = [d for d in t.get("dropped", []) if d["id"] not in before.get("dropped", [])]
+            room = [d for d in gone if d["line"].startswith("No room for")]
+            parts += [d["line"] for d in gone if d not in room]
+            if len(room) > 1:
+                names = [d["title"].lower() for d in room]
                 parts.append(f"No room for {', '.join(names[:-1])} and {names[-1]} this week, so they're let go.")
             else:
-                parts += [i["line"] for i in gone]
-            if any(i["kind"] == "dropped" for i in items):
+                parts += [d["line"] for d in room]
+            if gone:
                 parts.append("Next week starts fresh.")
-            line = " ".join(parts)
-            line = line[0].upper() + line[1:] if line else line
-            with self.lock:
-                self.db.execute("INSERT INTO plan_changes (user_id, week_start, data, at) VALUES (?, ?, ?, ?)",
-                                (user_id, ws, json.dumps({"items": items, "line": line, "reason": reason}), stamp))
+            longs = [sid for sid, x in by_id.items() if x.get("kind") == "long"]
+            big = bool(gone) or any(was.get(sid) != now["schedule"].get(sid) for sid in longs
+                                    if sid in now["schedule"] and sid in was)
+            if parts:
+                line = " ".join(parts)
+                with self.lock:
+                    self.db.execute("INSERT INTO plan_changes (user_id, week_start, data, at) VALUES (?, ?, ?, ?)",
+                                    (user_id, ws, json.dumps({"line": line[0].upper() + line[1:], "big": big,
+                                                              "reason": self._change_reason(c, week, t, row["at"])}),
+                                     stamp))
         with self.lock:
             rows = self.db.execute("SELECT id, data, at FROM plan_changes WHERE user_id = ? AND week_start = ? "
-                                   "AND seen = 0 ORDER BY id DESC LIMIT 3", (user_id, ws)).fetchall()
-        return [{"id": r["id"], "at": r["at"], **json.loads(r["data"]),
-                 "big": any(i["kind"] == "dropped" or i.get("long") for i in json.loads(r["data"])["items"])}
-                for r in rows]
+                                   "AND seen = 0 ORDER BY id DESC LIMIT 1", (user_id, ws)).fetchall()
+        out = []
+        for r in rows:
+            d = json.loads(r["data"])
+            big = d.get("big", any(i["kind"] == "dropped" or i.get("long") for i in d.get("items", [])))
+            out.append({"id": r["id"], "at": r["at"], "line": d["line"], "reason": d.get("reason"), "big": big})
+        return out
 
     @staticmethod
     def _change_reason(c: dict, week: dict, t: dict, since: Optional[float]) -> str:
@@ -1340,12 +1356,13 @@ class Backend:
 
     def seen_plan_changes(self, user_id: int, ids: list[int]) -> None:
         with self.lock:
-            self.db.executemany("UPDATE plan_changes SET seen = 1 WHERE user_id = ? AND id = ?",
-                                [(user_id, i) for i in ids])
+            # Only the newest note is shown, so seeing it covers the ones before it.
+            if ids:
+                self.db.execute("UPDATE plan_changes SET seen = 1 WHERE user_id = ? AND id <= ?", (user_id, max(ids)))
 
     @staticmethod
     def _next_item(session: dict, today: date, on: Optional[str] = None) -> dict:
-        """One session What's Next names: on its day this week (it may have moved from its planned day)."""
+        """One session What's Next names, on the day this week's layout puts it."""
         from rideengine.analysis import today as td
         d = date.fromisoformat(on or session["date"])
         return {"date": d.isoformat(), "when": td._day_name(d, today) if d - today < timedelta(days=7)
@@ -1360,7 +1377,16 @@ class Backend:
             return None
         return {**s, "guide": {**td.guide(s), "feel": _feel(s)}}
 
-    BRIEF_AT = (7, 30)       # the morning brief, the rider's local time
+    BRIEF_AT = (6, 0)        # the morning brief's default time, the rider's local time: riders go out early
+
+    def _brief_at(self, user_id: int) -> tuple[int, int]:
+        """When this rider's morning brief arrives: their own time (You › Settings), else BRIEF_AT."""
+        with self.lock:
+            row = self.db.execute("SELECT brief_at FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row and row["brief_at"]:
+            h, m = row["brief_at"].split(":")
+            return int(h), int(m)
+        return self.BRIEF_AT
     REVIEW_AT = (18, 0)      # the Sunday review, from this time on Sunday
 
     def train_inbox(self, user_id: int, now: Optional[datetime] = None) -> dict:
@@ -1370,6 +1396,7 @@ class Backend:
         brief comes as `scheduled` (its time and words), so the phone can schedule it itself. Lock-screen words
         only: never recovery numbers."""
         from rideengine.analysis import today as td
+        brief_at = self._brief_at(user_id)
         t = self.train_today(user_id)
         if t.get("state") == "no_plan":
             return {"items": [], "scheduled": []}
@@ -1409,15 +1436,15 @@ class Backend:
                           "at": datetime.fromtimestamp(float(r["ride_id"]), tz).isoformat()})
 
         # A change today: recovery says ease off.
-        if now.time() >= datetime.min.time().replace(hour=self.BRIEF_AT[0], minute=self.BRIEF_AT[1]):
+        if now.time() >= datetime.min.time().replace(hour=brief_at[0], minute=brief_at[1]):
             if t.get("readiness") == "strained" and t["state"] in ("session", "rest"):
                 title = "Easy today instead" if t["state"] == "session" else "Rest today instead"
                 items.append({"id": f"change:{today}", "kind": "change", "title": title,
                               "body": "Your recovery is lower than usual this morning. " + (
                                   f"Today: {td.short(t['session'])}." if t.get("session") else "The harder work moves later."),
-                              "opens": {"screen": "today"}, "at": at(today, self.BRIEF_AT)})
-        # The week re-planned itself: only a bigger change is worth a notification (a session let go, the long ride
-        # moved); small shuffles are said in the app, on Today (docs/train-method.md "When the plan changes").
+                              "opens": {"screen": "today"}, "at": at(today, brief_at)})
+        # The week laid out differently: only a bigger change is worth a notification (a session let go, the long
+        # ride on another day); the rest is said in the app, on Today (docs/train-method.md "When the plan changes").
         for ch in t.get("changes") or []:
             if ch.get("big"):
                 items.append({"id": f"plan:{ch['id']}", "kind": "change", "title": "This week's plan changed",
@@ -1450,7 +1477,7 @@ class Backend:
 
         # The morning brief, for the phone to schedule: tomorrow (and today, if it's still early).
         scheduled = []
-        days = [today] if now.time() < datetime.min.time().replace(hour=self.BRIEF_AT[0], minute=self.BRIEF_AT[1]) else []
+        days = [today] if now.time() < datetime.min.time().replace(hour=brief_at[0], minute=brief_at[1]) else []
         days.append(today + timedelta(days=1))
         week_days = {d["date"]: d for d in t.get("days") or []}
         for d in days:
@@ -1480,7 +1507,7 @@ class Backend:
             if ai:
                 title, body = ai["title"], ai["body"]
             scheduled.append({"id": f"brief:{d}", "kind": "brief", "title": title, "body": body.strip(),
-                              "opens": {"screen": "today"}, "at": at(d, self.BRIEF_AT)})
+                              "opens": {"screen": "today"}, "at": at(d, brief_at)})
         items.sort(key=lambda x: x["at"], reverse=True)
         return {"items": items, "scheduled": scheduled}
 
@@ -1537,12 +1564,12 @@ class Backend:
                     (w for w in view["weeks"] if date.fromisoformat(w["week_start"]) > c["today"]), None))
         if week is None:
             return None
-        out = {**week, "schedule": {}, "moved": []}
+        out = {**week, "schedule": {}}
         ws = date.fromisoformat(week["week_start"])
         if ws <= c["today"] < ws + timedelta(days=7):
             readiness = (self.recovery(user_id).get("readiness") or {}).get("status", "unknown")
             t = week.get("replan") or td.plan_today(week["sessions"], self._recent_kinds(c), c["today"], ws, readiness)
-            out.update(schedule=t["schedule"], moved=t["moved"], folded=t.get("folded", []),
+            out.update(schedule=t["schedule"], folded=t.get("folded", []),
                        dropped=t.get("dropped", []))
         return out
 
@@ -1594,9 +1621,7 @@ class Backend:
                                   "line": s["progress"]["line"]}
                     if ride_id in (s.get("counted") or {}).get("rides", [(s.get("counted") or {}).get("ride_id")]):
                         against = self._ridden_against(user_id, c, s, f.get("work"), ride_id)
-                        planned = date.fromisoformat(s["date"])
                         counted = {"session_id": s["id"], "title": s["title"], "kind": s["kind"],
-                                   "planned_for": td.WEEKDAY[planned.weekday()] if planned != d else None,
                                    "reason": s["counted"]["reason"], "by_hand": s["counted"].get("by_hand", False)}
                         intent = s["kind"]
         earlier = [x for x in c["feats"] if x["start"] < f["start"]]
@@ -1674,8 +1699,8 @@ class Backend:
             "ride": {"weekday": td.WEEKDAY[d.weekday()], "indoor": bool(note["indoor"]), **did,
                      "what_it_was": note["kind_title"], "how_we_know": note["reason"],
                      "what_this_kind_of_riding_builds": BUILDS.get(note["kind"])},
-            "counted_as": ({"session": note["counted"]["title"], "planned_for": note["counted"]["planned_for"],
-                            "set_by_rider": note["counted"]["by_hand"]} if note["counted"] else None),
+            "counted_as": ({"session": note["counted"]["title"], "set_by_rider": note["counted"]["by_hand"]}
+                           if note["counted"] else None),
             "new_bests": [b for b in note["means"]],
             "goal": ({"title": goal["title"], "in_the_riders_words": goal.get("words"), "weeks_left": goal.get("weeks_left"),
                       "numbers": [{k: m[k] for k in ("name", "meaning", "current", "target", "unit", "reached")}

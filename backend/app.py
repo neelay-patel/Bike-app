@@ -239,7 +239,7 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
     @app.get("/v1/train/today")
     def train_today(uid: int = Depends(user)):
         """Today on the Train tab (docs/train-tab.md): the coach's opening line; today's session, or rest, or
-        done; why; how it should feel; what's next; sessions moved from their planned day; the goal and its
+        done; why; how it should feel; what's next; the week as now laid out; the goal and its
         numbers; and the latest ride's note. state "no_plan" until a goal is set."""
         return be.train_today(uid)
 
@@ -299,7 +299,7 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
 
     @app.post("/v1/train/changes/seen")
     def plan_changes_seen(body: dict = Body(...), uid: int = Depends(user)):
-        """{"ids": [1, 2]}: the rider has seen these plan changes (Today's "Moved:" line), so they're not shown
+        """{"ids": [1, 2]}: the rider has seen these plan changes (Today's "Your week now" line), so they're not shown
         again."""
         be.seen_plan_changes(uid, [int(i) for i in body.get("ids") or []])
         return {"ok": True}

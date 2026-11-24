@@ -62,13 +62,19 @@ enum WatchWorkout {
         return label
     }
 
-    static func when(_ s: PlanSession) -> DateComponents? {
+    /// When the session waits on the Watch: its day, from early that morning (24 Nov 2026). Apple asks for a time,
+    /// but a scheduled workout can be started whenever you like; the time only orders them and sets the reminder.
+    /// So it's the morning brief's time (06:00 unless the rider changed it): there before any ride, never late.
+    static func when(_ s: PlanSession, at early: String = "06:00") -> DateComponents? {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm"
         f.locale = Locale(identifier: "en_US_POSIX")
-        guard let d = f.date(from: "\(s.date) \(s.time)") else { return nil }
+        guard let d = f.date(from: "\(s.onDate) \(early)") else { return nil }
         return Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: d)
     }
+
+    /// The rider's morning brief time, for when(_:at:).
+    static func early() async -> String { (try? await APIClient().me().briefAt) ?? "06:00" }
 }
 
 /// Puts sessions on the Watch: one when the rider taps "Send to Apple Watch", or, with the setting on, the
@@ -110,7 +116,7 @@ final class WatchSessions: ObservableObject {
 
     private func sendNow(_ s: PlanSession) async -> Outcome {
         guard Self.supported else { return .failed("This iPhone can't send workouts to an Apple Watch.") }
-        guard let plan = WatchWorkout.plan(for: s), let at = WatchWorkout.when(s) else {
+        guard let plan = WatchWorkout.plan(for: s), let at = WatchWorkout.when(s, at: await WatchWorkout.early()) else {
             return .failed("This session has no steps to send.")
         }
         guard await authorized() else {
@@ -132,8 +138,9 @@ final class WatchSessions: ObservableObject {
 
     private var lastSync: Date?
 
-    /// The next 7 days' riding sessions, as the plan has them now. Kova's scheduled workouts are only its own,
-    /// so clearing them first leaves nothing stale behind.
+    /// The next 7 days' riding sessions, on the days this week's fresh layout has them, so a different session
+    /// than the day's is there too if the rider feels like it. Kova's scheduled workouts are only its own, so
+    /// clearing them first leaves nothing stale behind.
     func sync(force: Bool = false) async {
         guard auto, Self.supported else { return }
         if !force, let last = lastSync, Date().timeIntervalSince(last) < 600 { return }
@@ -145,11 +152,13 @@ final class WatchSessions: ObservableObject {
         let today = f.string(from: Date())
         let end = f.string(from: Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date())
         let coming = plan.weeks.flatMap(\.sessions)
-            .filter { !$0.offBike && $0.status != "done" && $0.date >= today && $0.date < end }
+            .filter { !$0.offBike && $0.status != "done" && $0.dropped == nil && $0.foldedInto == nil
+                      && $0.onDate >= today && $0.onDate < end }
             .prefix(max(1, WorkoutScheduler.maxAllowedScheduledWorkoutCount))
+        let early = await WatchWorkout.early()
         await WorkoutScheduler.shared.removeAllWorkouts()
         for s in coming {
-            if let p = WatchWorkout.plan(for: s), let at = WatchWorkout.when(s) {
+            if let p = WatchWorkout.plan(for: s), let at = WatchWorkout.when(s, at: early) {
                 await WorkoutScheduler.shared.schedule(p, at: at)
             }
         }
@@ -202,7 +211,7 @@ struct WatchSettingsCard: View {
             Toggle("Sessions on my Apple Watch", isOn: Binding(get: { watch.auto },
                                                                set: { on in Task { await watch.setAuto(on) } }))
                 .font(Theme.text(15)).tint(Theme.cobalt).frame(minHeight: 44)
-            Text("The coming week's sessions wait in the Watch's Workout app, under Scheduled, and change when your plan does. Start one instead of a plain Cycling workout: the Watch taps your wrist at every step.")
+            Text("The coming week's sessions wait in the Watch's Workout app, under Scheduled, from the time of your morning brief, and change when your plan does. Start any of them whenever you ride, instead of a plain Cycling workout: the Watch taps your wrist at every step.")
                 .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
         }
         .padding(16).surfaceCard(radius: 22)

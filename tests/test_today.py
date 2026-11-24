@@ -34,9 +34,10 @@ def test_monday_the_planned_session_and_what_comes_next():
     t = td.plan_today(week(), rides((-6, "surges"), (-5, "steady"), (-4, "threshold"), (-2, "steady")), MON, MON, "good")
     assert t["state"] == "session" and t["session_id"] == "s-surges"
     assert t["why"] == td.WHY["surges"]
-    # No hard days back to back: sweet spot moves from Tuesday to Wednesday, endurance to Thursday.
+    # No hard days back to back: the fresh layout puts sweet spot on Wednesday and endurance on Thursday.
     assert t["then"].startswith("Tomorrow: rest. Wednesday: Sweet spot, 3 × 12 min.")
-    assert {m["id"]: m["to"] for m in t["moved"]} == {"s-steady": "2026-11-25", "s-endurance": "2026-11-26"}
+    assert t["schedule"]["s-steady"] == "2026-11-25" and t["schedule"]["s-endurance"] == "2026-11-26"
+    assert "moved" not in t
     assert "Strength and mobility is still open" in t["then"]
 
 
@@ -197,7 +198,14 @@ def test_coach_inbox(env):
     assert set(box) == {"items", "scheduled"}
     brief = box["scheduled"][-1]
     assert brief["kind"] == "brief" and brief["id"].startswith("brief:") and brief["opens"] == {"screen": "today"}
-    assert brief["at"][11:16] == "07:30" and brief["title"]
+    assert brief["at"][11:16] == "06:00" and brief["title"]               # early: riders go out early
+    # The rider's own time: kept, and the brief comes then; nonsense or the middle of the night is refused.
+    assert client.get("/v1/me").json()["brief_at"] == "06:00"
+    assert client.put("/v1/me", json={"brief_at": "5:45"}).json()["brief_at"] == "05:45"
+    assert client.get("/v1/train/inbox").json()["scheduled"][-1]["at"][11:16] == "05:45"
+    for bad in ("02:00", "13:00", "6:75", "soon", None):
+        assert client.put("/v1/me", json={"brief_at": bad}).status_code == 400
+    assert client.get("/v1/me").json()["brief_at"] == "05:45"
     # Messages reach the lock screen: never recovery numbers.
     for m in box["items"] + box["scheduled"]:
         words = (m["title"] + " " + m["body"]).lower()
@@ -262,8 +270,8 @@ def test_sessions_grow_from_the_evidence():
     assert score == {"punch": 1}
     g = Backend._grow(week("2026-11-30", "2026-11-30")["sessions"][0], "build", score, last)
     assert p.job_minutes(g) == {"punch": 9.0} and g["level"] == 0.25
-    assert g["grew"] == ("A step up: 9 min of hard efforts, from 7.5 min, because you did Monday's surges in full "
-                         "and felt easy.")
+    assert g["grew"] == ("A step up: 9 min of hard efforts, from 7.5 min, because you did last Monday's surges in "
+                         "full and felt easy.")
     # Felt hard: held. Wrecked: a step back, said. Missed or partly done: held, never punished.
     assert p.grow_score(1, "hard") == 1 and p.grow_score(1, "part") == 1 and p.grow_score(1, "missed") == 1
     w2 = {"week_start": "2026-11-30", "phase": "build", "sessions": [g]}
@@ -272,6 +280,12 @@ def test_sessions_grow_from_the_evidence():
     assert score == {"punch": 0}
     g = Backend._grow(week("2026-12-07", "2026-12-07")["sessions"][0], "build", score, last)
     assert p.job_minutes(g) == {"punch": 7.5} and g["grew"].startswith("A step back") and "felt wrecked" in g["grew"]
+    assert "because last Monday's surges" in g["grew"]
+    # Older than last week: said with its date, not a weekday that reads as this week's.
+    score2, last2 = {"punch": 1}, {"surges": {"minutes": 7.5, "date": "2026-11-23", "feel": None, "title": "Surges",
+                                              "why": "felt hard"}}
+    g = Backend._grow(week("2026-12-14", "2026-12-16")["sessions"][0], "build", score2, last2)
+    assert "the surges on 23 Nov in full" in g["grew"]
     # Base weeks grow at most halfway; easy, long and group rides don't grow.
     assert p.grown({"kind": "surges", "seconds": 3300, "indoor": True}, 8, "base")["level"] == 0.5
     assert p.grown({"kind": "long", "seconds": 7200}, 8, "build") is None
@@ -304,31 +318,56 @@ def test_leftovers_join_a_planned_ride_and_what_doesnt_fit_is_let_go():
     assert set(t["schedule"]) == {"thu", "sat"} or set(t["schedule"]) == {"sat", "thu"}
 
 
-def test_plan_changes_are_stored_with_their_reason(env):
-    """The week laid out again after a ride: what moved, and why in the rider's terms, said once."""
+def test_a_new_layout_is_said_once_with_its_reason(env):
+    """The week is laid out fresh each time; when a session lands on another day than last shown, one plain line
+    says the week as it is now, and why. A ride that just did a session isn't news. Seen once, not again."""
     be, uid, client, _ = env
     ws = "2026-11-23"
-    week = {"week_start": ws, "sessions": [{"id": "wed", "title": "Sweet spot"}, {"id": "sun", "title": "Endurance"}],
-            "rides": []}
+    week = {"week_start": ws, "rides": [],
+            "sessions": [{"id": "wed", "title": "Sweet spot", "kind": "steady"},
+                         {"id": "sat", "title": "Long ride", "kind": "long"},
+                         {"id": "sun", "title": "Endurance", "kind": "endurance"}]}
     c = {"today": date(2026, 11, 24)}
-    t = {"schedule": {"wed": "2026-11-25", "sun": "2026-11-29"}, "folded": [], "dropped": []}
-    assert be._plan_changes(uid, c, week, t) == []                 # the first layout: nothing changed yet
+    t = {"schedule": {"wed": "2026-11-25", "sat": "2026-11-28", "sun": "2026-11-29"}, "folded": [], "dropped": []}
+    assert be._plan_changes(uid, c, week, t) == []                 # the first layout: nothing to compare with
     assert be._plan_changes(uid, c, week, t) == []                 # the same again: still nothing
-    # Wednesday's ride did the punch; the sweet spot moves to Thursday.
+    # Wednesday's ride did the punch; the sweet spot is now on Thursday.
     week["rides"] = [{"ride_id": "r", "start": 4102444800, "date": "2026-11-25",
                       "jobs": {"jobs": [{"job": "punch", "status": "done"}]}}]
-    t = {"schedule": {"wed": "2026-11-26", "sun": "2026-11-29"}, "folded": [], "dropped": []}
+    t = {"schedule": {"wed": "2026-11-26", "sat": "2026-11-28", "sun": "2026-11-29"}, "folded": [], "dropped": []}
     (ch,) = be._plan_changes(uid, {"today": date(2026, 11, 25)}, week, t)
-    assert ch["line"] == "Moved: sweet spot to Thursday." and ch["reason"] == "Today's ride did the punch."
-    assert not ch["big"]
-    # Seen: not shown again.
+    assert ch["line"] == "Your week now: sweet spot Thursday, long ride Saturday, endurance Sunday."
+    assert ch["reason"] == "Today's ride did the punch." and not ch["big"]
     assert client.post("/v1/train/changes/seen", json={"ids": [ch["id"]]}).json() == {"ok": True}
     assert be._plan_changes(uid, {"today": date(2026, 11, 25)}, week, t) == []
-    # Letting a session go is a bigger change.
-    t = {"schedule": {"wed": "2026-11-26"}, "folded": [],
+    # Thursday's ride did the sweet spot: it just leaves the layout, nothing to say.
+    t = {"schedule": {"sat": "2026-11-28", "sun": "2026-11-29"}, "folded": [], "dropped": []}
+    assert be._plan_changes(uid, {"today": date(2026, 11, 26)}, week, t) == []
+    # The long ride on another day, or a session let go: bigger, so a notification too.
+    t = {"schedule": {"sat": "2026-11-29"}, "folded": [],
          "dropped": [{"id": "sun", "title": "Endurance", "line": "No room for endurance this week, so it's let go."}]}
     (ch,) = be._plan_changes(uid, {"today": date(2026, 11, 28)}, week, t)
-    assert ch["big"] and ch["line"] == "No room for endurance this week, so it's let go. Next week starts fresh."
+    assert ch["big"] and ch["line"] == ("Your week now: long ride Sunday. No room for endurance this week, so it's "
+                                        "let go. Next week starts fresh.")
+
+
+def test_a_session_is_on_the_day_it_was_ridden_or_laid_out(env):
+    """24 Nov 2026: a done session sits on the day it was ridden, one still open on the day this week's layout
+    puts it, and its status follows that day; no ride note says where a session was first planned."""
+    be, uid, client, _ = env
+    client.post("/v1/sync/garmin_personal")
+    client.put("/v1/goals/current", json={"objective": "faster", "aspiration": "keep_up_group"})
+    view = be.plan_view(uid)
+    today = be._plan_context(uid)["today"].isoformat()
+    for w in view["weeks"]:
+        sched = (w.get("replan") or {}).get("schedule", {})
+        for s in w["sessions"]:
+            assert s["on"] == (s["counted"]["date"] if s.get("counted") else sched.get(s["id"], s["date"]))
+            if w.get("replan") and s["status"] in ("today", "upcoming", "open"):
+                assert s["status"] == ("today" if s["on"] == today else "upcoming" if s["on"] > today else "open")
+            if s.get("counted"):
+                note = be.train_ride_note(uid, s["counted"]["ride_id"])
+                assert note["counted"] and "planned_for" not in note["counted"]
 
 
 def test_what_the_rider_sees_after_re_planning(env):

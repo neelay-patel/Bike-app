@@ -8,7 +8,7 @@ import UserNotifications
 // /v1/train/inbox: after a ride, a plan change, the Sunday review) with stable ids; the phone shows each new one
 // as a notification. Until Kova has push (the paid developer account), messages arrive when the phone wakes Kova:
 // Apple Health waking it for a new ride, background refresh now and then, or opening it. The morning brief comes
-// with its time, so the phone schedules it itself and it arrives at 07:30 either way. Lock-screen words only:
+// with its time, so the phone schedules it itself and it arrives on time either way (06:00 unless the rider picks another time). Lock-screen words only:
 // the server never puts recovery numbers in a message.
 
 struct CoachInbox: Decodable {
@@ -44,7 +44,7 @@ final class CoachNotifier: NSObject, ObservableObject, UNUserNotificationCenterD
     static let shared = CoachNotifier()
     static let refreshTask = "com.neelaypatel.rideapp.coach"
     /// The kinds of message the rider can turn off, in Settings.
-    static let kinds: [(id: String, label: String)] = [("ride", "After every ride"), ("brief", "Morning brief, 07:30"),
+    static let kinds: [(id: String, label: String)] = [("ride", "After every ride"), ("brief", "Morning brief"),
                                                        ("change", "When the plan changes"), ("review", "Sunday review")]
 
     @Published var route: CoachRoute?
@@ -153,12 +153,57 @@ struct CoachSettingsCard: View {
             MonoLabel("When the coach speaks up").padding(.bottom, 4)
             ForEach(CoachNotifier.kinds, id: \.id) { k in
                 Toggle(k.label, isOn: Binding(get: { on[k.id] ?? true },
-                                              set: { on[k.id] = $0; CoachNotifier.setEnabled(k.id, $0) }))
+                                              set: { on[k.id] = $0; CoachNotifier.setEnabled(k.id, $0)
+                                                     Task { await CoachNotifier.shared.refresh(appActive: true) } }))
                     .font(Theme.text(15)).tint(Theme.cobalt).frame(minHeight: 44)
+                if k.id == "brief", on["brief"] ?? true { BriefTimeRow() }
             }
             Text("Until Kova can send messages straight to your phone, they arrive when your iPhone wakes Kova: after a ride syncs, now and then in the background, or when you open it. The morning brief always arrives on time.")
                 .font(Theme.text(12)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
         }
         .padding(16).surfaceCard(radius: 22)
+    }
+}
+
+/// The morning brief's time (24 Nov 2026): 06:00 to start, since riders go out early; any time from 04:00 to noon.
+/// Kept on the server, which writes the brief for that time; the phone reschedules it straight away.
+private struct BriefTimeRow: View {
+    @State private var time = BriefTimeRow.date("06:00")
+    @State private var loaded = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            DatePicker("Arrives at", selection: $time, in: Self.date("04:00")...Self.date("12:00"),
+                       displayedComponents: .hourAndMinute)
+                .font(Theme.text(15)).foregroundStyle(Theme.inkSoft).tint(Theme.cobalt).frame(minHeight: 44)
+                .padding(.leading, 12)
+            if let error { Text(error).font(Theme.text(12)).foregroundStyle(Theme.heart) }
+        }
+        .task {
+            if let at = try? await APIClient().me().briefAt { time = Self.date(at) }
+            loaded = true
+        }
+        .onChange(of: time) { _, t in
+            guard loaded else { return }
+            Task {
+                do {
+                    _ = try await APIClient().setBriefAt(Self.string(t))
+                    error = nil
+                    await CoachNotifier.shared.refresh(appActive: true)
+                    await WatchSessions.shared.sync(force: true)       // the Watch's sessions wait from then too
+                } catch { self.error = "Couldn't save the time. Try again in a moment." }
+            }
+        }
+    }
+
+    private static func date(_ hhmm: String) -> Date {
+        let p = hhmm.split(separator: ":").compactMap { Int($0) }
+        return Calendar.current.date(bySettingHour: p.first ?? 6, minute: p.count > 1 ? p[1] : 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private static func string(_ d: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return String(format: "%02d:%02d", c.hour ?? 6, c.minute ?? 0)
     }
 }

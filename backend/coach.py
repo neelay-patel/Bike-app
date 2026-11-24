@@ -101,8 +101,8 @@ REVIEW_SCHEMA = {
     "additionalProperties": False,
 }
 
-BRIEF_SYSTEM = """You are the coach in Kova, a cycling app. You write the rider's morning brief: a notification at
-07:30 and the first words on the Train tab. The app's engine has already decided today (a session or rest), why,
+BRIEF_SYSTEM = """You are the coach in Kova, a cycling app. You write the rider's morning brief: a notification
+early in the morning and the first words on the Train tab. The app's engine has already decided today (a session or rest), why,
 and what's next; you turn its facts into words the rider reads in a glance and wants to act on.
 
 Write two things:
