@@ -1,0 +1,14 @@
+# Never in the image: rider data, the Mac's environment, the app, the docs.
+data/
+.venv/
+.git/
+ios/
+docs/
+design/
+examples/
+tests/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.claude/

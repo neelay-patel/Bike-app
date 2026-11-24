@@ -1215,6 +1215,11 @@ class Backend:
                                    if x.get("off_bike") and x.get("status") != "done"), None),
                 "folded": t.get("folded", []), "dropped": t.get("dropped", []), "changes": changes,
                 "learn": today_learn, "review": self._review_card(user_id, c),
+                # This morning's brief in the coach's words, as the notification had it (no new call here); the
+                # greeting stays when there's none, or once today's ride is in.
+                "brief": (self.coach.saved(user_id, f"brief:{c['today'].isoformat()}")
+                          if t["state"] in ("session", "rest") and "recovery" not in (t.get("why") or "").lower()
+                          else None),
                 "readiness": readiness, "goal": self._goal_markers(user_id, c), "latest": latest}
 
     @staticmethod
@@ -1471,10 +1476,53 @@ class Backend:
                     body = f"A new week starts. {td.short(first)}. {td.WHY.get(first['kind'], '')}"
                 else:
                     title, body = "A new week", "Rest today; the week's first session comes tomorrow."
+            ai = self._ai_brief(user_id, c, d, t, title, body.strip())
+            if ai:
+                title, body = ai["title"], ai["body"]
             scheduled.append({"id": f"brief:{d}", "kind": "brief", "title": title, "body": body.strip(),
                               "opens": {"screen": "today"}, "at": at(d, self.BRIEF_AT)})
         items.sort(key=lambda x: x["at"], reverse=True)
         return {"items": items, "scheduled": scheduled}
+
+    def _brief_facts(self, c: dict, d: date, t: dict, title: str, body: str) -> Optional[dict]:
+        """What the AI coach may know for a day's brief: the day's session or rest as the engine decided it, why,
+        how it should feel, why the work works, the week so far and what's left, the goal, and the last ride's
+        jobs and what it did well. Never recovery data: on a day the engine eased because recovery was low, there's
+        no AI brief at all (the engine's words say it)."""
+        from rideengine.analysis import plan as p
+        from rideengine.analysis import today as td
+        from rideengine.analysis import voice
+        if d == c["today"] and "recovery" in (t.get("why") or "").lower():
+            return None
+        ses = None
+        if d == c["today"] and t.get("state") == "session":
+            ses = t.get("session")
+        else:
+            ses = next((n["session"] for n in t.get("next") or [] if n.get("date") == d.isoformat()), None)
+        latest = t.get("latest") or {}
+        facts = {"day": td.WEEKDAY[d.weekday()], "engine_words": {"title": title, "body": body},
+                 "session": ({"title": ses["title"], "main": td.short(ses), "job": ses.get("job"),
+                              "why": td.WHY.get(ses["kind"]), "how_it_should_feel": td.FEEL.get(ses["kind"]),
+                              "why_it_works": (voice.learn(ses.get("job"), d.toordinal()) or {}).get("text"),
+                              "minutes": round((ses.get("seconds") or 0) / 60)} if ses else None),
+                 "rest_day": ses is None,
+                 "week": {"done": t.get("done"), "total": t.get("total")},
+                 "goal": ({"title": t["goal"].get("title"), "weeks_left": t["goal"].get("weeks_left")}
+                          if t.get("goal") else None),
+                 "last_ride": ({"date": latest.get("date"), "did": (latest.get("jobs") or {}).get("summary"),
+                                "done_well": (latest.get("done_well") or {}).get("text")}
+                               if latest and latest.get("date", "") >= (d - timedelta(days=2)).isoformat() else None)}
+        if ses and ses.get("steps"):
+            main = next((x["steps"][0].get("target", {}).get("watts") for x in ses["steps"] if x.get("steps")), None)
+            if main:
+                facts["session"]["watts"] = f"{main[0]}–{main[1]} W"
+        return facts
+
+    def _ai_brief(self, user_id: int, c: dict, d: date, t: dict, title: str, body: str) -> Optional[dict]:
+        if not self.coach.allowed(user_id):
+            return None
+        facts = self._brief_facts(c, d, t, title, body)
+        return self.coach.morning_brief(user_id, d.isoformat(), facts) if facts else None
 
     def train_week(self, user_id: int, start: Optional[str] = None) -> Optional[dict]:
         """A plan week with each session's status and the ride that counted, the week's rides with what kind of

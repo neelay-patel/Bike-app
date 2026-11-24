@@ -81,12 +81,14 @@ def main(argv=None) -> int:
     v = sub.add_parser("serve")
     v.add_argument("--host", default="127.0.0.1")
     v.add_argument("--port", type=int, default=8000)
+    v.add_argument("--no-access-log", action="store_true",
+                   help="don't log each request (on a host: the calendar feed's secret is in its address)")
     a = p.parse_args(argv)
 
     if a.cmd == "serve":
         import uvicorn
         from .app import create_app
-        uvicorn.run(create_app(), host=a.host, port=a.port)
+        uvicorn.run(create_app(), host=a.host, port=a.port, access_log=not a.no_access_log)
         return 0
 
     if a.cmd == "build-map":

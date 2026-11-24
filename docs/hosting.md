@@ -1,6 +1,14 @@
 # Hosting and TestFlight: sharing the app with other riders
 
-Written 18 Nov 2026. A plan, not built yet. The goal: put the app on TestFlight so other riders can use it, and stop
+Written 18 Nov 2026. **Step 4 done 23 Nov 2026 for Neelay**: the backend runs on Fly.io (app `kova-backend`, region
+yyz/Toronto, one always-on `shared-cpu-1x` machine with 1 GB, a 3 GB encrypted disk `kova_data` mounted at
+`/app/data` with Fly's daily snapshots kept 5 days), at `https://kova-backend.fly.dev`. `Dockerfile`, `fly.toml` and
+`scripts/host-start.sh` (which unpacks an uploaded `incoming.tar.gz` of the Mac's data before the server starts,
+and serves with no access log since the calendar feed's secret is in its address). Secrets in Fly's store only. The
+phone signs in with its existing dev token (moved with the database) until Sign in with Apple; the Mac's server is
+retired and its `data/` is a backup. Still to do from below: Sign in with Apple, delete account, object storage and
+Litestream (when there are other riders), a domain, Garmin Starter tier, privacy policy, TestFlight.
+The rest of this was the plan. The goal: put the app on TestFlight so other riders can use it, and stop
 depending on the Mac. Today the backend runs in a terminal on Neelay's Mac mini, and the phone reaches it only on the
 home Wi-Fi (`http://Neelays-Mac-mini.local:8000`), so rides recorded away from home arrive only once he's back. A
 hosted backend fixes that for him too.

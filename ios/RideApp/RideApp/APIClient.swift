@@ -405,7 +405,7 @@ struct TrainToday: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case state, date, week, weeks, phase, greeting, session, why, feel, then, moved, readiness, goal, latest, days, done, total
-        case next, nextNote, changes, learn, review
+        case next, nextNote, changes, learn, review, brief
         case where_ = "where"
     }
     let readiness: String?
@@ -421,6 +421,10 @@ struct TrainToday: Decodable {
     let learn: Learn?
     /// The week in review (Sunday evening to Tuesday, or while a change waits for the rider's OK).
     let review: ReviewCard?
+    /// This morning's brief in the AI coach's words (when the rider has the AI on).
+    let brief: Brief?
+
+    struct Brief: Decodable { let title: String; let body: String }
 
     struct ReviewCard: Decodable { let weekStart: String; let index: Int; let line: String?; let open: Int }
     /// The week re-planned itself (docs/train-method.md "When the plan changes"): what changed and why, until seen.

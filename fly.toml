@@ -1,0 +1,33 @@
+# Kova's backend on Fly.io (docs/hosting.md). One always-on machine in Toronto with a disk for the rider data.
+# The app name is set when the app is created (fly launch / fly apps create) and written here then.
+app = "kova-backend"
+primary_region = "yyz"
+
+[build]
+
+[env]
+  RIDE_DATA_DIR = "/app/data/backend"
+  PORT = "8080"
+
+[[mounts]]
+  source = "kova_data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Always on: the Garmin poll and the insights worker run inside the server.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

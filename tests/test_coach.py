@@ -118,3 +118,30 @@ def test_the_review_words_keep_every_change_and_only_the_facts_numbers():
     assert _check_review({"summary": "Fine.", "proposals": [{"id": "w:ease", "why": "x"}, {"id": "w:more", "why": "y"}]},
                          facts)["why"] == "proposals"                                              # can't add one
     assert _check_review({"summary": "You rode 5 h.", "proposals": [{"id": "w:ease", "why": "x"}]}, facts)["why"] == "numbers"
+
+
+def test_the_morning_brief_is_the_engines_day_in_the_coachs_words(env):
+    be, uid, client, _ = env
+    fake = FakeClaude({"title": "Sweet spot: 2 × 11 min", "body": "Hold 140–149 W, steady: it lifts what you can hold."})
+    be.coach._client = fake
+    ride_with_note(be, uid, client)
+    c = be._plan_context(uid)
+    t = {"state": "session", "why": "It raises the power you can hold.", "done": 1, "total": 5,
+         "session": {"title": "Sweet spot", "kind": "steady", "job": "hold", "seconds": 3000,
+                     "steps": [{"set": "2 × 11 min", "repeat": 2, "steps": [{"zone": "SS", "target": {"watts": [140, 149]}}]}]},
+         "next": [], "goal": {"title": "Keep up with the fast group", "weeks_left": 22}, "latest": None}
+    f = be._brief_facts(c, c["today"], t, "Sweet spot today", "Sweet spot, 2 × 11 min.")
+    assert f["session"]["watts"] == "140–149 W" and f["rest_day"] is False
+    assert "readiness" not in str(f) and "hrv" not in str(f).lower()
+    # A day eased because recovery was low: no AI brief at all.
+    assert be._brief_facts(c, c["today"], {**t, "why": "Your recovery is lower than usual this morning, so today is easy."},
+                           "Easy", "Easy.") is None
+    # Written by the coach once allowed, checked, saved; Today reads the saved words without a new call.
+    be.coach.set_allowed(uid, True)
+    out = be.coach.ride_story(uid, c["today"].isoformat(), f, wait=True, key=f"brief:{c['today'].isoformat()}")
+    assert out["title"] == "Sweet spot: 2 × 11 min" and len(fake.calls) == 1
+    assert be.coach.saved(uid, f"brief:{c['today'].isoformat()}")["body"].startswith("Hold 140–149 W")
+    assert "recovery" not in fake.calls[0]["messages"][0]["content"].lower()
+    # A number that isn't in the facts: refused, the engine's words stay.
+    be.coach._client = FakeClaude({"title": "Sweet spot", "body": "Hold 160 W."})
+    assert be.coach.ride_story(uid, "x", f, wait=True, key="brief:2030-01-01") is None

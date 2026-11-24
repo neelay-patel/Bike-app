@@ -65,6 +65,10 @@ rider's words, progress read from normal riding, an AI coach that explains while
 - Garmin's personal API key is for Neelay's own account only; other riders connect through the Starter tier.
 - Throwaway test servers run on a **copy** of `data/backend/`, never the real one. Before deleting rides in a copy,
   rewrite its relative `raw_path`s, or the real raw files get deleted.
+- **The real data lives on Fly.io since 23 Nov 2026** (`kova-backend`, Toronto, disk `kova_data` at `/app/data`).
+  The Mac's `data/backend/` is a backup as of that day, no longer updated: run backend commands on the host (see
+  Commands), and take test copies from the host when they need current data. Secrets (`RIDE_SECRET_KEY`,
+  `ANTHROPIC_API_KEY`) are only in Fly's secret store.
 
 ## Commands
 ```
@@ -87,8 +91,11 @@ python -m backend build-map data/osm/ontario-latest.osm.pbf   # our own map for 
 python -m backend card --user 1 <ride_id>
 python -m backend compact                           # compress stored rides and recordings (backs up the database first)
 python -m backend serve                             # API docs at http://127.0.0.1:8000/docs
-scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a login service (launchd); log in
-                                                    # data/backend/server.log. After a backend change: restart
+# The backend is hosted on Fly.io (docs/hosting.md): https://kova-backend.fly.dev. After a backend change:
+~/.fly/bin/fly deploy --app kova-backend --ha=false --remote-only
+~/.fly/bin/fly logs --app kova-backend
+~/.fly/bin/fly ssh console --app kova-backend -C "sh -c 'cd /app && python -m backend rebuild --user 1'"   # any backend command, on the host
+scripts/mac-server.sh install|uninstall                 # the old Mac server (retired 23 Nov; its data is a backup)
 ```
 
 ## Verified numbers (for sanity checks)
@@ -101,7 +108,7 @@ scripts/mac-server.sh install|restart|status|logs   # the Mac's server as a logi
 On Neelay's iPhone, all pushed to origin/main:
 - **Data:** Garmin (personal key), Apple Health (rides, recovery), KICKR power via the Watch, Zwift via Garmin. New
   rides arrive on their own: the server polls Garmin every 15 min; the app sends Watch rides and asks for a check
-  each time it opens. Needs the home Wi-Fi until the backend is hosted; the Mac's server is a login service.
+  each time it opens. The backend is hosted on Fly.io (Toronto) since 23 Nov, so rides arrive from anywhere.
 - **Kova:** name, "the climb" icon, opening screen (KOVA's letters rise in after the climb), About Kova.
 - **Efforts:** new efforts lead as their full ride card, this month in one line, then the collection by month.
 - **Train** (replaced Plan, 21 Nov; the method `docs/train-method.md`, build steps 1-6 done 23 Nov): the plan

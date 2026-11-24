@@ -20,7 +20,9 @@ struct TrainView: View {
                     header
                     StatusLine()
                     if let t = model.today, t.state != "no_plan" {
-                        if let g = t.greeting { CoachLine(text: g).arrive(0) }
+                        // The morning brief in the coach's words when there is one; else the engine's greeting.
+                        if let b = t.brief { CoachLine(text: b.body, title: b.title).arrive(0) }
+                        else if let g = t.greeting { CoachLine(text: g).arrive(0) }
                         // Today, then a thread with a light running down it to what's next (21 Nov 2026).
                         VStack(alignment: .leading, spacing: 0) {
                             TodayHero(today: t, plan: model.plan).arrive(1)
@@ -106,11 +108,18 @@ struct TrainView: View {
 /// The coach's opening line, beside the Kova mark: in ink, so it reads as the coach speaking.
 struct CoachLine: View {
     let text: String
+    /// The morning brief's title, when the line is the brief.
+    var title: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CoachMark()
-            Text(text).font(Theme.text(16)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 3) {
+                if let title {
+                    Text(title).font(Theme.text(16, .semibold)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                Text(text).font(Theme.text(16)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 4)
     }

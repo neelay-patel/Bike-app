@@ -101,6 +101,32 @@ REVIEW_SCHEMA = {
     "additionalProperties": False,
 }
 
+BRIEF_SYSTEM = """You are the coach in Kova, a cycling app. You write the rider's morning brief: a notification at
+07:30 and the first words on the Train tab. The app's engine has already decided today (a session or rest), why,
+and what's next; you turn its facts into words the rider reads in a glance and wants to act on.
+
+Write two things:
+- title: at most 6 words. Today, plainly: the session's name and its heart ("Sweet spot: 2 × 11 min"), or
+  "Rest day". No hype.
+- body: one or two short sentences, at most 30 words: what to do and why it matters for the goal, like a good coach
+  would say it over coffee. If there's a ride from yesterday or the day before with something done well, you may
+  nod to it in a few words. On a rest day, say why rest helps.
+
+Rules (Kova's words guide):
+- Use only numbers that appear in the facts, written the same way. Never calculate new numbers.
+- Plain words. Never: FTP, TSS, CTL, zones by number, ERG, "load", "compliance". Never empty praise ("Great job!").
+- Speak to the rider as "you". Indoors or out is the rider's choice: never suggest one. No medical advice.
+- Don't change the plan: today's session or rest is the engine's.
+"""
+
+BRIEF_SCHEMA = {
+    "type": "object",
+    "properties": {"title": {"type": "string", "description": "At most 6 words."},
+                   "body": {"type": "string", "description": "One or two short sentences."}},
+    "required": ["title", "body"],
+    "additionalProperties": False,
+}
+
 _NUM = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?![\w])")
 
 
@@ -221,23 +247,29 @@ class Coach:
         import anthropic
         started = time.time()
         usage, out = None, {"ok": False}
-        review = key.startswith("review:")
+        kind = key.split(":")[0]
+        review = kind == "review"
+        system, schema, about = {"review": (REVIEW_SYSTEM, REVIEW_SCHEMA, "week"),
+                                 "brief": (BRIEF_SYSTEM, BRIEF_SCHEMA, "day")}.get(kind, (SYSTEM, SCHEMA, "ride"))
         try:
             r = self.client().beta.messages.create(
                 model=MODEL,
                 max_tokens=2000,
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
-                output_config={"effort": "low", "format": {"type": "json_schema",
-                                                           "schema": REVIEW_SCHEMA if review else SCHEMA}},
-                system=[{"type": "text", "text": REVIEW_SYSTEM if review else SYSTEM,
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": f"Facts about this {'week' if review else 'ride'} (JSON):\n"
+                output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": f"Facts about this {about} (JSON):\n"
                                                       + json.dumps(facts, sort_keys=True)}],
             )
             usage = r.usage
             if r.stop_reason == "refusal":
                 out = {"ok": False, "why": "refusal"}
+            elif kind == "brief":
+                data = json.loads(next((b.text for b in r.content if b.type == "text"), ""))
+                bad = check_numbers(data["title"] + " " + data["body"], facts)
+                out = ({"ok": True, "title": data["title"].strip(), "body": data["body"].strip(), "by": "ai",
+                        "model": r.model} if not bad else {"ok": False, "why": "numbers", "bad": bad})
             elif review:
                 data = json.loads(next((b.text for b in r.content if b.type == "text"), ""))
                 out = _check_review(data, facts) | {"model": r.model}
@@ -261,6 +293,20 @@ class Coach:
                             (user_id, key, MODEL, *(cost["tokens"]), cost["usd"], round(time.time() - started, 2),
                              1 if out.get("ok") else 0, time.time()))
         return out if out.get("ok") else None
+
+    def saved(self, user_id: int, key: str) -> Optional[dict]:
+        """The last good words saved under this key, whatever facts they were written for (no call)."""
+        if not self.allowed(user_id):
+            return None
+        with self.lock:
+            row = self.db.execute("SELECT output FROM coach_texts WHERE user_id = ? AND key = ?", (user_id, key)).fetchone()
+        out = json.loads(row["output"]) if row else None
+        return out if out and out.get("ok") else None
+
+    def morning_brief(self, user_id: int, day: str, facts: dict) -> Optional[dict]:
+        """The morning brief in the coach's words, for these facts (written in the background the first time; the
+        engine's words stay until then, and whenever a reply fails its checks)."""
+        return self.ride_story(user_id, day, facts, key=f"brief:{day}")
 
     def week_review(self, user_id: int, week_start: str, facts: dict) -> Optional[dict]:
         """The Sunday review in the coach's words, for these facts (written in the background the first time, like
