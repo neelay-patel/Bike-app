@@ -38,7 +38,7 @@ HR_THR = (0.86, 0.93)
 HR_STEADY_MIN = 20       # ... held for at least this long
 
 TITLES = {"surges": "Surges", "steady": "Sweet spot", "threshold": "Threshold", "vo2": "VO2 max",
-          "sprint": "Sprints", "over_unders": "Over-unders", "group": "Group ride", "endurance": "Endurance",
+          "sprint": "Sprints", "over_unders": "Over-unders", "group": "Group ride", "endurance": "Zone 2",
           "long": "Long ride", "easy": "Easy spin", "mixed": "Mixed riding"}
 
 # How well a ride of one kind (rows) does the job of a planned session (columns). Same kind: 1.0.

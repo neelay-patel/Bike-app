@@ -250,6 +250,14 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
         so the phone shows each message once; no recovery numbers in any of them (they reach the lock screen)."""
         return be.train_inbox(uid)
 
+    @app.get("/v1/train/zone2")
+    def train_zone2(uid: int = Depends(user)):
+        """Zone 2 (docs/train-method.md): {"range": [lo, hi] bpm, "source" (yours | estimated), "how", "own",
+        "talk", "check" (what the latest steady ride says about the range), "week" (% in zone 2, above, below,
+        and the week's share at zone 2 or easier), "trend" (watts at zone 2 by month)}. Set your own range with
+        PUT /v1/me {"zone2": "126-138"}, or null to work it out again."""
+        return be.train_zone2(uid)
+
     @app.get("/v1/train/week")
     def train_week(start: Optional[str] = None, uid: int = Depends(user)):
         """A plan week (this one, or the week starting `start`): sessions with what counted as each and why,

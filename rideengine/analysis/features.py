@@ -18,11 +18,13 @@ from .goals import power_curve
 from .train import work as train_work
 from .headline import hold, watts_per_beat
 from .repeats import Track
+from . import zone2
 
-VERSION = 12  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
+VERSION = 13  # 2 HR recovery; 3 route shape; 4 indoor time; 5 power curve; 6 max HR; 7 avg power while pedalling;
               # 8 efficiency and durability (headline.py); 9 indoor trace, virtual route and world (mini cards);
               # 10 what the ride contained, for counting it against the plan (train.py); 11 cadence, pushes and
-              # heart-rate drift in it, for the coach's one thing to try; 12 interval sets (effort.find_sets)
+              # heart-rate drift in it, for the coach's one thing to try; 12 interval sets (effort.find_sets); 13 time at
+              # each heart rate and a steady ride's drift (zone2.py)
 
 
 def extract(ride: Ride) -> dict:
@@ -37,7 +39,7 @@ def extract(ride: Ride) -> dict:
          "w_per_beat": watts_per_beat(ride) if ride.provenance.get("channel:power") else None,
          "m_per_beat": None, "hold": hold(ride),
          "cells": [], "first": None, "last": None, "bbox": None, "track_km": 0.0, "climbs": [],
-         "work": train_work(ride)}
+         "work": train_work(ride), "hr_hist": zone2.hist(ride), "z2_drift": zone2.steady(ride)}
     if ride.indoor:
         # The indoor mini card's picture: the ride game's virtual route when there is one (Zwift sends its
         # made-up GPS), else the session's shape over time (power, else heart rate).

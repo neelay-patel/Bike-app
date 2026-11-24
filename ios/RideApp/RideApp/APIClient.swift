@@ -510,6 +510,8 @@ struct TrainNote: Decodable, Identifiable {
     /// The coach's voice (docs/train-method.md step 5): one specific thing done well, and why the work works.
     let doneWell: Learn?
     let learn: Learn?
+    /// The ride's moving time in zone 2, above and below, and one line where zone 2 was the point.
+    let zone2: Zone2Split?
 
     struct Toward: Decodable { let sessionId: String; let title: String; let job: String?; let line: String }
 
@@ -555,6 +557,40 @@ struct TrainNote: Decodable, Identifiable {
 
 /// GET /v1/train/week: a plan week with what counted as each session, the week's rides, and (this week) the
 /// days the open sessions are now expected on.
+/// Moving time in zone 2, above and below (adds to 100), the range it was read against, and one line.
+struct Zone2Split: Decodable, Hashable {
+    let `in`: Int
+    let above: Int
+    let below: Int
+    let minutes: Int
+    let bpm: [Int]
+    let line: String?
+    /// Average watts while heart rate was in zone 2 (rides with power).
+    let watts: Int?
+}
+
+/// GET /v1/train/zone2: the rider's range and where it came from, what the latest steady ride says about it,
+/// this week's share, and watts at zone 2 by month.
+struct TrainZone2: Decodable {
+    let range: [Int]?
+    let source: String?
+    let how: String?
+    let own: String?
+    let talk: String?
+    let why: String?
+    let check: Check?
+    let week: Zone2Split?
+    let trend: [Month]?
+
+    struct Check: Decodable { let rideId: String; let date: String; let verdict: String; let line: String }
+    struct Month: Decodable, Identifiable {
+        var id: String { month }
+        let month: String
+        let watts: Int
+        let minutes: Int
+    }
+}
+
 struct TrainWeek: Decodable {
     let weekStart: String
     let phase: String
@@ -565,6 +601,8 @@ struct TrainWeek: Decodable {
     let done: Int
     let total: Int
     let schedule: [String: String]
+    /// The week's time in zone 2, above and below.
+    let zone2: Zone2Split?
 
     struct WeekRide: Decodable, Identifiable {
         var id: String { rideId }
@@ -842,6 +880,8 @@ struct Me: Decodable {
     let avatar: [String: String]?
     /// The morning brief's time, "HH:MM" in the rider's time zone (06:00 unless they changed it).
     let briefAt: String?
+    /// The rider's own zone 2 range, "126-138"; nil when it's worked out.
+    let zone2: String?
 }
 
 /// GET /v1/avatar/options: every part, its choices, and colours for the swatches.
@@ -1353,6 +1393,14 @@ struct APIClient {
     func me() async throws -> Me { try await get("v1/me") }
 
     /// When the morning brief arrives, "HH:MM" from 04:00 to 12:00.
+    func zone2() async throws -> TrainZone2 { try await get("v1/train/zone2") }
+
+    /// The rider's own zone 2 range ("126-138"), or nil to have it worked out again.
+    func setZone2(_ range: String?) async throws -> Me {
+        let body = try JSONSerialization.data(withJSONObject: ["zone2": range as Any? ?? NSNull()])
+        return try Self.decoder.decode(Me.self, from: await send(request("PUT", "v1/me", body: body)))
+    }
+
     func setBriefAt(_ time: String) async throws -> Me {
         let body = try JSONSerialization.data(withJSONObject: ["brief_at": time])
         return try Self.decoder.decode(Me.self, from: await send(request("PUT", "v1/me", body: body)))

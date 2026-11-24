@@ -80,6 +80,28 @@ suggested way to do a job.
   back. Base weeks grow at most halfway, build and sharpen all the way (sharpen starts halfway); easier weeks,
   the taper, easy, long and group rides don't grow.
 
+## Zone 2 (24 Nov 2026, `rideengine/analysis/zone2.py`)
+Neelay's call: use the term **zone 2**, the one zone name every rider knows; plain words for the rest.
+
+- **What it is:** the hardest you can ride while still below your first threshold, where breathing and lactate first
+  start to rise (`zone2` in `docs/training-science.md`). The everyday check: easy enough to talk in full sentences.
+- **The range:** 60-70% of heart rate reserve (resting and max, as Apple's zones appear to work; Garmin defaults to %
+  of max, which reads far too low for a trained rider). The rider can set their own (a lab test, or the zone 2 on
+  their Watch or Edge) under Train › Zone 2; every ride and every session's heart-rate target follows it.
+- **Checked from normal riding:** a steady ride with power of 40 min or more whose heart rate drifts under 5% at the
+  same watts stayed aerobic. Only rides ridden near the range count (a steady threshold workout says nothing about
+  zone 2). It says "fits", "may top out lower" or "may reach higher"; it never changes the range on its own.
+- **After every ride, one key number:** % of moving time in zone 2, with how much was above and below (stops don't
+  count). It's shown on every ride; words only where zone 2 was the point (a zone 2, long or easy ride): earned
+  praise at 70% or more in, one thing to change when 25% or more was above (spin the climbs in a low gear; ease the
+  trainer down), or when it was mostly below (raise the trainer). Hard days: the split, nothing said.
+- **The week:** its share above zone 2, against about 20% (polarized training, `easy-most`).
+- **The plan:** Endurance is now **Zone 2**; the long ride is zone 2 the whole way. On the Watch, zone 2 riding of 10
+  min or more has heart rate as the ceiling (a nudge when you pass the top, never for riding easier); watts stay
+  the target for the hard work. Recoveries inside sets keep no alert.
+- **The proof it works:** watts at zone 2 heart rate, month by month (rides with power: the trainer, for now).
+- **The AI coach** gets the split as percentages, never the range (it's worked out from resting heart rate).
+
 ## The rules
 ### Limits no plan change and no AI can cross (most are built)
 - No hard days back to back **(built)**.

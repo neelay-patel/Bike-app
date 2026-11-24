@@ -89,6 +89,11 @@ Our own drawing style, not a copy of any existing card game's art.
 - Read or skim the Garmin and Wahoo API terms (AI and sharing), so `SOURCE_POLICY` can be filled in.
 
 
+## Order from 24 Nov 2026 (Neelay)
+1. Heart rate and zone 2 in Train and the rides. 2. Change the plan by talking. 3. A coach reviews
+`docs/training-science.md`. 4. Garmin integration (workouts to the Edge, Courses API). 5. Other riders and TestFlight.
+6. The fun engagement model and prizes. Later: routes, more sources. The list below is the earlier detail.
+
 ## Next steps in detail (21 Nov 2026)
 1. **Reinstall the app by 30 Nov 2026** (free Personal Team, 7-day profile; renewed 23 Nov). Neelay is considering
    the paid Apple Developer Program (individual): one-year builds, TestFlight, then Sign in with Apple in place of

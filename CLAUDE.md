@@ -32,7 +32,7 @@ rider's words, progress read from normal riding, an AI coach that explains while
   (per-ride extract, versioned), `repeats` (routes, home loop, climbs as segments), `wellness` (`docs/recovery.md`),
   `effort` (sessions and phases), `headline` (the four numbers), `goals`, `plan` (training plan, .ics, .zwo),
   `train` (what kind of training a ride was, which session it counts as), `today` (today's session or rest),
-  `feedback` (one thing to try after each ride), `collection` (badges, ratings, binder),
+  `feedback` (one thing to try after each ride), `zone2` (range, time in zone 2, drift check), `collection` (badges, ratings, binder),
   `simpower` (SIMULATED, prototyping only).
 - `rideengine/routes/` (`docs/routes.md`): GPX routes, our OSM map, the route check, FIT courses, our router, tuning,
   routes from a description. `rideengine/card/`: the ride card (`ride_card.py`), avatar, rider card.
@@ -124,18 +124,19 @@ On Neelay's iPhone, all pushed to origin/main:
 - **You:** rider card, the four headline numbers, fitness and recovery, badges, bests, tallies, home loop.
 - **Routes:** check a GPX, tune it, the Route Generator (describe a ride, now with a climbing target), send to Edge.
 
-## Next steps (detail: `docs/roadmap.md`)
-1. **Reinstall the app by 30 Nov 2026** (free 7-day profile; renewed 23 Nov). The paid developer account is waiting on Apple support.
-2. **Live with Train** (the jobs model went live 23 Nov) and adjust the thresholds, growth and words from real use.
-3. **Train next** (`docs/train-tab.md`): the morning brief, changing the plan by talking, Garmin workouts; and the
-   Method's credential (a coach reviews `docs/training-science.md`, each reference checked). Goal: keep up with
-   the fast group by 1 May 2027.
-4. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
+## Next steps (Neelay's order, 24 Nov 2026; detail: `docs/roadmap.md`)
+Always: **reinstall the app by 30 Nov 2026** (free 7-day profile), and **live with Train**, adjusting from real use.
+1. **Heart rate and zone 2** (built 24 Nov; `docs/train-method.md` "Zone 2"): live with it, and check the range
+   against the zone 2 on Neelay's Watch. Goal: keep up with the fast group by 1 May 2027.
+2. **Change the plan by talking** ("I can't ride Thursday", "make Saturday long"; `docs/train-tab.md`).
+3. **A coach reviews `docs/training-science.md`** (each reference checked): Neelay arranges it.
+4. **Garmin integration**: workouts to the Edge, Courses API for routes.
+5. **Other riders and TestFlight** (`docs/hosting.md`) once Apple sorts out the developer account: Sign in with
+   Apple, delete account, Garmin Starter tier, privacy policy, Kova trademark check.
+6. **A fun engagement model**, then bring prizes back (`PrizeShelf` in `YouView.swift` is kept). Idea from Neelay's
    son: "meta" (most effective tactic available) for the one thing to work on next.
-5. **Routes:** Garmin Courses API, scenery, better starts, people to ride with (`docs/routes.md`).
-6. **Other riders and TestFlight** (`docs/hosting.md`): developer account, Sign in with Apple, delete account,
-   host the backend, Garmin Starter tier, privacy policy, Kova trademark check.
-7. **More sources:** Wahoo, Whoop, Oura, Google Health, Hammerhead; read each provider's terms, fill `SOURCE_POLICY`.
+Later: routes (scenery, better starts, people to ride with; `docs/routes.md`); more sources (Wahoo, Whoop, Oura,
+Google Health, Hammerhead; read each provider's terms, fill `SOURCE_POLICY`).
 
 ## Linked work in claude.ai (Project "Cycling app")
 - Share card canvas: https://claude.ai/artifact/6vEqXrfwo3ozkCh8byzDin

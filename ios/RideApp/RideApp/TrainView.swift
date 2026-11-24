@@ -46,6 +46,7 @@ struct TrainView: View {
                             .buttonStyle(.plain)
                             .arrive(4)
                         }
+                        Zone2WeekCard().arrive(4)
                         if let goal = t.goal { GoalCard(goal: goal).arrive(5) }
                         Text("Training guidance from your own data, not medical advice.")
                             .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
@@ -766,6 +767,7 @@ struct RideNoteView: View {
                     Text(title(n)).font(Theme.heading(40)).foregroundStyle(Theme.ink).padding(.horizontal, 4)
                         .fixedSize(horizontal: false, vertical: true)
                     did(n)
+                    if let z = n.zone2 { Zone2RideCard(split: z) }
                     counted(n)
                     if let s = n.story {
                         // The AI's words already carry the praise (it's told to praise only what done_well names).
@@ -1198,6 +1200,19 @@ struct TrainWeekView: View {
                         }
                     }
                     .padding(.horizontal, 16).surfaceCard(radius: 22)
+                    if let z = w.zone2 {
+                        NavigationLink { Zone2View() } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                MonoLabel("Zone 2")
+                                Zone2Numbers(split: z, big: 28)
+                                if let l = z.line {
+                                    Text(l).font(Theme.text(14)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if !w.extra.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             MonoLabel("Extra riding")

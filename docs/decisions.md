@@ -15,6 +15,12 @@ in CLAUDE.md; this is the background, for when a rule is questioned or a change 
 - **Device totals beat GPS-derived ones** (barometric climbing, moving time, wearable calories). Scugog loop: the
   Garmin's 850 m barometric total wins over the 633 m from the GPX track.
 
+## Zone 2 (24 Nov 2026)
+- **Call it zone 2** (Neelay), the one zone name riders know; plain words for everything else.
+- **One key number after a ride:** % of moving time in zone 2, then above and below, not every zone mapped.
+- **The range:** 60-70% of heart rate reserve until the rider sets their own; checked from steady rides' drift, never
+  changed by the engine on its own. Details: `docs/train-method.md` "Zone 2".
+
 ## Indoor riding
 - **Indoor km and climbing count** (19 Nov 2026, replacing the 17-18 Nov "count 0" rule). Neelay: "As a rider I want
   credit", and hill training on Zwift is real work against gravity. They count in every tally, streak, Everest and

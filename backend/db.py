@@ -264,6 +264,7 @@ MIGRATIONS = [
     ("users", "ai_personal", "INTEGER DEFAULT 0"),  # personal-use AI: this rider's data may go to the AI coach
     ("ride_feel", "ftp_w", "REAL"),     # hard rides: the watts the targets started from when it was ridden
     ("plan_proposals", "data", "TEXT"),  # the proposal as it was decided, so the review keeps showing it
+    ("users", "zone2", "TEXT"),         # the rider's own zone 2 range, "126-138"; NULL is worked out (zone2.py)
     ("users", "brief_at", "TEXT"),      # the morning brief's time, "HH:MM" in the rider's time zone; NULL is 06:00
 ]
 

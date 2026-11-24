@@ -21,7 +21,7 @@ from xml.sax.saxutils import escape
 # Zones as fractions of FTP, and of heart-rate reserve (Karvonen) for the heart-rate target.
 ZONES = {
     "Z1": {"name": "Easy", "ftp": (0.40, 0.55), "hrr": (0.50, 0.60), "rpe": 2},
-    "Z2": {"name": "Endurance", "ftp": (0.56, 0.75), "hrr": (0.60, 0.70), "rpe": 3},
+    "Z2": {"name": "Zone 2", "ftp": (0.56, 0.75), "hrr": (0.60, 0.70), "rpe": 3},
     "Z3": {"name": "Tempo", "ftp": (0.76, 0.87), "hrr": (0.70, 0.80), "rpe": 5},
     "SS": {"name": "Sweet spot", "ftp": (0.88, 0.94), "hrr": (0.78, 0.85), "rpe": 6},
     "Z4": {"name": "Threshold", "ftp": (0.95, 1.05), "hrr": (0.85, 0.90), "rpe": 7},
@@ -29,6 +29,8 @@ ZONES = {
     "Z6": {"name": "Anaerobic", "ftp": (1.21, 1.50), "hrr": (0.92, 1.00), "rpe": 9},
     "Z7": {"name": "Sprint", "ftp": (1.51, 2.50), "hrr": None, "rpe": 10},
 }
+# Zone 2 steps by name: "Endurance" and "Steady endurance" in plans made before 24 Nov 2026 (renamed when shown).
+Z2_LABELS = ("Zone 2", "Endurance", "Steady endurance")
 SHORT_EFFORT_S = 120   # heart rate lags short efforts: ride them by power or feel, not heart rate
 # Cadence to aim for, in rpm: smooth and quick for steady work, a touch quicker for the hard efforts. A sprint has
 # none: wind it up as fast as you can.
@@ -127,11 +129,12 @@ def workout(kind: str, level: float, minutes: int, indoor: bool) -> dict:
               "steps": [_warm(10), step("Ride with the group", minutes - 15, "Z3"), step("Cool down", 5, "Z1")]}
     elif kind == "long":
         w |= {"title": "Long ride",
-              "purpose": "Time in the saddle at a pace you could chat at.",
-              "steps": [_warm(10), step("Steady endurance", minutes - 15, "Z2"), step("Cool down", 5, "Z1")]}
+              "purpose": "Time in the saddle in zone 2: a pace you could chat at the whole way.",
+              "steps": [_warm(10), step("Zone 2", minutes - 15, "Z2"), step("Cool down", 5, "Z1")]}
     elif kind == "endurance":
-        w |= {"title": "Endurance", "purpose": "Easy aerobic miles that build the base.",
-              "steps": [step("Endurance", minutes, "Z2")]}
+        w |= {"title": "Zone 2", "purpose": "Easy aerobic riding that builds the base: easy enough to talk in full "
+                                           "sentences.",
+              "steps": [step("Zone 2", minutes, "Z2")]}
     elif kind == "easy":
         w |= {"title": "Easy spin", "purpose": "Recovery: legs moving, nothing hard.",
               "steps": [step("Easy", minutes, "Z1")]}
@@ -144,7 +147,7 @@ def workout(kind: str, level: float, minutes: int, indoor: bool) -> dict:
     w["seconds"] = sum(_seconds(s) for s in w["steps"])
     # Fill structured sessions to the time available with easy riding before the cool-down.
     if kind not in ("group", "long", "endurance", "easy") and w["seconds"] < minutes * 60 - 300:
-        w["steps"].insert(-1, step("Endurance", (minutes * 60 - w["seconds"]) / 60, "Z2"))
+        w["steps"].insert(-1, step("Zone 2", (minutes * 60 - w["seconds"]) / 60, "Z2"))
         w["seconds"] = minutes * 60
     return w
 
@@ -153,6 +156,12 @@ def _seconds(s: dict) -> int:
     if "set" in s:
         return s["repeat"] * sum(_seconds(x) for x in s["steps"])
     return s["seconds"]
+
+
+def renamed(steps: list) -> list:
+    """Steps of plans made before 24 Nov 2026 with zone 2 called by its name."""
+    return [{**x, "steps": renamed(x["steps"])} if "set" in x else
+            {**x, "label": "Zone 2"} if x.get("zone") == "Z2" and x.get("label") in Z2_LABELS else x for x in steps]
 
 
 def flatten(steps: list) -> list[dict]:
@@ -267,7 +276,7 @@ def with_leftover(session: dict, block: dict) -> dict:
     at = len(steps) - 1 if steps and steps[-1].get("label") == "Cool down" else len(steps)
     extra = _seconds(block)
     fill = next((i for i in range(at - 1, -1, -1) if not steps[i].get("steps") and steps[i].get("zone") == "Z2"
-                 and steps[i].get("label") in ("Endurance", "Steady endurance")), None)
+                 and steps[i].get("label") in Z2_LABELS), None)
     if fill is not None:
         take = min(extra, max(0, steps[fill]["seconds"] - 300))      # leave at least 5 min of it
         steps[fill] = {**steps[fill], "seconds": steps[fill]["seconds"] - take}

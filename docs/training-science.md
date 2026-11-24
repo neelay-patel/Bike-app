@@ -99,6 +99,16 @@ polarized training).
   *International Journal of Sports Physiology and Performance* 5(3): 276–291.
 - Stöggl & Sperlich (2014), above.
 
+### `zone2`
+"Zone 2: the hardest you can ride while still below your first threshold." Experts agree on the idea (just under
+the first lactate or ventilatory threshold) more than on how to find it; fixed percentages of max heart rate miss it
+for many riders, which is why Kova starts from heart rate reserve, lets the rider set their own, and checks it by
+heart-rate drift. **Moderate.** (Authors and full references to fill in at the coach's review.)
+- "What Is 'Zone 2 Training'?: Experts' Viewpoint on Definition, Training Methods, and Expected Adaptations" (2025).
+  *International Journal of Sports Physiology and Performance*. PubMed 40010355.
+- "Zone 2 Intensity: A Critical Comparison of Individual Variability in Different Submaximal Exercise Intensity
+  Boundaries" (2025), 50 cyclists. PubMed 40225831.
+
 ### `easy-chat`
 "If you could chat all the way, you're doing it right." The talk test is a reasonable field marker of low
 intensity. **Moderate.**

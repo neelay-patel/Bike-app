@@ -569,15 +569,16 @@ class Backend:
     def me(self, user_id: int) -> dict:
         from rideengine.card.avatar import clean
         with self.lock:
-            row = self.db.execute("SELECT id, tz, display_name, avatar, ftp, brief_at FROM users WHERE id = ?",
+            row = self.db.execute("SELECT id, tz, display_name, avatar, ftp, brief_at, zone2 FROM users WHERE id = ?",
                                   (user_id,)).fetchone()
         return {"id": row["id"], "tz": row["tz"], "name": row["display_name"] or "Rider",
                 "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None, "ftp": row["ftp"],
-                "brief_at": row["brief_at"] or "%02d:%02d" % self.BRIEF_AT}
+                "brief_at": row["brief_at"] or "%02d:%02d" % self.BRIEF_AT, "zone2": row["zone2"]}
 
     def update_me(self, user_id: int, body: dict) -> dict:
-        """{"tz": ..., "name": ..., "avatar": {...}, "brief_at": "06:00"}: any of them. The avatar is cleaned to
-        known parts; the brief's time is from 04:00 to 12:00."""
+        """{"tz": ..., "name": ..., "avatar": {...}, "brief_at": "06:00", "zone2": "126-138" or null}: any of them.
+        The avatar is cleaned to known parts; the brief's time is from 04:00 to 12:00; null zone2 is worked out."""
+        from rideengine.analysis import zone2
         from rideengine.card.avatar import clean
         if "tz" in body:
             self.insights.set_tz(user_id, str(body["tz"]))
@@ -599,6 +600,12 @@ class Backend:
                     raise ValueError("The morning brief's time must be between 04:00 and 12:00")
                 self.db.execute("UPDATE users SET brief_at = ? WHERE id = ?",
                                 ("%02d:%02d" % (int(m[1]), int(m[2])), user_id))
+            if "zone2" in body:
+                own = zone2.parse_own(body["zone2"]) if body["zone2"] else None
+                if body["zone2"] and own is None:
+                    raise ValueError("Zone 2 is two heart rates, like 126-138")
+                self.db.execute("UPDATE users SET zone2 = ? WHERE id = ?",
+                                ("%d-%d" % tuple(own) if own else None, user_id))
         return self.me(user_id)
 
     # --- training plan (rideengine/analysis/plan.py) -----------------------------------------------
@@ -606,6 +613,7 @@ class Backend:
         from rideengine.analysis import features as feat_mod
         from rideengine.analysis import goals as g
         from rideengine.analysis import plan as p
+        from rideengine.analysis import zone2
         tz = self.insights.tz(user_id)
         with self.lock:
             feats = self.insights._features(user_id)
@@ -619,8 +627,14 @@ class Backend:
         rest = self.recovery(user_id)["resting_hr"].get("usual")
         max_hr = p.max_hr_estimate([f.get("max_hr") for f in recent])
         ftp = p.ftp_estimate(me.get("ftp"), power)
+        # Zone 2 (zone2.py): the rider's own range, else 60-70% of heart rate reserve. It's the zone 2 every
+        # session's heart-rate target uses too.
+        z2 = zone2.zone2_range(max_hr, rest, zone2.parse_own(me.get("zone2")))
+        hrz = p.hr_zones(max_hr, rest)
+        if hrz is not None and z2:
+            hrz["Z2"] = z2["bpm"]
         return {"user_id": user_id, "tz": tz, "today": today, "feats": vfeats, "starts": starts,
-                "ftp": ftp, "aim": self._aim(user_id, ftp, tz), "hr_zones": p.hr_zones(max_hr, rest),
+                "ftp": ftp, "aim": self._aim(user_id, ftp, tz), "hr_zones": hrz, "zone2": z2,
                 "max_hr": max_hr, "resting_hr": rest}
 
     AIM_STEP = 0.05          # a hard session that felt easy raises the targets this much ...
@@ -735,8 +749,13 @@ class Backend:
         for w in plan["weeks"]:
             # Plans made before 21 Nov 2026 named winter sessions for the trainer; indoors or out is the rider's
             # choice.
-            names = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride"}
-            w = {**w, "sessions": [{**s, "title": names.get(s["title"], s["title"])} for s in w["sessions"]]}
+            # Endurance became Zone 2 on 24 Nov 2026.
+            names = {"Zwift group ride": "Group ride", "Long indoor ride": "Long ride", "Endurance": "Zone 2"}
+            why = {"Easy aerobic miles that build the base.": p.workout("endurance", 0, 60, True)["purpose"],
+                   "Time in the saddle at a pace you could chat at.": p.workout("long", 0, 120, True)["purpose"]}
+            w = {**w, "sessions": [{**s, "title": names.get(s["title"], s["title"]),
+                                    "purpose": why.get(s.get("purpose"), s.get("purpose")),
+                                    "steps": p.renamed(s.get("steps") or [])} for s in w["sessions"]]}
             w = self._reviewed(plan, w)
             w = {**w, "sessions": [self._grow(s, w["phase"], score, last) if s["date"] >= plan["grow_from"] else s
                                    for s in w["sessions"]]}
@@ -1571,7 +1590,36 @@ class Backend:
             t = week.get("replan") or td.plan_today(week["sessions"], self._recent_kinds(c), c["today"], ws, readiness)
             out.update(schedule=t["schedule"], folded=t.get("folded", []),
                        dropped=t.get("dropped", []))
+        out["zone2"] = self._week_zone2(c, ws)
         return out
+
+    @staticmethod
+    def _week_zone2(c: dict, ws: date) -> Optional[dict]:
+        """The week's time in zone 2, above and below, and its share at zone 2 or easier."""
+        from rideengine.analysis import zone2
+        if not c.get("zone2"):
+            return None
+        a = datetime.combine(ws, datetime.min.time(), c["tz"]).timestamp()
+        hs = [f.get("hr_hist") for f in c["feats"] if a <= f["start"] < a + 7 * 86400]
+        sp = zone2.split(hs, c["zone2"]["bpm"])
+        return {**sp, "bpm": c["zone2"]["bpm"], "line": zone2.week_line(sp)} if sp else None
+
+    def train_zone2(self, user_id: int) -> dict:
+        """Zone 2 in one place (docs/train-method.md): the rider's range and where it came from, what the latest
+        steady ride says about it, this week's share, and watts at zone 2 month by month (the proof it works)."""
+        from rideengine.analysis import zone2
+        c = self._plan_context(user_id)
+        z = c["zone2"]
+        if not z:
+            return {"range": None, "own": self.me(user_id).get("zone2"),
+                    "why": "Zone 2 is worked out from your resting and maximum heart rate: it needs ten rides with "
+                           "heart rate and a resting heart rate from your Watch. Or set your own."}
+        monday = c["today"] - timedelta(days=c["today"].weekday())
+        return {"range": z["bpm"], "source": z["source"], "how": z["how"], "own": self.me(user_id).get("zone2"),
+                "talk": "Easy enough to talk in full sentences.",
+                "check": zone2.check(c["feats"], z["bpm"], c["tz"]),
+                "week": self._week_zone2(c, monday),
+                "trend": zone2.trend(c["feats"], z["bpm"], c["tz"])}
 
     def _ridden_against(self, user_id: int, c: dict, session: dict, work: Optional[dict], ride_id: str) -> Optional[dict]:
         """Planned against ridden, judged by the targets the ride was ridden to (not ones raised since)."""
@@ -1661,7 +1709,9 @@ class Backend:
         kind_job = voice.KIND_JOB.get(cls["kind"])
         main_job = kind_job if kind_job in jobs_done else jobs_done[0] if jobs_done else kind_job
         note_learn = voice.learn(main_job, int(ride_id) if ride_id.isdigit() else 0)
+        note_z2 = self._ride_zone2(c, f, intent, cls["kind"], jobs_done)
         note = {"ride_id": ride_id, "date": d.isoformat(), "indoor": f.get("indoor"), "did": did,
+                "zone2": note_z2,
                 "kind": cls["kind"], "kind_title": train.TITLES.get(cls["kind"]) if cls["kind"] else None,
                 "reason": cls.get("reason"), "counted": counted, "against": against, "means": means,
                 "jobs": jobs, "toward": toward, "left": self._left_this_week(c, ride_week),
@@ -1676,6 +1726,24 @@ class Backend:
             facts = self._story_facts(c, f, d, note, goal)
             note["story"] = self.coach.ride_story(user_id, ride_id, facts)
         return note
+
+    @staticmethod
+    def _ride_zone2(c: dict, f: dict, intent: Optional[str], kind: Optional[str], jobs_done: list) -> Optional[dict]:
+        """A ride's time in zone 2, above and below (moving time), and one line where zone 2 was the point: the
+        session it counted as, else what kind of riding it was, else the job it did (docs/train-method.md)."""
+        from rideengine.analysis import zone2
+        if not c.get("zone2") or not f.get("hr_hist"):
+            return None
+        rng = c["zone2"]["bpm"]
+        sp = zone2.split([f["hr_hist"]], rng)
+        if sp is None:
+            return None
+        point = intent or kind
+        if intent is None and kind in (None, "mixed"):
+            point = "long" if "long" in jobs_done else "endurance" if "easy" in jobs_done else None
+        w = zone2.watts([f["hr_hist"]], rng, min_s=10 * 60)
+        return {**sp, "bpm": rng, "line": zone2.ride_line(sp, rng, point, bool(f.get("indoor"))),
+                "watts": (w or {}).get("watts")}
 
     def _story_facts(self, c: dict, f: dict, d: date, note: dict, goal: Optional[dict]) -> dict:
         BUILDS = {"surges": "punch: answering accelerations and closing gaps",
@@ -1713,6 +1781,10 @@ class Backend:
                                  if note.get("against") else None),
             "jobs_it_did": (note.get("jobs") or {}).get("summary"),
             "done_well": (note.get("done_well") or {}).get("text"),
+            # The split, not the range: the range is worked out from resting heart rate, which the AI never gets.
+            "zone2": ({"percent_in": note["zone2"]["in"], "percent_above": note["zone2"]["above"],
+                       "percent_below": note["zone2"]["below"]}
+                      if note.get("zone2") else None),
         }
 
     def ride_feel(self, user_id: int, ride_id: str) -> Optional[dict]:

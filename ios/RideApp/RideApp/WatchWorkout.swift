@@ -24,6 +24,8 @@ enum WatchWorkout {
                 // A set: its steps repeated. A set of sets (over-unders) flattens the inner set into the block.
                 let flat = inner.flatMap(\.flat)
                 blocks.append(IntervalBlock(steps: flat.map(interval), iterations: max(1, n)))
+            } else if let z2 = zone2(st) {
+                blocks.append(IntervalBlock(steps: [z2], iterations: 1))
             } else {
                 blocks.append(IntervalBlock(steps: [interval(st)], iterations: 1))
             }
@@ -38,6 +40,19 @@ enum WatchWorkout {
     private static func interval(_ st: PlanStep) -> IntervalStep {
         let easy = ["Z1", "Z2"].contains(st.zone ?? "")
         return IntervalStep(easy ? .recovery : .work, step: step(st, alert: !easy))
+    }
+
+    /// Zone 2 riding of 10 minutes or more (24 Nov 2026): heart rate is the ceiling. The Watch nudges you when you
+    /// pass the top of zone 2, never for riding easier; watts don't matter here. Recoveries inside sets keep no
+    /// alert (heart rate is still coming down from the effort).
+    private static func zone2(_ st: PlanStep) -> IntervalStep? {
+        guard st.zone == "Z2", (st.seconds ?? 0) >= 600, let h = st.target?.hr, h.count == 2, h[1] > 60 else { return nil }
+        let goal: WorkoutGoal = .time(st.seconds ?? 0, .seconds)
+        var a: (any WorkoutAlert)? = .heartRate(40...Double(h[1]))
+        if let alert = a, !CustomWorkout.supportsAlert(alert, activity: .cycling) { a = nil }
+        let name = "Zone 2 · under \(h[1])"
+        if #available(iOS 18.0, *) { return IntervalStep(.work, step: WorkoutStep(goal: goal, alert: a, displayName: name)) }
+        return IntervalStep(.work, step: WorkoutStep(goal: goal, alert: a))
     }
 
     private static func step(_ st: PlanStep, alert: Bool) -> WorkoutStep {
