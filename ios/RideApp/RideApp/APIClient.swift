@@ -1253,6 +1253,22 @@ struct CoachHome: Decodable {
     let ideas: [String]?
     let messages: [CoachChatMessage]?
     let remembers: Int?
+    let usage: CoachUsage?
+}
+
+/// How much of today's and this week's coaching is used, as a share (never money), like Claude's usage meter.
+struct CoachUsage: Decodable, Hashable {
+    struct Meter: Decodable, Hashable {
+        let usedPct: Int
+        let resetsAt: String
+        /// "at midnight" or "Monday"
+        let resets: String
+    }
+    let day: Meter
+    let week: Meter
+    let limited: Bool
+    /// Shown above the question box from 80% used, and when the limit is reached.
+    let line: String?
 }
 
 /// Advice the coach gave and follows up: how it's going comes from the engine's numbers on the rides since.
@@ -1447,6 +1463,8 @@ struct APIClient {
         let body = try JSONSerialization.data(withJSONObject: b)
         return try Self.decoder.decode(CoachAsked.self, from: await send(request("POST", "v1/coach/ask", body: body)))
     }
+
+    func coachUsage() async throws -> CoachUsage { try await get("v1/coach/usage") }
 
     func coachMessages(after: Int = 0) async throws -> [CoachChatMessage] {
         struct R: Decodable { let messages: [CoachChatMessage] }

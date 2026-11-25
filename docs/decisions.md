@@ -45,6 +45,10 @@ in CLAUDE.md; this is the background, for when a rule is questioned or a change 
   having all the context in one place. So: ask anything, answered from the rider's own rides, plan, goal and recovery,
   with improvement guidance that matters (ride faster, ride further); changing the plan is one thing the coach can do,
   always previewed and confirmed. Mock-up: https://claude.ai/artifact/NfUMesPF1vjx24mvQXEenB.
+- **Claude Sonnet 5.5 for the AI coach, with a usage meter (24 Nov 2026).** Neelay, conscious of cost, moved every AI
+  call from Opus 5.5 to Sonnet 5.5 (half the price; the advice held up on his data, 1-3 cents a question). Riders
+  get daily and weekly coaching allowances shown as a share used with when they reset, like Claude's own usage
+  meter, never in money; only questions count.
 - **Recovery data goes to the AI coach** (24 Nov 2026, reversing 21 Nov): HRV, resting heart rate, Cardio Recovery
   and VO2 max, for the rider's own coaching only, under the personal-use setting (other riders agree first). Still
   never shown to other people, never on a shared card. Cadence (indoors, from the KICKR) is part of the guidance too.

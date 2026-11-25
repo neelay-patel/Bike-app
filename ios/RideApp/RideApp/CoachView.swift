@@ -50,6 +50,7 @@ struct CoachView: View {
     @State private var asking = false
     @State private var error: String?
     @State private var showKnows = false
+    @State private var showUsage = false
     @FocusState private var typing: Bool
     private let api = APIClient()
 
@@ -69,7 +70,7 @@ struct CoachView: View {
                         ForEach(messages) { m in
                             CoachMessageView(message: m).id(m.id)
                         }
-                        if !asking, messages.isEmpty { ideas(h) }
+                        if !asking, !limited, messages.isEmpty { ideas(h) }
                         if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
                         Text("Training guidance from your own data, not medical advice.")
                             .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
@@ -92,18 +93,40 @@ struct CoachView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { showKnows = true } label: { Label("What your coach knows", systemImage: "person.text.rectangle") }
+                    Button { showUsage = true } label: { Label("Coaching usage", systemImage: "gauge.with.dots.needle.33percent") }
                     Button { Task { await newConversation() } } label: { Label("New conversation", systemImage: "square.and.pencil") }
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel("Coach options")
             }
         }
         .navigationDestination(isPresented: $showKnows) { CoachKnowsView() }
+        .navigationDestination(isPresented: $showUsage) { CoachUsageView() }
         .task { await load() }
     }
 
     // MARK: Asking
 
+    private var limited: Bool { home?.usage?.limited == true }
+
     private var inputBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let line = home?.usage?.line {
+                Button { showUsage = true } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: limited ? "pause.circle" : "gauge.with.dots.needle.67percent").font(.system(size: 12))
+                        Text(line).font(Theme.text(12)).multilineTextAlignment(.leading)
+                    }
+                    .foregroundStyle(limited ? Theme.heart : Theme.inkMuted)
+                }
+                .buttonStyle(.plain)
+            }
+            if !limited { field }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Theme.ground.opacity(0.97))
+    }
+
+    private var field: some View {
         HStack(alignment: .bottom, spacing: 10) {
             TextField(rideId == nil ? "Ask your coach" : "Ask about this ride", text: $draft, axis: .vertical)
                 .font(Theme.text(16)).lineLimit(1...5).focused($typing)
@@ -119,11 +142,9 @@ struct CoachView: View {
             .disabled(!canSend)
             .accessibilityLabel("Send")
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
-        .background(Theme.ground.opacity(0.97))
     }
 
-    private var canSend: Bool { !asking && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canSend: Bool { !asking && !limited && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private func ideas(_ h: CoachHome) -> some View {
         let list = rideId == nil ? (h.ideas ?? []) :
@@ -184,6 +205,7 @@ struct CoachView: View {
         } catch {
             self.error = error.localizedDescription
             draft = q
+            if (error as? APIError)?.status == 429, let h = try? await api.coachHome() { home = h }
         }
     }
 
@@ -614,5 +636,72 @@ struct CoachKnowsView: View {
     private func forget(_ id: Int) async {
         try? await api.coachForget(id)
         await load()
+    }
+}
+
+// MARK: - Coaching usage (like Claude's own usage meter: a share used and when it resets, never money)
+
+struct CoachUsageView: View {
+    @State private var usage: CoachUsage?
+    @State private var error: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let u = usage {
+                    VStack(alignment: .leading, spacing: 18) {
+                        meter("Today", u.day)
+                        Divider().overlay(Theme.line)
+                        meter("This week", u.week)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+                    if let l = u.line {
+                        Text(l).font(Theme.text(14)).foregroundStyle(u.limited ? Theme.heart : Theme.ink).padding(.horizontal, 4)
+                    }
+                    Text("Each question to your coach uses some of your coaching. Longer questions, and ones that look at a lot of your riding, use more. Ride stories, the morning brief and the Sunday review don't count.")
+                        .font(Theme.text(13)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                } else if let error {
+                    Text(error).font(Theme.text(14)).foregroundStyle(Theme.heart)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(40)
+                }
+            }
+            .padding(16)
+        }
+        .background(Theme.ground.ignoresSafeArea())
+        .navigationTitle("Coaching usage")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            do { usage = try await APIClient().coachUsage() } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func meter(_ title: String, _ m: CoachUsage.Meter) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                Text("\(m.usedPct)% used").font(Theme.text(14)).foregroundStyle(m.usedPct >= 100 ? Theme.heart : Theme.inkSoft)
+            }
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.surfaceSelected)
+                    Capsule().fill(m.usedPct >= 100 ? Theme.heart : Theme.cobalt)
+                        .frame(width: max(m.usedPct > 0 ? 6 : 0, g.size.width * CGFloat(min(m.usedPct, 100)) / 100))
+                }
+            }
+            .frame(height: 8)
+            Text("Resets \(resets(m))").font(Theme.mono(11)).foregroundStyle(Theme.label)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "at midnight", or "Monday at 12:00 AM", read in the phone's own time format.
+    private func resets(_ m: CoachUsage.Meter) -> String {
+        if m.resets == "Monday", let d = try? Date(m.resetsAt, strategy: .iso8601) {
+            return d.formatted(.dateTime.weekday(.wide)) + " at " + d.formatted(date: .omitted, time: .shortened)
+        }
+        return m.resets
     }
 }

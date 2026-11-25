@@ -67,7 +67,7 @@ def test_story_written_checked_saved_and_costed(env):
     assert story == {"ok": True, "headline": "A steady endurance hour", "story": "Steady work, as planned.", "by": "ai",
                      "model": coach_mod.MODEL}
     call = fake.calls[-1]
-    assert call["model"] == "claude-opus-5-5" and call["output_config"]["format"]["type"] == "json_schema"
+    assert call["model"] == "claude-sonnet-5-5" and call["output_config"]["format"]["type"] == "json_schema"
     assert call["fallbacks"] == "default" and "Don't repeat" in call["system"][0]["text"]
     # Saved: the same facts don't call again.
     n = len(fake.calls)

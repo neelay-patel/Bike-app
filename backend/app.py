@@ -317,12 +317,20 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
     def coach_ask(body: dict = Body(...), uid: int = Depends(user)):
         """{"text": "...", "ride_id": optional}: ask the coach. Returns at once with the question and a "working"
         answer; GET /v1/coach/messages?after=<id> until its status is "done"."""
+        from .coach_chat import LimitReached
         try:
             return be.coach_chat.ask(uid, body.get("text") or "", body.get("ride_id"))
+        except LimitReached as exc:
+            raise HTTPException(429, str(exc))
         except PermissionError as exc:
             raise HTTPException(403, str(exc))
         except ValueError as exc:
             raise HTTPException(409, str(exc))
+
+    @app.get("/v1/coach/usage")
+    def coach_usage(uid: int = Depends(user)):
+        """How much of today's and this week's coaching is used (a share, never money) and when each resets."""
+        return be.coach_chat.usage(uid)
 
     @app.get("/v1/coach/messages")
     def coach_messages(after: int = 0, uid: int = Depends(user)):

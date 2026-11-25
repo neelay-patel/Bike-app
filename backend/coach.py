@@ -28,8 +28,8 @@ from typing import Optional
 
 log = logging.getLogger("uvicorn.error")
 
-MODEL = "claude-opus-5-5"
-PRICE_PER_MTOK = {"input": 4.00, "output": 20.00, "cache_read": 0.20, "cache_write": 5.00}   # Claude Opus 5.5
+MODEL = "claude-sonnet-5-5"   # Claude Sonnet 5.5 since 24 Nov 2026 (was Opus 5.5): half the price, Neelay's call on cost
+PRICE_PER_MTOK = {"input": 2.00, "output": 10.00, "cache_read": 0.10, "cache_write": 2.50}   # Claude Sonnet 5.5
 KEY_FILE = os.path.expanduser(os.environ.get("KOVA_ANTHROPIC_KEY_FILE", "~/.config/kova/anthropic_api_key"))
 PROMPT_VERSION = 3           # bump when the instructions change, so saved stories are written again
 

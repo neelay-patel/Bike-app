@@ -88,7 +88,7 @@ def test_an_answer_from_the_riders_own_data(env):
     for banned in ('"lat"', '"lon"', '"cells"', '"bbox"', '"shape"'):
         assert banned not in sent
     first = fake.calls[0]
-    assert first["model"] == "claude-opus-5-5" and first["system"][0]["cache_control"]["type"] == "ephemeral"
+    assert first["model"] == "claude-sonnet-5-5" and first["system"][0]["cache_control"]["type"] == "ephemeral"
     assert "Rides gravel" not in first["system"][1]["text"]           # remembered only from this answer on
     home = client.get("/v1/coach").json()
     assert home["on"] and home["one_thing"]["title"] == "Ride a little further" and home["remembers"] == 1
@@ -152,12 +152,28 @@ def test_advice_is_followed_up_after_each_ride(env):
     assert client.get("/v1/coach").json()["one_thing"] is None
 
 
-def test_the_daily_cap(env, monkeypatch):
+def test_the_daily_and_weekly_limits(env, monkeypatch):
+    from datetime import datetime
     be, uid, client, fake = setup(env)
     be.coach.set_allowed(uid, True)
-    monkeypatch.setattr(cc, "DAY_LIMIT_USD", 0.0)
-    ask(client, "Hello?")
-    assert "daily limit" in client.get("/v1/coach/messages").json()["messages"][-1]["text"] and fake.calls == []
+    u = client.get("/v1/coach/usage").json()
+    assert u["day"]["used_pct"] == 0 and u["week"]["used_pct"] == 0 and not u["limited"] and u["line"] is None
+    fake.turns = [[text("Ride easy today.")]]
+    ask(client, "Should I ride hard?")
+    used = client.get("/v1/coach").json()["usage"]
+    assert used["day"]["used_pct"] > 0 and used["week"]["used_pct"] <= used["day"]["used_pct"]
+    # Past today's allowance: the question isn't sent anywhere, and the rider is told when it resets.
+    monkeypatch.setattr(cc, "DAY_LIMIT_USD", 0.001)
+    n = len(fake.calls)
+    r = client.post("/v1/coach/ask", json={"text": "And tomorrow?"})
+    assert r.status_code == 429 and "resets at midnight" in r.json()["detail"] and len(fake.calls) == n
+    assert client.get("/v1/coach/usage").json()["day"]["used_pct"] == 100
+    # The week's limit says Monday; resets are in the rider's time zone.
+    monkeypatch.setattr(cc, "DAY_LIMIT_USD", 1.0)
+    monkeypatch.setattr(cc, "WEEK_LIMIT_USD", 0.001)
+    u = be.coach_chat.usage(uid, now=datetime(2026, 11, 25, 15, 0, tzinfo=be.insights.tz(uid)))
+    assert u["limited"] and "Monday" in u["line"] and u["week"]["resets_at"].startswith("2026-11-30T00:00")
+    assert u["day"]["resets_at"].startswith("2026-11-26T00:00")
 
 
 def test_every_tool_and_measure_runs(env):

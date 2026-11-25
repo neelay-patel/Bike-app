@@ -35,7 +35,11 @@ from . import coach as coach_mod
 log = logging.getLogger("uvicorn.error")
 
 MODEL = coach_mod.MODEL
-DAY_LIMIT_USD = 3.00     # a rider's chat spend per day, then the coach says so and waits for tomorrow
+# How much coaching a rider can ask for, shown to them as a share used (never in money), like Claude's own usage
+# meter. The coach's automatic words (ride stories, the morning brief, the Sunday review) don't count: the rider
+# didn't ask for them. At Claude Sonnet 5.5's prices a question is about 1-6 cents.
+DAY_LIMIT_USD = 0.50
+WEEK_LIMIT_USD = 2.00
 MAX_ROUNDS = 10          # tool rounds per answer
 HISTORY = 12             # earlier messages of the conversation sent with each question
 MAX_ADVICE = 3           # advice being followed at once; a new one retires the oldest
@@ -51,7 +55,8 @@ How to answer:
 - Most questions are asking for advice. Give advice like a good coach: ONE clear thing to do (not a list of tips),
   why, from their own numbers, and how to do it this week (which ride, what to aim for, what it should feel like).
 - When you give advice the engine can follow up on, record it with give_advice, choosing the measure that will show
-  whether it worked. Say you'll check back after their next rides. Don't record small talk or one-off answers.
+  whether it worked, and say you'll check back after their next rides. Only promise to check back when you've
+  recorded it this way. Don't record small talk or one-off answers.
 - Keep it short: it's read on a phone. At most 100 words in two or three short paragraphs (a quick question gets
   two sentences). Pick the two or three numbers that make the point; leave the rest out. Plain text; **bold** for
   at most one phrase. No headings, no tables, no lists.
@@ -650,6 +655,10 @@ class Tools:
 
 
 # --- the conversation, advice, changes and memory, stored --------------------------------------------------------
+class LimitReached(Exception):
+    """The rider has used today's or this week's coaching (the message says which and when it resets)."""
+
+
 class CoachChat:
     """One per backend (`be.coach_chat`). Answers run on a worker thread; the app asks for the conversation until the
     answer is there, seeing what the coach is looking at while it works."""
@@ -713,12 +722,42 @@ class CoachChat:
         with self.lock:
             self.db.execute(f"UPDATE coach_chat SET {sets} WHERE id = ?", (*vals, mid))
 
-    def spent_today(self, uid: int) -> float:
-        start = datetime.now(self.be.insights.tz(uid)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    def _spent_since(self, uid: int, start: float) -> float:
         with self.lock:
             row = self.db.execute("SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM coach_usage WHERE user_id = ? "
                                   "AND key LIKE 'chat:%' AND at >= ?", (uid, start)).fetchone()
         return row["usd"]
+
+    def spent_today(self, uid: int) -> float:
+        start = datetime.now(self.be.insights.tz(uid)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        return self._spent_since(uid, start)
+
+    def usage(self, uid: int, now: Optional[datetime] = None) -> dict:
+        """How much of today's and this week's coaching the rider has used, as a share (never money), and when each
+        resets: midnight, and Monday at midnight, in the rider's time zone."""
+        tz = self.be.insights.tz(uid)
+        now = now or datetime.now(tz)
+        day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week0 = day0 - timedelta(days=day0.weekday())
+        out = {}
+        for key, start, limit, resets in (("day", day0, DAY_LIMIT_USD, day0 + timedelta(days=1)),
+                                          ("week", week0, WEEK_LIMIT_USD, week0 + timedelta(days=7))):
+            used = self._spent_since(uid, start.timestamp())
+            pct = 100 if limit <= 0 else min(100, round(used / limit * 100))
+            out[key] = {"used_pct": pct, "resets_at": resets.isoformat(),
+                        "resets": ("at midnight" if key == "day" else "Monday")}
+        full = out["day"]["used_pct"] >= 100 or out["week"]["used_pct"] >= 100
+        out["limited"] = full
+        if out["week"]["used_pct"] >= 100:
+            out["line"] = "You've used this week's coaching. It resets on Monday."
+        elif out["day"]["used_pct"] >= 100:
+            out["line"] = "You've used today's coaching. It resets at midnight."
+        elif max(out["day"]["used_pct"], out["week"]["used_pct"]) >= 80:
+            which = "today's" if out["day"]["used_pct"] >= out["week"]["used_pct"] else "this week's"
+            out["line"] = f"You've used {max(out['day']['used_pct'], out['week']['used_pct'])}% of {which} coaching."
+        else:
+            out["line"] = None
+        return out
 
     def ask(self, uid: int, text: str, ride_id: Optional[str] = None, wait: bool = False) -> dict:
         """The rider's question, saved, and the coach's answer started (on a worker thread, or now with `wait`)."""
@@ -732,12 +771,12 @@ class CoachChat:
                                    (uid, time.time() - 300)).fetchone()
         if busy:
             raise ValueError("The coach is still answering")
+        u = self.usage(uid)
+        if u["limited"]:
+            raise LimitReached(u["line"])
         q = self._add(uid, "rider", text, {"ride_id": ride_id} if ride_id else {})
         a = self._add(uid, "coach", "", status="working")
-        if self.spent_today(uid) >= DAY_LIMIT_USD:
-            self._update(a, text="That's all the coaching I can do today: there's a daily limit on what I spend. "
-                                 "Ask me again tomorrow.", status="done")
-        elif wait or not self.background:
+        if wait or not self.background:
             self._answer(uid, q, a)
         else:
             threading.Thread(target=self._answer, args=(uid, q, a), daemon=True).start()
@@ -1118,7 +1157,7 @@ class CoachChat:
                  "Am I on track for my goal?" if g else "What should my goal be?", "Should I ride hard today?"]
         return {"on": True, "one_thing": advice[0] if advice else None, "working_on": advice[1:],
                 "watching": watching, "ideas": ideas, "messages": self.messages(uid),
-                "remembers": len(self.memory(uid)), "spent_today_usd": round(self.spent_today(uid), 2)}
+                "remembers": len(self.memory(uid)), "usage": self.usage(uid)}
 
     def _goal(self, uid: int) -> Optional[dict]:
         row = self.be._active_goal_row(uid)

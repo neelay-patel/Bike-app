@@ -143,12 +143,12 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - Order: the ride note with "How did it feel?" (fed back to the engine: Wrecked after an easy day means ease off),
   the morning brief line, the Sunday review.
 - Needs: an Anthropic API key in the backend's environment (Neelay makes it; never in the repo), the `anthropic`
-  package. Model: Claude Opus 5.5 to start; a cheaper model for ride notes is Neelay's call once we see the cost.
+  package. Model: Claude Opus 5.5 to start; moved to Claude Sonnet 5.5 for every AI call on 24 Nov 2026 (Neelay, on cost).
 
 ### 6. Talk: a riding coach you can ask anything (redirected 24 Nov 2026; first version built the same day)
 **Built** (`backend/coach_chat.py`, `CoachView.swift`). Neelay: "Personally I would be asking for advice", so advice
 leads, and the follow-through is what a general chatbot can't do:
-- **Tools, not a summary.** Claude Opus 5.5 answers with read-only tools: `rides`, `ride`, `trend` (16 measures the
+- **Tools, not a summary.** Claude (Sonnet 5.5) answers with read-only tools: `rides`, `ride`, `trend` (16 measures the
   engine reads from every ride, by ride, week or month, with the change worked out), `fitness`, `recovery`, `plan`,
   `climbs`. Plus `show` (a chart), `give_advice`, `propose_change`, `remember`.
 - **The number check.** Every measured number in an answer (W, bpm, rpm, km, m, %, ...) must come from a tool, the
@@ -166,8 +166,15 @@ leads, and the follow-through is what a general chatbot can't do:
   limit), usual days. The engine checks the proposal when it's made and again when the rider taps OK.
 - **Memory** the rider sees and deletes ("What your coach knows"). **Questions are kept** (for the rider only) so we
   learn what riders really ask before building more chart types.
-- **Cost:** 3-13 cents a question on Neelay's data (24 Nov 2026), 10-25 s. A daily cap ($3) per rider. Personal-use
-  AI setting only. "Ask your coach about this ride" on every ride note.
+- **Model and cost:** Claude Sonnet 5.5 for every AI call since 24 Nov 2026 (was Opus 5.5; half the price, and the
+  advice held up on Neelay's data): 1-3 cents a question, 7-11 s (Opus was 3-13 cents). Personal-use AI setting
+  only. "Ask your coach about this ride" on every ride note.
+- **Coaching usage, like Claude's own meter:** a daily allowance ($0.50, resets at midnight) and a weekly one ($2,
+  resets Monday), shown to the rider only as a share used ("Coaching usage" in the coach's ⋯ menu, two bars with
+  when each resets). From 80% a line above the question box says so; at the limit the box is replaced by when it
+  resets, and the server refuses the question (429) before anything is sent. Only questions count: ride stories,
+  the morning brief and the Sunday review are the app's own and don't. Limits: `DAY_LIMIT_USD`, `WEEK_LIMIT_USD`
+  in `backend/coach_chat.py`.
 - **Not yet:** a zone 2 power target the coach can set (the mock-up's "Set 120 W"), the weekly "meta" written ahead,
   AI words for the check-ins, voice beyond iOS dictation, streaming the answer word by word.
 
