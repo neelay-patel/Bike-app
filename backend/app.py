@@ -305,6 +305,66 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(409, "That change can't be made now")
         return r
 
+    # --- the coach you can ask anything (backend/coach_chat.py) -----------------------------------------------
+    @app.get("/v1/coach")
+    def coach_home(uid: int = Depends(user)):
+        """The Coach screen: the one thing it's working on with you, the rest of its advice with how each is going
+        (checked after every ride by the engine), what it watches, ideas to ask, and the conversation. {"on": false}
+        until AI is turned on for the account."""
+        return be.coach_chat.home(uid)
+
+    @app.post("/v1/coach/ask")
+    def coach_ask(body: dict = Body(...), uid: int = Depends(user)):
+        """{"text": "...", "ride_id": optional}: ask the coach. Returns at once with the question and a "working"
+        answer; GET /v1/coach/messages?after=<id> until its status is "done"."""
+        try:
+            return be.coach_chat.ask(uid, body.get("text") or "", body.get("ride_id"))
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+    @app.get("/v1/coach/messages")
+    def coach_messages(after: int = 0, uid: int = Depends(user)):
+        """The conversation after a message id, oldest first (a working answer says what the coach is looking at)."""
+        return {"messages": be.coach_chat.messages(uid, after=after)}
+
+    @app.post("/v1/coach/new")
+    def coach_new(uid: int = Depends(user)):
+        """Start a new conversation (advice and memory stay)."""
+        return {"thread": be.coach_chat.new_thread(uid)}
+
+    @app.get("/v1/coach/knows")
+    def coach_knows(uid: int = Depends(user)):
+        """What the coach reads, what it never reads, the notes it keeps, and its advice so far."""
+        return be.coach_chat.knows(uid)
+
+    @app.delete("/v1/coach/memory/{nid}")
+    def coach_forget(nid: int, uid: int = Depends(user)):
+        if not be.coach_chat.forget(uid, nid):
+            raise HTTPException(404, "No such note")
+        return {"ok": True}
+
+    @app.put("/v1/coach/advice/{aid}")
+    def coach_advice(aid: int, body: dict = Body(...), uid: int = Depends(user)):
+        """{"status": "done" | "dropped" | "open"}: the rider finishes or drops a piece of advice."""
+        try:
+            ok = be.coach_chat.set_advice(uid, aid, str(body.get("status")))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        if not ok:
+            raise HTTPException(404, "No such advice")
+        return {"ok": True}
+
+    @app.post("/v1/coach/actions/{aid}")
+    def coach_action(aid: int, body: dict = Body(...), uid: int = Depends(user)):
+        """{"accept": true} makes a plan change the coach proposed (the engine checks it again first); false says
+        not now."""
+        r = be.coach_chat.decide(uid, aid, bool(body.get("accept")))
+        if r is None:
+            raise HTTPException(409, "That change can't be made now")
+        return r
+
     @app.post("/v1/train/changes/seen")
     def plan_changes_seen(body: dict = Body(...), uid: int = Depends(user)):
         """{"ids": [1, 2]}: the rider has seen these plan changes (Today's "Your week now" line), so they're not shown

@@ -34,6 +34,7 @@ struct TrainView: View {
                             }
                         }
                         if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
+                        CoachCard().arrive(3)
                         if let r = t.review {
                             NavigationLink { ReviewView(week: r.weekStart) } label: { ReviewCardView(card: r) }
                                 .buttonStyle(.plain).arrive(4)
@@ -757,6 +758,7 @@ struct RideNoteView: View {
     @State private var moreTips = false
     @State private var changing = false
     @State private var error: String?
+    @State private var coachOn = false
 
     var body: some View {
         ScrollView {
@@ -789,6 +791,21 @@ struct RideNoteView: View {
                     }
                     if let tip = n.tips.first { tips(n, first: tip) }
                     feel(n)
+                    if coachOn {
+                        NavigationLink {
+                            CoachView(rideId: rideId,
+                                      rideLabel: n.day.map { "Your ride on " + $0.formatted(.dateTime.weekday(.wide).day().month(.wide)) })
+                        } label: {
+                            HStack(spacing: 10) {
+                                CoachMark(size: 28)
+                                Text("Ask your coach about this ride").font(Theme.text(15, .medium)).foregroundStyle(Theme.cobalt)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.label)
+                            }
+                            .padding(14).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 16)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if let error { Text(error).font(Theme.text(13)).foregroundStyle(Theme.heart) }
                 }
                 .padding(16)
@@ -800,6 +817,7 @@ struct RideNoteView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .task { await load() }
+        .task { coachOn = (try? await APIClient().me())?.ai ?? false }
         .sheet(isPresented: $changing) {
             if let n = note ?? initial { CountAsSheet(note: n) { await load(); await model.refresh() } }
         }

@@ -108,7 +108,8 @@ Neelay's call: use the term **zone 2**, the one zone name every rider knows; pla
 - At most 4 riding days in a row; rest after 3 when the week allows **(built)**.
 - Something hurts: rest, and see someone if it doesn't settle **(built)**. Wrecked: the next day is easy **(built)**.
 - Recovery lower than usual in the morning: easy or rest **(built)**. Recovery numbers are never shown to anyone
-  else and never sent to the AI (CLAUDE.md).
+  else (CLAUDE.md). They go to the AI coach for the rider's own coaching once the coach you can talk to is built
+  (decided 24 Nov 2026, `docs/decisions.md`); until then they aren't sent.
 - Watt targets move at most 5% per tap and stay within 15% above the estimate of what the rider could hold for an
   hour **(built)**.
 - The week's riding time stays within the hours the rider gave, plus 10%. Every fourth week is easier, and the

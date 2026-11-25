@@ -145,7 +145,40 @@ Each step ends on Neelay's phone and in tests (synthetic always; his own data wh
 - Needs: an Anthropic API key in the backend's environment (Neelay makes it; never in the repo), the `anthropic`
   package. Model: Claude Opus 5.5 to start; a cheaper model for ride notes is Neelay's call once we see the cost.
 
-### 6. Talk: change the plan in your own words
+### 6. Talk: a riding coach you can ask anything (redirected 24 Nov 2026; first version built the same day)
+**Built** (`backend/coach_chat.py`, `CoachView.swift`). Neelay: "Personally I would be asking for advice", so advice
+leads, and the follow-through is what a general chatbot can't do:
+- **Tools, not a summary.** Claude Opus 5.5 answers with read-only tools: `rides`, `ride`, `trend` (16 measures the
+  engine reads from every ride, by ride, week or month, with the change worked out), `fitness`, `recovery`, `plan`,
+  `climbs`. Plus `show` (a chart), `give_advice`, `propose_change`, `remember`.
+- **The number check.** Every measured number in an answer (W, bpm, rpm, km, m, %, ...) must come from a tool, the
+  rider's words or the conversation; a rounding to 5 or 10 is allowed ("about 150 W"). Durations and counts are
+  coaching, not claims, and aren't checked. A failing answer goes back once with the numbers named; a second failure
+  gives an honest line instead.
+- **Advice it follows up.** `give_advice` saves the one thing with a measure and a direction, and the baseline from
+  the rides before. After each new ride the engine reads that measure on the rides since: waiting, working (moved
+  by more than a set step), not yet. The coach checks in once per ride in the conversation, in the engine's words.
+  The newest open advice is "the one thing" at the top of the Coach screen (and its card on Train); at most three
+  open at once. The rider can mark advice done or drop it.
+- **Charts are the engine's.** The coach only picks one (`trend`, `aim`, `ride`); the server fills the numbers and
+  the app draws it.
+- **Plan changes wait for OK.** Ease a week, swap a session to another kind, weekly hours (within the 10% growth
+  limit), usual days. The engine checks the proposal when it's made and again when the rider taps OK.
+- **Memory** the rider sees and deletes ("What your coach knows"). **Questions are kept** (for the rider only) so we
+  learn what riders really ask before building more chart types.
+- **Cost:** 3-13 cents a question on Neelay's data (24 Nov 2026), 10-25 s. A daily cap ($3) per rider. Personal-use
+  AI setting only. "Ask your coach about this ride" on every ride note.
+- **Not yet:** a zone 2 power target the coach can set (the mock-up's "Set 120 W"), the weekly "meta" written ahead,
+  AI words for the check-ins, voice beyond iOS dictation, streaming the answer word by word.
+
+The design before the build:
+Neelay: talking to the coach should be an actual riding coach at your disposal, not small plan adjustments; every
+rider has an LLM, but Kova has all the context in one place. Mock-up (6 screens, real numbers):
+https://claude.ai/artifact/NfUMesPF1vjx24mvQXEenB. The coach answers from read-only tools over the rider's rides,
+plan, goal, recovery (now included) and cadence; every number comes from a tool and is checked; "Ask about this" on
+each card; a weekly "one thing" (the "meta"); notes it remembers, which the rider can see and delete; plan changes
+are one of its actions, previewed and confirmed. The earlier plan for this step, kept as the coach's plan-change
+actions:
 - Words → structured constraints (away Tue-Thu, indoor trainer without power, short on time, ill, something hurts)
   through a fixed schema; the engine re-plans within its limits; the AI explains; the rider accepts or declines.
   Quick buttons for the common ones. Voice through iOS dictation. "Something hurts" and "ill" always back off and

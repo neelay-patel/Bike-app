@@ -90,7 +90,7 @@ Our own drawing style, not a copy of any existing card game's art.
 
 
 ## Order from 24 Nov 2026 (Neelay)
-1. Heart rate and zone 2 in Train and the rides. 2. Change the plan by talking. 3. A coach reviews
+1. Heart rate and zone 2 in Train and the rides. 2. A riding coach you can ask anything (was "change the plan by talking"; redirected 24 Nov). 3. A coach reviews
 `docs/training-science.md`. 4. Garmin integration (workouts to the Edge, Courses API). 5. Other riders and TestFlight.
 6. The fun engagement model and prizes. Later: routes, more sources. The list below is the earlier detail.
 

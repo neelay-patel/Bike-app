@@ -59,6 +59,8 @@ class Backend:
         self.insights = Insights(self, background=background)
         from .coach import Coach
         self.coach = Coach(self.db, self.lock)   # the AI coach's words (backend/coach.py); tests swap its client
+        from .coach_chat import CoachChat
+        self.coach_chat = CoachChat(self, background)   # the coach you can ask anything (backend/coach_chat.py)
         self.map_source = None   # roads and stops for the route check; None: OpenStreetMap (tests swap it)
         self.graph_source = None  # roads to route on when tuning; None: our own map (tests swap it)
         self.heights = None       # ground heights for tuned routes; None: elevation tiles (tests swap it)
@@ -573,7 +575,8 @@ class Backend:
                                   (user_id,)).fetchone()
         return {"id": row["id"], "tz": row["tz"], "name": row["display_name"] or "Rider",
                 "avatar": clean(json.loads(row["avatar"])) if row["avatar"] else None, "ftp": row["ftp"],
-                "brief_at": row["brief_at"] or "%02d:%02d" % self.BRIEF_AT, "zone2": row["zone2"]}
+                "brief_at": row["brief_at"] or "%02d:%02d" % self.BRIEF_AT, "zone2": row["zone2"],
+                "ai": self.coach.allowed(user_id)}   # personal-use AI on: the coach you can ask is there
 
     def update_me(self, user_id: int, body: dict) -> dict:
         """{"tz": ..., "name": ..., "avatar": {...}, "brief_at": "06:00", "zone2": "126-138" or null}: any of them.

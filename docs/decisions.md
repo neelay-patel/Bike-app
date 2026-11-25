@@ -40,6 +40,14 @@ in CLAUDE.md; this is the background, for when a rule is questioned or a change 
   winter; sessions are named neutrally (Group ride, not Zwift group ride), Today says "indoors or out" with advice on
   where each suits, the tab icon is rising bars (not a trainer), Zwift export is offered for any structured session,
   and outdoor rides without power count by heart rate (long steady stretches at a sweet-spot or threshold heart rate).
+- **Talking to Kova means a real riding coach, not plan edits** (24 Nov 2026). Neelay turned down "change the plan by
+  talking" as the feature: small adjustments are low value, and every rider has a general LLM already. Kova's edge is
+  having all the context in one place. So: ask anything, answered from the rider's own rides, plan, goal and recovery,
+  with improvement guidance that matters (ride faster, ride further); changing the plan is one thing the coach can do,
+  always previewed and confirmed. Mock-up: https://claude.ai/artifact/NfUMesPF1vjx24mvQXEenB.
+- **Recovery data goes to the AI coach** (24 Nov 2026, reversing 21 Nov): HRV, resting heart rate, Cardio Recovery
+  and VO2 max, for the rider's own coaching only, under the personal-use setting (other riders agree first). Still
+  never shown to other people, never on a shared card. Cadence (indoors, from the KICKR) is part of the guidance too.
 
 ## The four headline numbers (You)
 - Reviewed 19 Nov 2026; Neelay chose to **leave them as they are** for now, with these known quirks:

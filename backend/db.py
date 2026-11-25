@@ -105,6 +105,46 @@ CREATE TABLE IF NOT EXISTS coach_usage (
     ok            INTEGER,
     at            REAL NOT NULL
 );
+-- The coach you can ask anything (backend/coach_chat.py): the conversation (rider's questions are kept, for the rider
+-- only, so we learn what riders ask) ...
+CREATE TABLE IF NOT EXISTS coach_chat (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    thread        INTEGER NOT NULL DEFAULT 1,
+    role          TEXT NOT NULL,        -- rider | coach | start (a new conversation)
+    text          TEXT NOT NULL,
+    data          TEXT,                 -- JSON: charts, actions, advice ids, the ride asked about
+    status        TEXT NOT NULL,        -- working | done | failed
+    progress      TEXT,                 -- while working: what the coach is looking at
+    at            REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS coach_chat_user ON coach_chat (user_id, thread, id);
+-- ... notes it keeps about the rider (each one the rider can see and delete) ...
+CREATE TABLE IF NOT EXISTS coach_memory (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    note          TEXT NOT NULL,
+    at            REAL NOT NULL
+);
+-- ... advice it follows up on after each ride (open | done | dropped | replaced) ...
+CREATE TABLE IF NOT EXISTS coach_advice (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    chat_id       INTEGER,
+    data          TEXT NOT NULL,        -- title, do, why, measure, want, where, kind, baseline
+    status        TEXT NOT NULL,
+    checked       TEXT,                 -- the last ride it checked in on
+    at            REAL NOT NULL
+);
+-- ... and plan changes it proposed, waiting for the rider's OK (open | accepted | declined | failed).
+CREATE TABLE IF NOT EXISTS coach_actions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    chat_id       INTEGER,
+    data          TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    at            REAL NOT NULL
+);
 -- How a ride felt, the one tap the rider gives after it (feeds the next days' plan).
 CREATE TABLE IF NOT EXISTS ride_feel (
     user_id       INTEGER NOT NULL REFERENCES users(id),

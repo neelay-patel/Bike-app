@@ -36,7 +36,8 @@ rider's words, progress read from normal riding, an AI coach that explains while
   `simpower` (SIMULATED, prototyping only).
 - `rideengine/routes/` (`docs/routes.md`): GPX routes, our OSM map, the route check, FIT courses, our router, tuning,
   routes from a description. `rideengine/card/`: the ride card (`ride_card.py`), avatar, rider card.
-- `backend/`: FastAPI service (SQLite in dev): `service.py`, `connectors/` (one per provider), `insights.py`
+- `backend/`: FastAPI service (SQLite in dev): `service.py`, `connectors/` (one per provider), `coach.py` and
+  `coach_chat.py` (the AI coach: ride words, and the coach you can ask), `insights.py`
   (`docs/insights.md`), `app.py` (HTTP API), `crypto.py`. Dev data in `data/backend/`. Rides' and recordings' JSON is stored compressed (`db.pack`/`unpack`); each
   ride also has a small `brief` the ride list reads (bump `service.BRIEF_VERSION` if `describe()` changes).
 - `ios/RideApp/`: the iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`). Tabs: Efforts, Train (plan and
@@ -128,7 +129,10 @@ On Neelay's iPhone, all pushed to origin/main:
 Always: **reinstall the app by 30 Nov 2026** (free 7-day profile), and **live with Train**, adjusting from real use.
 1. **Heart rate and zone 2** (built 24 Nov; `docs/train-method.md` "Zone 2"): live with it, and check the range
    against the zone 2 on Neelay's Watch. Goal: keep up with the fast group by 1 May 2027.
-2. **Change the plan by talking** ("I can't ride Thursday", "make Saturday long"; `docs/train-tab.md`).
+2. **A riding coach you can ask anything** (built 24 Nov, `backend/coach_chat.py`, `CoachView.swift`; mock-up
+   https://claude.ai/artifact/NfUMesPF1vjx24mvQXEenB): advice first, from read-only tools over all your riding, plan,
+   goal, recovery and cadence; numbers checked; advice followed up after every ride; plan changes wait for OK.
+   Live with it, and read the questions asked (`coach_chat`) before adding chart types (`docs/train-tab.md` step 6).
 3. **A coach reviews `docs/training-science.md`** (each reference checked): Neelay arranges it.
 4. **Garmin integration**: workouts to the Edge, Courses API for routes.
 5. **Other riders and TestFlight** (`docs/hosting.md`) once Apple sorts out the developer account: Sign in with
@@ -144,3 +148,4 @@ Google Health, Hammerhead; read each provider's terms, fill `SOURCE_POLICY`).
 - Goal setting flow (mock-up, approved 15 Nov 2026): https://claude.ai/artifact/JCQyTJQ5XDZi9gvpCkXXcB
 - Name and icon mock-ups (19-20 Nov 2026): https://claude.ai/artifact/LcEQTiwpvgb7D6hy49uFr9
 - Train tab mock-up (21 Nov 2026): https://claude.ai/artifact/PqSSKTSmCHpzt5V63k8io2
+- Coach mock-up (24 Nov 2026): https://claude.ai/artifact/NfUMesPF1vjx24mvQXEenB

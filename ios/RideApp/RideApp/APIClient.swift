@@ -9,12 +9,23 @@ enum ServerConfig {
     private static let tokenAccount = "backend-token"
 
     static var serverURL: URL? {
-        get { UserDefaults.standard.string(forKey: urlKey).flatMap(URL.init(string:)) }
+        get {
+            #if DEBUG
+            // Simulator testing against a throwaway server: `SIMCTL_CHILD_KOVA_DEV_SERVER=... xcrun simctl launch`.
+            if let s = ProcessInfo.processInfo.environment["KOVA_DEV_SERVER"] { return URL(string: s) }
+            #endif
+            return UserDefaults.standard.string(forKey: urlKey).flatMap(URL.init(string:))
+        }
         set { UserDefaults.standard.set(newValue?.absoluteString, forKey: urlKey) }
     }
 
     static var token: String? {
-        get { Keychain.read(tokenAccount) }
+        get {
+            #if DEBUG
+            if let t = ProcessInfo.processInfo.environment["KOVA_DEV_TOKEN"] { return t }
+            #endif
+            return Keychain.read(tokenAccount)
+        }
         set {
             if let newValue, !newValue.isEmpty { Keychain.write(tokenAccount, newValue) } else { Keychain.delete(tokenAccount) }
         }
@@ -882,6 +893,8 @@ struct Me: Decodable {
     let briefAt: String?
     /// The rider's own zone 2 range, "126-138"; nil when it's worked out.
     let zone2: String?
+    /// AI is on for the account (personal use): the coach you can ask is there.
+    let ai: Bool?
 }
 
 /// GET /v1/avatar/options: every part, its choices, and colours for the swatches.
@@ -1227,6 +1240,109 @@ struct CourseReport: Decodable {
     }
 }
 
+// MARK: - The coach you can ask anything (backend/coach_chat.py)
+
+/// GET /v1/coach: the one thing it's working on with you, the rest of its advice (each checked after every ride by
+/// the engine), what it watches, ideas to ask, and the conversation. `on` is false until AI is on for the account.
+struct CoachHome: Decodable {
+    let on: Bool
+    let why: String?
+    let oneThing: CoachAdvice?
+    let workingOn: [CoachAdvice]?
+    let watching: [CoachWatch]?
+    let ideas: [String]?
+    let messages: [CoachChatMessage]?
+    let remembers: Int?
+}
+
+/// Advice the coach gave and follows up: how it's going comes from the engine's numbers on the rides since.
+struct CoachAdvice: Decodable, Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let `do`: String
+    let why: String?
+    let measure: String
+    let status: String?        // waiting | working | not_yet (open advice); done | dropped | replaced in `closed`
+    let statusLabel: String?
+    let check: String?
+    let closed: String?
+}
+
+struct CoachWatch: Decodable, Hashable {
+    let label: String
+    let value: String
+    let unit: String
+    let detail: String?
+}
+
+struct CoachChatMessage: Decodable, Identifiable, Hashable {
+    let id: Int
+    let role: String           // rider | coach
+    let text: String
+    let status: String         // working | done | failed
+    let progress: String?
+    let charts: [CoachChart]?
+    let actions: [CoachAction]?
+    let advice: [CoachAdviceRef]?
+    let rideId: String?
+}
+
+/// A chart under an answer, drawn by the app; the numbers are the engine's, never the AI's.
+struct CoachChart: Decodable, Hashable {
+    let type: String           // trend | aim | ride
+    let title: String
+    let unit: String?
+    let points: [Point]?
+    let band: [Double]?
+    let start: Double?
+    let current: Double?
+    let target: Double?
+    let rideId: String?
+    let date: String?
+    let `where`: String?
+    let minutes: Int?
+    let km: Double?
+    let avgHr: Double?
+    let avgPower: Double?
+    let zone2: Zone2Split?
+
+    struct Point: Decodable, Hashable { let label: String; let value: Double }
+}
+
+/// A plan change the coach proposed: nothing changes until the rider says OK (the engine checks it again then).
+struct CoachAction: Decodable, Identifiable, Hashable {
+    let id: Int
+    let preview: String
+    let why: String?
+    let status: String         // open | accepted | declined | failed
+    let whyNot: String?
+}
+
+struct CoachAdviceRef: Decodable, Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let `do`: String
+    let measure: String
+    let status: String
+}
+
+struct CoachAsked: Decodable {
+    let question: Int
+    let answer: Int
+    let messages: [CoachChatMessage]
+}
+
+/// GET /v1/coach/knows: what the coach reads, never reads, the notes it keeps, and its advice so far.
+struct CoachKnows: Decodable {
+    struct Read: Decodable, Hashable { let what: String; let detail: String }
+    struct Note: Decodable, Identifiable, Hashable { let id: Int; let note: String }
+    let reads: [Read]
+    let never: String
+    let memory: [Note]
+    let advice: [CoachAdvice]
+    let disclaimer: String
+}
+
 // MARK: - Client
 
 struct APIError: LocalizedError {
@@ -1318,6 +1434,45 @@ struct APIClient {
     func planSettings(days: [String], times: [String: String], weeklyHours: Double) async throws -> TrainingPlan {
         let body = try JSONSerialization.data(withJSONObject: ["days": days, "times": times, "weekly_hours": weeklyHours])
         return try Self.decoder.decode(TrainingPlan.self, from: await send(request("PUT", "v1/plan/settings", body: body)))
+    }
+
+    // MARK: The coach you can ask anything (backend/coach_chat.py)
+
+    func coachHome() async throws -> CoachHome { try await get("v1/coach") }
+
+    /// Ask the coach; the answer arrives "working" and is read with `coachMessages(after:)` until it's done.
+    func coachAsk(_ text: String, rideId: String? = nil) async throws -> CoachAsked {
+        var b: [String: Any] = ["text": text]
+        if let rideId { b["ride_id"] = rideId }
+        let body = try JSONSerialization.data(withJSONObject: b)
+        return try Self.decoder.decode(CoachAsked.self, from: await send(request("POST", "v1/coach/ask", body: body)))
+    }
+
+    func coachMessages(after: Int = 0) async throws -> [CoachChatMessage] {
+        struct R: Decodable { let messages: [CoachChatMessage] }
+        let r: R = try await get("v1/coach/messages", query: [URLQueryItem(name: "after", value: String(after))])
+        return r.messages
+    }
+
+    func coachNewConversation() async throws {
+        _ = try await send(request("POST", "v1/coach/new"))
+    }
+
+    func coachKnows() async throws -> CoachKnows { try await get("v1/coach/knows") }
+
+    func coachForget(_ id: Int) async throws {
+        _ = try await send(request("DELETE", "v1/coach/memory/\(id)"))
+    }
+
+    /// done | dropped | open
+    func coachSetAdvice(_ id: Int, status: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["status": status])
+        _ = try await send(request("PUT", "v1/coach/advice/\(id)", body: body))
+    }
+
+    func coachDecide(_ id: Int, accept: Bool) async throws -> CoachAction {
+        let body = try JSONSerialization.data(withJSONObject: ["accept": accept])
+        return try Self.decoder.decode(CoachAction.self, from: await send(request("POST", "v1/coach/actions/\(id)", body: body)))
     }
 
     // MARK: Train (rideengine/analysis/train.py, today.py, feedback.py)
