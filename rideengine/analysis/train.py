@@ -682,7 +682,7 @@ def match_week(sessions: list[dict], rides: list[dict], overrides: dict | None =
 
 # --- the ride against the session it counts as ----------------------------------------------------------
 
-def against(session: dict, w: dict) -> dict | None:
+def against(session: dict, w: dict, indoor: bool = False, feel: str | None = None) -> dict | None:
     """Planned against ridden, set by set: the session (with its targets filled in, plan.targets) and the ride's
     stored work. {"summary", "lines": [...], "sets": [{"set", "planned", "done", "power", "watts", "target",
     "verdict"}]}, or None when the session has no sets or the ride no power."""
@@ -691,11 +691,44 @@ def against(session: dict, w: dict) -> dict | None:
     sets = w.get("sets") or []
     if not planned or w.get("basis") != "power":
         return None
+    from . import pacing
     rows, lines, used = [], [], -1
+    steady, extra_lines, last_end = [], [], None
     for ps in planned:
         on = ps["steps"][0]
         label = f"{ps['repeat']} × {say_length(on['seconds'])} {on['label'].lower()}"
         tgt = (on.get("target") or {}).get("watts")
+        if on["seconds"] >= pacing.STEADY_S:
+            # Steady reps aren't hard efforts: found in the power by their length (rideengine/analysis/pacing.py).
+            rd = pacing.read(on, ps["repeat"], w.get("p30") or [], w.get("c30") or [])
+            reps = (rd or {}).get("reps") or []
+            if not reps:
+                rows.append({"set": label, "planned": ps["repeat"], "done": 0, "power": None, "watts": None,
+                             "target": tgt, "verdict": "missing", "length": say_length(on["seconds"]),
+                             "label": on["label"].lower()})
+                lines.append(f"{label}: not found in the ride.")
+                continue
+            ws = [r["watts"] for r in reps]
+            avg = round(sum(ws) / len(ws))
+            # Each rep is the job: one under the floor puts the set under, whatever the average.
+            verdict = ("below" if tgt and min(ws) < tgt[0] else "above" if tgt and avg > tgt[1] else
+                       "on" if tgt else "done")
+            rows.append({"set": label, "planned": ps["repeat"], "done": len(reps), "power": avg,
+                         "watts": [min(ws), max(ws)], "target": tgt, "verdict": verdict,
+                         "length": say_length(on["seconds"]), "label": on["label"].lower(), "reps": reps})
+            count = (f"all {ps['repeat']}" if len(reps) == ps["repeat"] else f"{len(reps)} of {ps['repeat']}")
+            text = f"{label}: {count}, {avg} W on average"
+            if tgt:
+                text += ({"above": f", above the {tgt[0]}–{tgt[1]} W planned",
+                          "on": f", inside the {tgt[0]}–{tgt[1]} W planned"}.get(verdict) or
+                         (f", under the {tgt[0]}–{tgt[1]} W planned" if avg < tgt[0] else
+                          f"; {sum(1 for x in ws if x < tgt[0])} of {len(ws)} under the {tgt[0]}–{tgt[1]} W planned"))
+            lines.append(text + ".")
+            if any(r["pattern"] != "on" for r in reps):
+                extra_lines += rd["lines"]
+            steady.append({"read": rd, "label": on["label"].lower()})
+            last_end = rd["spans"][-1][1]
+            continue
         k = next((i for i, x in enumerate(sets) if i > used and abs(math.log(x["seconds"] / on["seconds"])) < 0.45), None)
         if k is None:
             rows.append({"set": label, "planned": ps["repeat"], "done": 0, "power": None, "watts": None,
@@ -705,6 +738,7 @@ def against(session: dict, w: dict) -> dict | None:
             continue
         used = k
         x = sets[k]
+        last_end = x["end_s"] // STEP_S
         ws = [r[1] for r in x["reps"]]
         verdict = ("above" if tgt and x["power"] > tgt[1] else "below" if tgt and x["power"] < tgt[0]
                    else "on" if tgt else "done")
@@ -719,14 +753,14 @@ def against(session: dict, w: dict) -> dict | None:
             text += {"above": f", above the {tgt[0]}–{tgt[1]} W planned", "below": f", under the {tgt[0]}–{tgt[1]} W planned",
                      "on": f", inside the {tgt[0]}–{tgt[1]} W planned"}[verdict]
         lines.append(text + ".")
+    lines += extra_lines
     # What came after the last set, against the easy riding the plan had there.
-    last = sets[used] if used >= 0 else None
     tail = planned[-1]
     idx = (session.get("steps") or []).index(tail)
     after_plan = [st for st in (session.get("steps") or [])[idx + 1:] if not st.get("repeat")]
     p30 = w.get("p30") or []
-    if last and after_plan and p30:
-        a = last["end_s"] // STEP_S
+    if last_end is not None and after_plan and p30:
+        a = last_end
         vals = [v for v in p30[a:] if v is not None]
         if len(vals) * STEP_S >= 5 * 60:
             mins = round(len(vals) * STEP_S / 60)
@@ -739,6 +773,9 @@ def against(session: dict, w: dict) -> dict | None:
     full = all(r["done"] >= r["planned"] for r in rows)
     if not hit:
         summary = "The session's sets weren't found in this ride."
+    elif full and steady and all(r["verdict"] in ("on", "above", "done") for r in hit) and any(
+            rp["pattern"] not in ("on", "over") for x in steady for rp in x["read"]["reps"]):
+        summary = "Every set done, inside the targets on average, with some minutes under."
     elif full and all(r["verdict"] in ("on", "done") for r in hit):
         summary = "Ridden as planned."
     elif full and all(r["verdict"] in ("on", "above", "done") for r in hit):
@@ -753,4 +790,7 @@ def against(session: dict, w: dict) -> dict | None:
     if hit:
         short = " and ".join(f"{r['done']} × {r['length']}" for r in hit) + f" {hit[0]['label']}"
         short += ", as planned." if full else f": {sum(r['done'] for r in rows)} of the {sum(r['planned'] for r in rows)} planned."
-    return {"summary": summary, "short": short, "lines": lines, "sets": rows}
+    nxt = None
+    for x in steady:
+        nxt = nxt or pacing.next_time(x["read"], indoor, feel, label=x["label"])
+    return {"summary": summary, "short": short, "lines": lines, "sets": rows, "next_time": nxt}

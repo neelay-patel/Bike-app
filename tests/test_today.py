@@ -273,6 +273,15 @@ def test_how_a_hard_session_felt_moves_the_targets(env):
     assert be._aim(uid, est, tz)["watts"] == 151          # 5% below 159, but never below the estimate
     tap("1795617001", "easy", 170)
     assert be._aim(uid, est, tz)["watts"] == round(151 * 1.15)
+    # Felt easy, but the reps were under the targets (26 Nov 2026): ride the targets first; they stay.
+    be.db.execute("UPDATE ride_feel SET ftp_w = 159, under = ? WHERE user_id = ? AND ride_id = ?",
+                  (json.dumps({"w": 138, "target": [140, 149]}), uid, "1795617001"))
+    a = be._aim(uid, est, tz)
+    assert a["watts"] == 159 and "under its targets, so they stay" in a["source"]
+    note = be._feel_note(a, "1795617001", {"feel": "easy", "hurts": False, "from_w": 159,
+                                          "under": {"w": 138, "target": [140, 149]}}, nxt, "Wednesday")
+    assert note == ("You said it felt easy, at 138 W against the 140–149 W asked, so the watts stay as they are: "
+                    "ride the full range next time, and if that feels easy too, they go up.")
     be.db.execute("DELETE FROM ride_feel WHERE user_id = ?", (uid,))
     assert be._aim(uid, est, tz)["watts"] == 151
 

@@ -650,19 +650,24 @@ class Backend:
         estimate, never more than 15% above it. Worked out from the stored taps, so changing a tap undoes it."""
         est = ftp.get("watts")
         with self.lock:
-            rows = self.db.execute("SELECT ride_id, feel, ftp_w FROM ride_feel WHERE user_id = ? AND ftp_w IS NOT NULL",
+            rows = self.db.execute("SELECT ride_id, feel, ftp_w, under FROM ride_feel WHERE user_id = ? AND ftp_w IS NOT NULL",
                                    (user_id,)).fetchall()
         rows = sorted((r for r in rows if r["ride_id"] != skip and (before is None or int(r["ride_id"]) < int(before))),
                       key=lambda r: int(r["ride_id"]))
         if not est or not rows:
             return {**ftp, "base": est}
         r = rows[-1]
-        floor = r["ftp_w"] * {"easy": 1 + self.AIM_STEP, "wrecked": 1 - self.AIM_STEP}.get(r["feel"], 1.0)
+        # Felt easy but ridden under its targets: they stay until they're ridden (26 Nov 2026).
+        step = {"easy": 1 + self.AIM_STEP, "wrecked": 1 - self.AIM_STEP}.get(r["feel"], 1.0)
+        if r["feel"] == "easy" and r["under"]:
+            step = 1.0
+        floor = r["ftp_w"] * step
         aim = round(max(est, min(floor, est * (1 + self.AIM_MAX))))
         if aim == est:
             return {**ftp, "base": est}
         day = datetime.fromtimestamp(int(r["ride_id"]), tz).strftime("%A")
-        why = (f"{day}'s hard session felt easy" if r["feel"] == "easy" else
+        why = (f"{day}'s hard session felt easy, though under its targets, so they stay" if r["feel"] == "easy" and r["under"]
+               else f"{day}'s hard session felt easy" if r["feel"] == "easy" else
                f"{day}'s hard session felt about right at these watts")
         raised = f"raised from {est} W because {why}"
         return {"watts": aim, "base": est, "raised": raised,
@@ -1629,17 +1634,21 @@ class Backend:
                 "week": self._week_zone2(c, monday),
                 "trend": zone2.trend(c["feats"], z["bpm"], c["tz"])}
 
-    def _ridden_against(self, user_id: int, c: dict, session: dict, work: Optional[dict], ride_id: str) -> Optional[dict]:
-        """Planned against ridden, judged by the targets the ride was ridden to (not ones raised since)."""
+    def _ridden_against(self, user_id: int, c: dict, session: dict, work: Optional[dict], ride_id: str,
+                        then: Optional[float] = None) -> Optional[dict]:
+        """Planned against ridden, judged by the targets the ride was ridden to (not ones raised since): set by
+        set, steady reps read minute by minute (rideengine/analysis/pacing.py), and one thing for next time when
+        they fell short."""
         from rideengine.analysis import plan as p
         from rideengine.analysis import train
         if not work:
             return None
         feel = self.ride_feel(user_id, ride_id)
-        then = (feel or {}).get("from_w") or self._aim(user_id, c["ftp"], c["tz"], before=ride_id)["watts"]
+        then = then or (feel or {}).get("from_w") or self._aim(user_id, c["ftp"], c["tz"], before=ride_id)["watts"]
         if then and session.get("steps"):
             session = p.targets(session, then, c["hr_zones"])
-        a = train.against(session, work)
+        f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None) or {}
+        a = train.against(session, work, indoor=bool(f.get("indoor")), feel=(feel or {}).get("feel"))
         # Only when the ride was the suggested workout (docs/train-method.md): every planned set is in it. Another
         # workout that did the same job is read by its own sets and the job, not graded against this one.
         if a is None or any(r["verdict"] == "missing" for r in a["sets"]):
@@ -1675,6 +1684,9 @@ class Backend:
                     if ride_id in (s.get("progress") or {}).get("rides", []):
                         toward = {"session_id": s["id"], "title": s["title"], "job": s.get("job"),
                                   "line": s["progress"]["line"]}
+                        # Partly done: where it fell short matters most here (26 Nov 2026).
+                        against = self._ridden_against(user_id, c, s, f.get("work"), ride_id)
+                        intent = s["kind"]
                     if ride_id in (s.get("counted") or {}).get("rides", [(s.get("counted") or {}).get("ride_id")]):
                         against = self._ridden_against(user_id, c, s, f.get("work"), ride_id)
                         counted = {"session_id": s["id"], "title": s["title"], "kind": s["kind"],
@@ -1683,6 +1695,9 @@ class Backend:
         earlier = [x for x in c["feats"] if x["start"] < f["start"]]
         contrib = feedback.contribution(f, earlier, ftp)
         tips = feedback.pointers(f.get("work") or {}, cls, ftp, intent) if f.get("work") else []
+        if against and against.get("next_time"):
+            # Where the session's reps fell short comes first: it's the one thing for next time.
+            tips = [against["next_time"]] + [t for t in tips if t["id"] != "steady_too_hard"]
         goal = self._goal_markers(user_id, c)
         # A new best that's one of the goal's numbers is said once, with what it means for the goal.
         markers = {"60": "punch", "1200": "sustained"}
@@ -1797,9 +1812,10 @@ class Backend:
 
     def ride_feel(self, user_id: int, ride_id: str) -> Optional[dict]:
         with self.lock:
-            row = self.db.execute("SELECT feel, hurts, ftp_w FROM ride_feel WHERE user_id = ? AND ride_id = ?",
+            row = self.db.execute("SELECT feel, hurts, ftp_w, under FROM ride_feel WHERE user_id = ? AND ride_id = ?",
                                   (user_id, ride_id)).fetchone()
-        return {"feel": row["feel"], "hurts": bool(row["hurts"]), "from_w": row["ftp_w"]} if row else None
+        return ({"feel": row["feel"], "hurts": bool(row["hurts"]), "from_w": row["ftp_w"],
+                 "under": json.loads(row["under"]) if row["under"] else None} if row else None)
 
     @staticmethod
     def _next_hard(view: Optional[dict], today: date, t: Optional[dict] = None) -> tuple[Optional[dict], Optional[str]]:
@@ -1829,6 +1845,10 @@ class Backend:
                    when: Optional[str] = None) -> Optional[str]:
         """What the rider's tap changed, when it changed the targets: said with the next hard session's watts,
         not as a new number for what they could hold for an hour (that stays the estimate)."""
+        if feel and feel["feel"] == "easy" and feel.get("under"):
+            u = feel["under"]
+            return (f"You said it felt easy, at {u['w']} W against the {u['target'][0]}–{u['target'][1]} W asked, so "
+                    f"the watts stay as they are: ride the full range next time, and if that feels easy too, they go up.")
         if not feel or (aim.get("because") or {}).get("ride_id") != ride_id or feel["feel"] != "easy":
             return None
         was = feel.get("from_w") or aim["base"]
@@ -1857,10 +1877,27 @@ class Backend:
                                   (user_id, ride_id)).fetchone()
         # A hard ride keeps the watts its targets started from (the first tap's), so how it felt can move them.
         ftp_w = old["ftp_w"] if old and old["ftp_w"] else self._hard_ride_aim(user_id, ride_id)
+        under = self._under_targets(user_id, ride_id, ftp_w) if ftp_w else None
         with self.lock:
-            self.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at, ftp_w) "
-                            "VALUES (?, ?, ?, ?, ?, ?)", (user_id, ride_id, feel, 1 if hurts else 0, db.now(), ftp_w))
+            self.db.execute("INSERT OR REPLACE INTO ride_feel (user_id, ride_id, feel, hurts, at, ftp_w, under) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, ride_id, feel, 1 if hurts else 0, db.now(), ftp_w,
+                                                            json.dumps(under) if under else None))
         return True
+
+    def _under_targets(self, user_id: int, ride_id: str, then: float) -> Optional[dict]:
+        """A hard ride whose main reps averaged under the targets it was ridden to: {"w", "target"}. Felt easy
+        there means ride the targets first, not raise them (docs/train-method.md "Short of the target")."""
+        view = self.plan_view(user_id)
+        s = next((s for w in (view or {}).get("weeks", []) for s in w["sessions"]
+                  if ride_id in (s.get("counted") or {}).get("rides", [(s.get("counted") or {}).get("ride_id")])
+                  or ride_id in (s.get("progress") or {}).get("rides", [])), None)
+        if s is None:
+            return None
+        c = self._plan_context(user_id)
+        f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None)
+        a = self._ridden_against(user_id, c, s, (f or {}).get("work"), ride_id, then=then)
+        low = [r for r in (a or {}).get("sets", []) if r["verdict"] == "below" and r.get("target")]
+        return {"w": (low[0].get("watts") or [low[0]["power"]])[0], "target": low[0]["target"]} if low else None
 
     def _hard_ride_aim(self, user_id: int, ride_id: str) -> Optional[float]:
         """For a hard ride with power: the watts the targets started from before this ride's tap."""

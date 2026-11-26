@@ -71,6 +71,15 @@ suggested way to do a job.
   ride already planned that can take it without breaking a limit: a few hard efforts in the last hour of the long
   ride, or added to the next hard day; never onto an easy day or the day after a hard one. When there's no room,
   it's said once and dropped, not carried over as a debt.
+- **Short of the target: where, and what to do next time** (built 26 Nov 2026, `rideengine/analysis/pacing.py`).
+  A session's steady reps (3 min or more) are found in the ride's power by their length and read against the
+  targets the ride was ridden to: each rep's watts, minutes under, and its pattern (under throughout, started low,
+  faded, or dipped in and out, with the minutes it dipped), and whether cadence went down with the watts. A rep
+  under the floor puts the set under, whatever the average. One thing for next time comes from the worst rep:
+  ride to the number, start at the floor and build, be on target in the first minute, aim for the middle of the
+  range, or shift down to keep 85–95 rpm; indoors, ERG at the middle of the range. It's the first "one thing to
+  try", and it's shown for a partly done ride too. **Felt easy but under the targets: the watts stay** until the
+  targets are ridden ("ride the full range next time, and if that feels easy too, they go up").
 - **More than the job asked counts for more.** Extra hard minutes are credited ("Punch, and then some: 12 min of
   hard efforts against 5"). They count toward the week's hard days, so the next day is easy as the limits say, but
   the rest of the week's jobs stay as they are.
