@@ -64,12 +64,45 @@ def test_three_days_in_a_row_then_rest_if_the_week_allows():
 
 
 def test_rest_on_a_day_off_when_the_week_still_fits():
+    tue = td.plan_today(week({"surges": "done"}), rides((0, "surges")), MON + timedelta(days=1), MON, "good")
     t = td.plan_today(week({"surges": "done"}), rides((0, "surges")), MON + timedelta(days=2), MON, "good")
-    # Wednesday: the endurance session is planned today, so it's on.
-    assert t["session_id"] == "s-endurance"
+    # Wednesday: Tuesday went by without a ride, so Tuesday's layout put sweet spot on Wednesday; it's on.
+    assert tue["schedule"]["s-steady"] == "2026-11-25" and t["session_id"] == "s-steady"
     t = td.plan_today(week({"surges": "done", "steady": "done", "endurance": "done"}),
                       rides((0, "surges"), (1, "steady"), (2, "endurance")), MON + timedelta(days=3), MON, "good")
     assert t["state"] == "rest"                                  # Thursday off, group ride Friday
+
+
+def test_the_day_a_session_is_shown_on_is_the_day_today_gives_it():
+    """Neelay's week of 23 Nov 2026: surges Monday, an easy ride Tuesday (it did the endurance job), sweet spot
+    still open. Each morning Today gave rest and the sweet spot slid a day (Wednesday, then Thursday, then Friday),
+    pushing the group ride along. Whatever the layout shows for tomorrow is what tomorrow's Today says."""
+    done_by = {0: "surges", 1: "endurance"}
+    for days_ridden in range(2):                       # after Monday's ride, after Tuesday's
+        ridden = rides(*((d, "surges" if d == 0 else None) for d in range(days_ridden + 1)))
+        for r, d in zip(ridden, range(days_ridden + 1)):
+            r["kind"] = done_by[d] if d in done_by else None
+        statuses = {done_by[d]: "done" for d in range(days_ridden + 1)}
+        evening = td.plan_today(week(statuses), ridden, MON + timedelta(days=days_ridden), MON, "good")
+        morning = td.plan_today(week(statuses), ridden, MON + timedelta(days=days_ridden + 1), MON, "good")
+        shown = {sid for sid, d in evening["schedule"].items() if d == (MON + timedelta(days=days_ridden + 1)).isoformat()}
+        assert (morning["session_id"] in shown) if shown else morning["state"] == "rest", (days_ridden, evening, morning)
+    # And on Wednesday it stays put: no ride Wednesday, then Thursday's Today has what Wednesday's layout had.
+    statuses = {"surges": "done", "endurance": "done"}
+    two = rides((0, "surges"), (1, "endurance"))
+    wed = td.plan_today(week(statuses), two, MON + timedelta(days=2), MON, "good")
+    assert wed["state"] == "session" and wed["session_id"] == "s-steady"
+    assert wed["schedule"]["s-group"] == "2026-11-27"                   # the group ride stays on Friday
+    # Any rest day kept as shown: what its layout shows for tomorrow, tomorrow gives.
+    for statuses, ridden in [({}, []), ({"surges": "done"}, rides((0, "surges"))),
+                             ({"surges": "done", "endurance": "done"}, rides((0, "surges"), (1, "endurance")))]:
+        for k in range(6):
+            day = td.plan_today(week(statuses), ridden, MON + timedelta(days=k), MON, "good")
+            if day["state"] != "rest":
+                continue
+            nxt = td.plan_today(week(statuses), ridden, MON + timedelta(days=k + 1), MON, "good")
+            shown = [sid for sid, d in day["schedule"].items() if d == (MON + timedelta(days=k + 1)).isoformat()]
+            assert (nxt["session_id"] in shown) if shown else nxt["state"] == "rest", (statuses, k, day["schedule"], nxt)
 
 
 def test_ridden_today_and_a_finished_week():

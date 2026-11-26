@@ -775,8 +775,13 @@ class Backend:
                     t["purpose"] = t["purpose"].rstrip(".") + ": a club ride outside, or a Zwift group ride."
                 # The day it's on (24 Nov 2026): the day it was ridden, else the day this week's fresh layout puts
                 # it on, else the plan's day. "date" is only the plan's first sketch.
+                # Partly done and not laid out again (its little left joined a ride or was let go): the day of
+                # its last ride, not the sketch's day (26 Nov 2026).
                 x = counted["counted"].get(s["id"])
-                t["on"] = x["date"] if x else (replan or {}).get("schedule", {}).get(s["id"], s["date"])
+                part = counted["progress"].get(s["id"])
+                ridden = {r["ride_id"]: r["date"] for r in counted["rides"]}
+                part_day = max((ridden[r] for r in (part or {}).get("rides", []) if r in ridden), default=None)
+                t["on"] = (x["date"] if x else (replan or {}).get("schedule", {}).get(s["id"]) or part_day or s["date"])
                 t["status"] = self._session_status({**s, "date": t["on"]}, counted, done, w, today)
                 t["job"] = p.JOB_OF.get(s["kind"])
                 alt = (plan.get("alternatives") or {}).get(t["job"] or "")

@@ -168,8 +168,15 @@ def _streak(rode: set, before: date) -> int:
 
 def schedule(open_sessions: list[dict], first: date, end: date, rode: set, hard_days: set) -> dict[str, date] | None:
     """Place the open sessions on days from `first` to before `end`: each on the earliest day on or after the
-    later of its planned date and `first`, with no hard day next to another and no more than MAX_STREAK riding
-    days in a row (counting rides already done). None if they don't all fit."""
+    later of its planned date and `first`, with no hard day next to another and no more than STREAK_REST riding
+    days in a row when the week allows, MAX_STREAK when it doesn't (counting rides already done). None if they
+    don't all fit. The same rules as Today's rest days, so the day a session is laid on is the day Today gives it."""
+    return (_schedule(open_sessions, first, end, rode, hard_days, STREAK_REST) or
+            _schedule(open_sessions, first, end, rode, hard_days, MAX_STREAK))
+
+
+def _schedule(open_sessions: list[dict], first: date, end: date, rode: set, hard_days: set,
+              max_streak: int) -> dict[str, date] | None:
     placed: dict[str, date] = {}
     riding, harder = set(rode), set(hard_days)
     order = sorted(open_sessions, key=lambda s: (s["date"], PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99))
@@ -181,7 +188,7 @@ def schedule(open_sessions: list[dict], first: date, end: date, rode: set, hard_
                 ok = (d - timedelta(days=1)) not in harder and (d + timedelta(days=1)) not in harder
             if ok:
                 riding.add(d)
-                ok = _streak(riding, d + timedelta(days=1)) <= MAX_STREAK
+                ok = _streak(riding, d + timedelta(days=1)) <= max_streak
                 riding.discard(d)
             if ok:
                 break
@@ -328,40 +335,38 @@ def plan_today(sessions: list[dict], recent: list[dict], today: date, week_start
                       "later in the week.")
         return finish(today + timedelta(days=1), None)
 
-    # Would the week still fit if today were rest?
-    planned_today = [s for s in open_ if s["date"] == today.isoformat()]
-    fits_after = schedule(open_, today + timedelta(days=1), end, rode, hard_days) is not None
-    if streak >= MAX_STREAK or (streak >= STREAK_REST and fits_after):
-        out["why"] = (f"{streak} days of riding in a row. Rest today: the fitness from them is built while you "
-                      f"recover, and the next session will be better for it.")
-        if off_bike:
-            out["why"] += f" {off_bike[0]['title']} fits well today."
-        return finish(today + timedelta(days=1), None)
-    if not planned_today and fits_after:
-        out["why"] = "Rest today: the rest of this week's sessions still fit on the days ahead."
-        if off_bike:
-            out["why"] += f" {off_bike[0]['title']} fits well today."
-        return finish(today + timedelta(days=1), None)
-
+    # Today is what the week's layout puts on today (docs/train-method.md "When the plan changes"): laid out from
+    # today by the same rules as the days ahead, so a session shown for tomorrow is still there in the morning.
+    # (Until 26 Nov 2026 this asked the plan's first sketch instead, and a session moved to tomorrow slid a day
+    # every morning.)
+    laid = schedule(open_, today, end, rode, hard_days)
+    on_today = next((s for s in sorted(open_, key=lambda s: PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99)
+                     if laid and laid.get(s["id"]) == today), None)
     yesterday_hard = yesterday in hard_days
-    choices = [s for s in open_ if not (yesterday_hard and hard(s["kind"]))]
-    if not choices:
-        if fits_after:
+    if streak >= MAX_STREAK or (laid is not None and on_today is None):
+        if streak >= STREAK_REST:
+            out["why"] = (f"{streak} days of riding in a row. Rest today: the fitness from them is built while you "
+                          f"recover, and the next session will be better for it.")
+        elif yesterday_hard and any(hard(s["kind"]) and laid and laid[s["id"]] == today + timedelta(days=1)
+                                    for s in open_):
             out["why"] = "Yesterday was hard, so rest today; the harder sessions come later in the week."
-            return finish(today + timedelta(days=1), None)
-        choices = open_          # the week is short of days: the work comes first
-    choices.sort(key=lambda s: (s["date"] != today.isoformat(),
-                                PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99, s["date"]))
-    pick = choices[0]
+        else:
+            out["why"] = "Rest today: the rest of this week's sessions still fit on the days ahead."
+        if off_bike:
+            out["why"] += f" {off_bike[0]['title']} fits well today."
+        return finish(today + timedelta(days=1), None)
+    if on_today:
+        pick = on_today
+    else:
+        # The week doesn't fit on the days left: the work comes first, the one that matters most.
+        choices = [s for s in open_ if not (yesterday_hard and hard(s["kind"]))] or open_
+        choices.sort(key=lambda s: (PRIORITY.index(s["kind"]) if s["kind"] in PRIORITY else 99, s["date"]))
+        pick = choices[0]
     out.update(state="session", session_id=pick["id"])
     if yesterday_hard and not hard(pick["kind"]):
         out["why"] = f"Yesterday was hard, so today is easy: {pick['title'].lower()}."
-    elif pick["date"] == today.isoformat():
-        out["why"] = WHY.get(pick["kind"]) or pick.get("purpose") or ""
     else:
-        was = date.fromisoformat(pick["date"])
-        when = "earlier this week" if was < today else WEEKDAY[was.weekday()]
-        out["why"] = f"Planned for {when}; it's the one to do next. " + (WHY.get(pick["kind"]) or pick.get("purpose") or "")
+        out["why"] = WHY.get(pick["kind"]) or pick.get("purpose") or ""
     return finish(today + timedelta(days=1), pick)
 
 

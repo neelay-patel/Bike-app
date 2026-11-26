@@ -169,7 +169,12 @@ Neelay's call: use the term **zone 2**, the one zone name every rider knows; pla
 ### When the plan changes
 The week is laid out fresh from what's still open each time it's read: nothing is "moved", and no history of
 moves is kept (simplified 24 Nov 2026). A session done sits on the day it was ridden; one still open sits on the day
-the fresh layout puts it. The plan's dates are only its first sketch, never shown as "planned Wednesday".
+the fresh layout puts it; one partly done whose rest joined a ride or was let go, on the day of its last ride. The
+plan's dates are only its first sketch, never shown as "planned Wednesday".
+- **Today is the layout's today** (fixed 26 Nov 2026): Today gives the session the layout puts on today, laid out
+  by the same rules (rest after 3 days in a row when the week allows, no hard days back to back), so a session
+  shown for tomorrow is still there in the morning. Before, Today asked the first sketch, and a session moved to
+  tomorrow slid a day every morning (sweet spot Wednesday, then Thursday, then Friday, the group ride with it).
 The rider should notice a new layout without being interrupted:
 - **One line on Today**, shown until seen, when a session still to ride lands on another day than last shown:
   the week as it is now, and the reason in a few words. "Your week now: sweet spot Wednesday, group ride Friday.
