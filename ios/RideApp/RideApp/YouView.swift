@@ -6,6 +6,7 @@ import SwiftUI
 /// Everything comes from the server's rules (rideengine/analysis/headline.py, records.py), not an AI model.
 struct YouView: View {
     @EnvironmentObject var model: AppModel
+    @State private var showSources = false
 
     var body: some View {
         NavigationStack {
@@ -15,12 +16,23 @@ struct YouView: View {
                     if model.you?.updating == true {
                         MonoLabel("Working in new rides…", color: Theme.cobalt).padding(.horizontal, 4)
                     }
-                    StatusLine()
+                    // Sources sit behind the gear (27 Nov 2026): once connected you rarely need them.
+                    HStack {
+                        StatusLine()
+                        Spacer(minLength: 0)
+                        Button { showSources = true } label: {
+                            Image(systemName: "gearshape").font(.system(size: 20)).foregroundStyle(Theme.cobalt)
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Sources and settings")
+                    }
 
                     // Your top-trumps card first: the fun bit about you.
                     if model.collection != nil || model.you != nil {
                         RiderCardSection()
                     }
+                    // Every ride's card, folded until you open it (moved here from Efforts, 27 Nov 2026).
+                    if !model.rides.isEmpty { YouCollection() }
                     if let headline = model.you?.headline {
                         SectionTitle("Your four numbers")
                         HeadlineCard(headline: headline)
@@ -57,6 +69,7 @@ struct YouView: View {
             .background(Theme.ground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
+            .sheet(isPresented: $showSources) { ConnectionsView().presentationDragIndicator(.visible) }
         }
     }
 
@@ -70,6 +83,74 @@ struct YouView: View {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         return f.date(from: iso)
+    }
+}
+
+/// Your collection on You: folded to one line until opened, then every effort by month, as cards or a
+/// list, with false starts behind a switch (as Efforts had it until 27 Nov 2026).
+struct YouCollection: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage("you.collectionOpen") private var open = false
+    @AppStorage("rides.showHidden") private var showHidden = false
+    @State private var deleting: RideSummary?
+
+    private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
+    private var efforts: [RideSummary] { visible.filter { $0.effort == nil || $0.effort == $0.rideId } }
+    private var hiddenCount: Int { model.rides.count - visible.count }
+
+    private func folded(_ ride: RideSummary) -> (falseStarts: Int, parts: Int) {
+        let mine = model.rides.filter { $0.effort == ride.rideId && $0.rideId != ride.rideId }
+        return (mine.filter { $0.hidden != nil }.count, mine.filter { $0.hidden == nil }.count)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if open {
+                EffortCollection(efforts: showHidden ? model.rides : efforts, showingHidden: showHidden,
+                                 folded: folded, delete: { deleting = $0 })
+                if hiddenCount > 0 {
+                    Toggle(isOn: $showHidden) {
+                        Text("Show \(hiddenCount) false starts and empty recordings")
+                            .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
+                    }
+                    .tint(Theme.cobalt).padding(14).surfaceCard(radius: 16)
+                }
+                Button { withAnimation(.snappy) { open = false } } label: {
+                    Label("Fold the collection", systemImage: "chevron.up").font(Theme.text(14, .medium))
+                        .foregroundStyle(Theme.cobalt).frame(maxWidth: .infinity, minHeight: 44)
+                }
+            } else {
+                Button { withAnimation(.snappy) { open = true } } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Your collection").font(Theme.heading(28)).foregroundStyle(Theme.ink)
+                            MonoLabel(line)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.down").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.cobalt)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 22)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },
+                                                                      set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { ride in
+            Button("Delete ride", role: .destructive) {
+                Task { await model.run("Couldn't delete the ride") { try await APIClient().deleteRide(ride.rideId) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { ride in
+            Text(DeleteRide.message(ride))
+        }
+    }
+
+    private var line: String {
+        let cal = Calendar.current
+        let month = efforts.filter { cal.isDate($0.date, equalTo: .now, toGranularity: .month) }.count
+        let n = efforts.count
+        return "\(n) card\(n == 1 ? "" : "s")" + (month > 0 ? " · \(month) this month" : "")
     }
 }
 

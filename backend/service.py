@@ -2112,7 +2112,7 @@ class Backend:
         same_year = [f["ride_id"] for f in feats if f["ride_id"] in visible
                      and datetime.fromtimestamp(f["start"], tz).year == year]
         number = same_year.index(ride_id) + 1 if ride_id in same_year else None
-        if name is None:
+        if name is None and not ride.indoor:
             name = next((r["name"] for r in found["routes"] if any(l["ride_id"] == ride_id for l in r["laps"])), None)
         if name is None and not ride.indoor:
             # Not a repeated route: name it after the main town on it ("Cannington loop").
@@ -2122,31 +2122,98 @@ class Backend:
             if on and f and f.get("first"):
                 loop = repeats.haversine(*f["first"], *f["last"]) <= repeats.LOOP_M
                 name = f"{on[0]['name']} {'loop' if loop else 'ride'}"
-        # What the ride was (docs/train-method.md): the suggested session's name when it was that workout, else the
-        # kind of work it did ("Punch"); indoors, where there's no place to name it after.
-        a, jobs = None, None
-        if (name is None and ride.indoor) or headline is None:
-            from rideengine.analysis import train
-            session = self._counted_session(user_id, ride_id)
-            c = self._plan_context(user_id)
-            if session:
-                a = self._ridden_against(user_id, c, session, train.work(ride), ride_id)
-            f = next((x for x in c["feats"] if x["ride_id"] == ride_id), None)
-            jobs = self._jobs(c, f, None) if f else None
-            if name is None and ride.indoor:
-                name = (session["title"] if session and a else
-                        jobs["jobs"][0]["title"] if jobs and jobs["jobs"] else None)
+        # Indoors the card names the ride for its day and ride game ("Thursday on Zwift", ride_card.py), and the
+        # training read lives under the card in the app, never on what's shared (27 Nov 2026).
         if headline is None:
             headline = records.headline(self.notes(user_id, ride_id))
-        if headline is None and a and a.get("short"):
-            headline = a["short"]
-        if headline is None and jobs and jobs.get("summary"):
-            headline = jobs["summary"]
         home = self.home_point(user_id, [f for f in feats if f["ride_id"] in visible]) if privacy else None
         from rideengine.analysis.collection import is_holo
         return ride_card(ride, number=number, name=name, headline=headline, places=places, fonts=fonts,
                          hide_near=[home] if home else None, background=background,
                          avatar=self.me(user_id)["avatar"], holo=is_holo(self.notes(user_id, ride_id)))
+
+    def ride_profile(self, user_id: int, ride_id: str) -> Optional[dict]:
+        """The ride page's profiles (rideengine/analysis/profile.py): every channel in 30-second steps, the
+        climbing so far, where the ride was at each step (for the dot on the card's map), and what to tap:
+        the climbs, the reps of a steady set, the session's phases, zone 2 and the ride's moments. Steps are
+        indexes into the profile ("a" to "b"). For the rider's own app only: it carries the track."""
+        from rideengine.analysis.basics import summary
+        from rideengine.analysis.climbs import find_climbs
+        from rideengine.analysis.effort import phases
+        from rideengine.analysis.profile import index_at, profile
+        from rideengine.worlds import has_track
+        ride = self.ride(user_id, ride_id)
+        if ride is None:
+            return None
+        p = profile(ride)
+        s = summary(ride)
+        t = p["t"]
+        out = {**p, "indoor": bool(ride.indoor), "climbs": [], "phases": [], "reps": [], "zone2": None,
+               "moments": [], "avg": {"s": s.get("avg_kmh"), "h": s.get("avg_hr"), "p": s.get("avg_power")},
+               "totals": {"km": s.get("km"), "ascent_m": s.get("ascent_m")}}
+        has = lambda k: any(v is not None for v in p[k])
+        out["focus"] = "p" if ride.indoor and has("p") else "e" if has("e") else "p" if has("p") else "h"
+        if not t:
+            return out
+        at = lambda seconds: index_at(t, seconds)
+        if has_track(ride):
+            for c in find_climbs(ride):
+                off = c["date_t"] - ride.start
+                out["climbs"].append({"a": at(off), "b": at(off + c["seconds"]), "gain_m": c["gain_m"],
+                                      "km": round(c["length_m"] / 1000, 1), "grade": c["grade"],
+                                      "minutes": round(c["seconds"] / 60), "hr": c.get("avg_hr"),
+                                      "watts": c.get("avg_power"), "at_km": c["km_into_ride"]})
+        try:
+            ph = phases(ride)
+            out["phases"] = [{"kind": x["kind"], "a": at(x["start_s"]), "b": at(x["end_s"])} for x in ph["phases"]]
+        except Exception:
+            pass
+        try:
+            note = self.train_ride_note(user_id, ride_id)
+        except Exception:
+            note = None
+        if note:
+            out["zone2"] = note.get("zone2")
+            against = note.get("against") or {}
+            lines = against.get("lines") or []
+            k = 0
+            for st in against.get("sets") or []:
+                for r in st.get("reps") or []:
+                    if r.get("start_s") is None:
+                        continue
+                    k += 1
+                    line = next((x.split(": ", 1)[1] for x in lines if x.startswith(f"Rep {k}: ")), None)
+                    out["reps"].append({"name": f"Rep {k}", "a": at(r["start_s"]), "b": at(r["end_s"]),
+                                        "watts": r["watts"], "minutes": r.get("minutes"), "thirds": r.get("thirds"),
+                                        "target": st.get("target"), "line": line})
+        # The moments: what a rider scans before the charts. Each jumps the charts and the map to it.
+        def top(key):
+            vals = [(v, i) for i, v in enumerate(p[key]) if v is not None]
+            return max(vals) if vals else (None, None)
+        m = out["moments"]
+        for r in out["reps"]:
+            m.append({"value": r["watts"], "unit": "W", "label": f"{r['name']} · {r['minutes']} min",
+                      "at": r["a"], "span": [r["a"], r["b"]], "focus": "p"})
+        if ride.indoor and s.get("power_60s"):
+            m.append({"value": s["power_60s"], "unit": "W", "label": "Best minute", "at": None, "span": None, "focus": "p"})
+        if ride.indoor and s.get("power_1200s"):
+            m.append({"value": s["power_1200s"], "unit": "W", "label": "Best 20 min", "at": None, "span": None, "focus": "p"})
+        v, i = top("h")
+        if v is not None:
+            m.append({"value": round(s.get("max_hr") or v), "unit": "bpm", "label": "Peak heart rate", "at": i,
+                      "span": None, "focus": "h"})
+        v, i = top("s")
+        if v is not None and has_track(ride):
+            m.append({"value": v, "unit": "km/h", "label": "Fastest" if ride.indoor else "Top speed", "at": i,
+                      "span": None, "focus": "s"})
+        v, i = top("e")
+        if v is not None and not ride.indoor:
+            m.append({"value": v, "unit": "m", "label": "Highest point", "at": i, "span": None, "focus": "e"})
+        if out["climbs"]:
+            c = max(out["climbs"], key=lambda c: c["gain_m"])
+            m.append({"value": c["gain_m"], "unit": "m", "label": f"Biggest climb · {c['km']} km", "at": c["a"],
+                      "span": [c["a"], c["b"]], "focus": "e"})
+        return out
 
     # --- planned routes ("courses": the route check and export, rideengine/routes/) ---------------
     def add_course(self, user_id: int, gpx: bytes, name: Optional[str] = None, source: Optional[str] = None,

@@ -1,5 +1,6 @@
 """The look (docs/design.md): tokens stay in sync with the app, fonts ship, the ride card renders."""
 import json
+import math
 import os
 import plistlib
 import re
@@ -49,7 +50,8 @@ def test_ride_card_shows_the_ride():
 def test_ride_card_without_heart_rate_or_climbing():
     ride = build_rides([line_ride(30)])[0]
     page = ride_card(ride, places=[])
-    assert "AVG SPEED" in page and "AVG HEART RATE" not in page and "♥" not in page
+    # Every card has the same six slots (27 Nov 2026): a missing value reads as a dash, never "None".
+    assert "AVG SPEED" in page and "AVG HEART RATE" in page and "\u2013" in page and "♥" not in page
     assert "None" not in page
 
 
@@ -90,3 +92,22 @@ def test_swift_bike_palette_matches_avatar():
         found = {k: v.upper() for k, v in re.findall(r'"(\w+)": 0x([0-9A-Fa-f]{6})', block)}
         assert found == {k: v.lstrip("#").upper() for k, v in colours.items()}, table
     assert set(avatar.OPTIONS["bike"]) == {"road", "gravel", "mtb", "indoor"}
+
+
+def test_zwift_card_is_a_ride():
+    """A Zwift ride's card (27 Nov 2026): named for its day and game, its world's track as the map with the
+    world's name (never the real places underneath), the same six numbers, and the app's scrub hook."""
+    from rideengine.model import Ride, Sample
+    t0 = 1_795_700_000.0
+    # A loop in Zwift's New York (Central Park's coordinates).
+    pts = [(40.77 + 0.01 * math.sin(i / 20), -73.97 + 0.01 * math.cos(i / 20)) for i in range(400)]
+    samples = [Sample(t=t0 + i * 5, lat=la, lon=lo, ele=80 + 10 * math.sin(i / 30), speed=7.0, hr=130, power=140,
+                      cadence=90) for i, (la, lo) in enumerate(pts)]
+    ride = Ride(start=t0, end=t0 + 2000, sport="cycling", indoor=True, samples=samples,
+                totals={"distance_m": 14000, "ascent_m": 120, "moving_s": 2000, "calories": 400},
+                provenance={"channel:lat": "garmin", "channel:power": "apple_watch"}, recordings=["x"])
+    page = ride_card(ride, fonts="local")
+    assert "on Zwift</h1>" in page and "NEW YORK" in page and "in Zwift’s New York." in page
+    for label in ("DISTANCE", "CLIMBING", "MOVING TIME", "AVG HEART RATE", "AVG SPEED", "CALORIES"):
+        assert label in page
+    assert "AVG POWER" not in page and "indoor-mark.png" in page and "kovaScrub" in page and 'id="scrub"' in page

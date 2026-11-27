@@ -71,7 +71,7 @@ MAP_PAD, MAP_TOP = 24, 40  # MAP_TOP keeps the date label clear of the route
 LABEL_CHAR_PX = 8.2        # IBM Plex Mono 11 px with 1.5 px tracking
 
 
-def _project(ride: Ride):
+def _project(ride: Ride, geo: dict | None = None):
     """Track points as (x_km, y_km, metres along, hr), x east and y south, from the ride's top-left."""
     pts = [(s.lat, s.lon, s.hr) for s in ride.samples if s.lat is not None and s.lon is not None]
     if len(pts) < 2:
@@ -80,6 +80,8 @@ def _project(ride: Ride):
     k = math.cos(math.radians(lat0)) * 111.195
     minx = min(p[1] for p in pts) * k
     maxy = max(p[0] for p in pts) * 111.195
+    if geo is not None:
+        geo.update(k=k, minx=minx, maxy=maxy)
     out, d = [], 0.0
     step = max(1, len(pts) // 600)
     for i, (la, lo, hr) in enumerate(pts):
@@ -92,10 +94,11 @@ def _project(ride: Ride):
     return out, w, h
 
 
-def route_path(ride: Ride, width: float = W, height: float = MAP_H) -> tuple[str, list, float, int]:
+def route_path(ride: Ride, width: float = W, height: float = MAP_H, geo: dict | None = None) -> tuple[str, list, float, int]:
     """SVG path of the track (north up) filling the map, the projected points (x, y, metres along, hr),
-    pixels per km, and the km between grid dots (1, 2, 5... so dots stay at least 6 px apart)."""
-    km_pts, w, h = _project(ride)
+    pixels per km, and the km between grid dots (1, 2, 5... so dots stay at least 6 px apart).
+    geo, if given, is filled with what maps a lat/lon onto the map (for the app's scrub dot)."""
+    km_pts, w, h = _project(ride, geo)
     if not km_pts:
         return "", [], 0.0, 1
     room_w, room_h = width - 2 * MAP_PAD, height - MAP_TOP - MAP_PAD
@@ -104,6 +107,8 @@ def route_path(ride: Ride, width: float = W, height: float = MAP_H) -> tuple[str
     ox = (width - w * ppk) / 2
     oy = MAP_TOP + (room_h - h * ppk) / 2
     proj = [(round(ox + x * ppk, 1), round(oy + y * ppk, 1), d, hr) for x, y, d, hr in km_pts]
+    if geo is not None:
+        geo.update(ppk=ppk, ox=ox, oy=oy)
     path = "M" + " L".join(f"{x} {y}" for x, y, _, _ in proj)
     return path, proj, ppk, dot_km
 
@@ -166,16 +171,29 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
     km = s["km"]
     up = s["ascent_m"]
     indoor = s["indoor"] or km < 0.05  # a smart trainer reports a distance, but it's still indoors
-    name = name or f"{when:%A} {'indoor ' if indoor else ''}ride"
+    # An indoor ride is a bike ride too (27 Nov 2026): named for the day and where it was ridden, with the
+    # same six numbers as any card, and its ride game's track as the map.
+    from ..worlds import has_track, world_of
+    world = world_of(ride) if indoor else None
+    track = has_track(ride)
+    if not name:
+        name = (f"{when:%A} on {world[0]}" if world else f"{when:%A} virtual ride" if indoor and track else
+                f"{when:%A} on the trainer" if indoor else f"{when:%A} ride")
     minutes = round((s["moving_h"] or 0) * 60)
-    if indoor:
+    if indoor and km < 0.05:
+        lead = f"{minutes} minutes on the trainer" + (f", {_num(up)} m climbed." if up and up >= 1 else ".")
+    elif indoor:
         # A ride game's climbing (Zwift) is real work against gravity: it counts and is shown (19 Nov 2026).
-        lead = f"{minutes} minutes indoors" + (f", {_num(up)} m climbed." if up and up >= 1 else ".")
+        where = f", in {world[0]}’s {world[1]}" if world else ", indoors"
+        lead = (f"{_num(up)} m in {round(km)} km{where}." if up and up >= 1 else f"{_num(km, 1)} km{where}.")
     else:
         lead = f"{_num(up)} m in {round(km)} km." if up else f"{_num(km, 1)} km."
     title = f"{lead} {headline}" if headline else lead
 
-    path, proj, ppk, dot_km = route_path(ride) if not indoor else ("", [], 0, 0)
+    geo: dict = {}
+    path, proj, ppk, dot_km = route_path(ride, geo=geo) if track else ("", [], 0, 0)
+    if indoor:
+        places = []          # never the real places under a ride game's world
     if places is None:
         from ..places import places_on_route
         places = [[p["name"], p["lat"], p["lon"]] for p in places_on_route(ride)]
@@ -200,27 +218,23 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
             lx, ly, anchor = _place_label(x, y, text, taken)
             labels += (f'<text x="{lx}" y="{ly}" text-anchor="{anchor}" fill="#FFFFFF" stroke="{c["cobalt"]}" stroke-width="4" stroke-linejoin="round" paint-order="stroke" font-family="{f["label"]}, monospace" '
                        f'font-size="11" letter-spacing="1.5">{html.escape(text)}</text>')
+    if world and proj:
+        # The world's name, by the track's northernmost point.
+        top = min(proj, key=lambda p: p[1])
+        dots += f'<circle cx="{top[0]}" cy="{top[1]}" r="5" fill="{c["cobalt"]}" stroke="#FFFFFF" stroke-width="2"></circle>'
+        lx, ly, anchor = _place_label(top[0], top[1], world[1].upper(), taken)
+        labels += (f'<text x="{lx}" y="{ly}" text-anchor="{anchor}" fill="#FFFFFF" stroke="{c["cobalt"]}" stroke-width="4" stroke-linejoin="round" paint-order="stroke" font-family="{f["label"]}, monospace" '
+                   f'font-size="11" letter-spacing="1.5">{html.escape(world[1].upper())}</text>')
     marks = dots + labels
 
-    stats = [] if indoor else [("Distance", f"{_hero(km, 1)} km")]
-    if up and not indoor:
-        stats.append(("Climbing", f"{_hero(up)} m"))
-    stats.append(("Time" if indoor else "Moving time", _duration(s["moving_h"] * 3600)))
-    if indoor and up and up >= 1:
-        stats.append(("Climbed", f"{_hero(up)} m"))
-    power = indoor and s["power_60s"] is not None
-    if power:
-        stats.append(("Avg power", f"{round(s['avg_power'])} W"))
-        if s["power_1200s"]:
-            stats.append(("Best 20 min", f"{s['power_1200s']} W"))
-    if s["avg_hr"]:
-        stats.append(("Avg heart rate", f"{round(s['avg_hr'])}", True))
-    if indoor and not power and s["max_hr"]:
-        stats.append(("Max heart rate", f"{round(s['max_hr'])}", True))
-    elif s["avg_kmh"] and not indoor:
-        stats.append(("Avg speed", f"{_hero(s['avg_kmh'], 1)} km/h"))
-    if s["calories"]:
-        stats.append(("Calories", _hero(s["calories"])))
+    # The same six numbers in the same places on every card, indoors or out (27 Nov 2026).
+    no_km = km < 0.05
+    stats = [("Distance", "indoor" if no_km else f"{_hero(km, 1)} km"),
+             ("Climbing", f"{_hero(up or 0)} m"),
+             ("Moving time", _duration((s["moving_h"] or 0) * 3600)),
+             ("Avg heart rate", f"{round(s['avg_hr'])}" if s["avg_hr"] else "–", True),
+             ("Avg speed", "indoor" if no_km or not s["avg_kmh"] else f"{_hero(s['avg_kmh'], 1)} km/h"),
+             ("Calories", _hero(s["calories"]) if s["calories"] else "–")]
     stripes = "".join(f'<div style="height:4px;background:{x}"></div>' for x in c["stripes"])
     tag = f"★ PB · NO. {number}" if holo and number else (f"NO. {number}" if number else "")
     aria = f"Route of {html.escape(name)}, {_num(km, 1)} km" + (f", heart rate peaked at {round(peak[3])} bpm" if peak else "")
@@ -232,22 +246,32 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
         f'<div style="font-family:\'{f["hero"]}\',monospace;font-size:34px;font-weight:900;line-height:1.05;margin-top:3px;'
         f'{"color:#F2A3B8;" if len(st) > 2 else ""}white-space:nowrap">{_split_unit(st[1], f)}</div></div>'
         for st in stats)
-    if indoor and fonts == "local":
-        # The indoor mark in the last right-hand slot: the app swaps in its own icon (the one on the
-        # collection's small cards), as it does the fonts.
-        cells += ('<div style="grid-column:2;display:flex;justify-content:flex-end;align-items:flex-end">'
-                  f'<img src="{INDOOR_MARK}" alt="" style="height:52px"></div>')
-    route = "" if indoor else f"""<div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
+    # The indoor mark in the map's corner: the app swaps in its own icon (the one on the collection's small
+    # cards), as it does the fonts.
+    mark = (f'<img src="{INDOOR_MARK}" alt="Indoor ride" style="position:absolute;right:14px;bottom:12px;height:52px">'
+            if indoor and fonts == "local" else "")
+    scrub = (f'<circle id="scrub" r="7" fill="#FFFFFF" stroke="{c["cobalt"]}" stroke-width="3" style="display:none"></circle>'
+             if geo.get("ppk") else "")
+    if not track:
+        effort = _effort_band(ride, c)
+        route = f"""<div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
+<svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="The ride's effort, minute by minute" style="position:absolute;left:0;top:0">{effort}</svg>
+<p style="position:absolute;left:14px;top:12px;margin:0;{label};color:#E3E8F7">{when:%a %-d %b %Y}</p>
+{mark}
+</div>"""
+    else:
+        route = f"""<div style="position:relative;background:{c['cobalt']};height:{MAP_H}px">
 <svg width="{W}" height="{MAP_H}" viewBox="0 0 {W} {MAP_H}" role="img" aria-label="{aria}" style="position:absolute;left:0;top:0;overflow:hidden">
 {_avatar_layer(avatar, c['cobalt'], str(int(ride.start))) if avatar else ""}
 {_grid(ppk, dot_km, c['cobaltLine'], str(int(ride.start))) if ppk else ""}
 <path d="{path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></path>
 {marks}
+{scrub}
 </svg>
 <p style="position:absolute;left:14px;top:12px;margin:0;{label};color:#E3E8F7">{when:%a %-d %b %Y}</p>
+{mark}
 </div>"""
-    dateline = (f'<p style="margin:0 0 12px 0;{label};color:{c["panelLabel"]}">{when:%a %-d %b %Y} · INDOOR</p>'.upper()
-                if indoor else "")
+    dateline = ""
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -261,19 +285,50 @@ def ride_card(ride: Ride, number: int | None = None, name: str | None = None, he
 <span style="{label};color:{tcolor};white-space:nowrap">{tag}</span>
 </header>
 {route}
-<div style="background:{c['panel']};color:#FFFFFF;padding:{"12px" if indoor else "16px"} 16px 16px 16px">
+<div style="background:{c['panel']};color:#FFFFFF;padding:16px">
 {dateline}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 12px">{cells}</div>
 </div>
 <div aria-hidden="true" style="display:flex;flex-direction:column">{stripes}</div>
 <p style="margin:0;background:{c['sand']};border-radius:0 0 14px 14px;padding:12px 14px 14px 14px;font-family:'{f['heading']}',serif;font-size:22px;line-height:1.15">{html.escape(title)}</p>
 </article>
-<script>{FIT_NAME}</script>
+<script>{FIT_NAME}{_scrub_js(geo)}</script>
 </body></html>
 """
 
 
 INDOOR_MARK = "indoor-mark.png"  # filled in by the iPhone app (CardRenderer.embedFonts)
+
+
+def _scrub_js(geo: dict) -> str:
+    """kovaScrub(lat, lon) puts a dot on the map where the ride was (the app calls it as you drag across the
+    ride's profiles); kovaScrub(null) hides it. Uses the map's own projection, so the dot sits on the route."""
+    if not geo.get("ppk"):
+        return ";window.kovaScrub=function(){}"
+    g = {k: round(v, 6) for k, v in geo.items()}
+    return (";window.kovaScrub=function(la,lo){var d=document.getElementById('scrub');if(!d)return;"
+            "if(la==null){d.style.display='none';return}"
+            f"var g={json.dumps(g)};"
+            "d.setAttribute('cx',(g.ox+(lo*g.k-g.minx)*g.ppk).toFixed(1));"
+            "d.setAttribute('cy',(g.oy+(g.maxy-la*111.195)*g.ppk).toFixed(1));d.style.display=''}")
+
+
+def _effort_band(ride: Ride, c: dict) -> str:
+    """A trainer ride with no track: the map is its effort (power, else heart rate) minute by minute."""
+    from ..analysis.profile import profile
+    p = profile(ride, step_s=60)
+    vals = p["p"] if any(v for v in p["p"]) else p["h"]
+    pts = [(i, v) for i, v in enumerate(vals) if v]
+    if len(pts) < 2:
+        return ""
+    lo, hi = min(v for _, v in pts), max(v for _, v in pts)
+    n = max(1, len(vals) - 1)
+    def xy(i, v):
+        return f"{24 + i / n * (W - 48):.1f} {MAP_H - 30 - (v - lo) / ((hi - lo) or 1) * (MAP_H - MAP_TOP - 50):.1f}"
+    line = "M" + " L".join(xy(i, v) for i, v in pts)
+    area = line + f" L{24 + pts[-1][0] / n * (W - 48):.1f} {MAP_H - 30} L{24 + pts[0][0] / n * (W - 48):.1f} {MAP_H - 30} Z"
+    return (f'<path d="{area}" fill="{c["cobaltLine"]}" opacity="0.55"></path>'
+            f'<path d="{line}" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round"></path>')
 
 # A long name shrinks to fit the header (down to 20 px) before it is cut off with an ellipsis.
 FIT_NAME = ("document.fonts.ready.then(function(){var h=document.getElementById('name'),s=30;"

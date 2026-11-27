@@ -6,8 +6,6 @@ import SwiftUI
 struct RidesView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var health: HealthSync
-    @State private var deleting: RideSummary?
-    @AppStorage("rides.showHidden") private var showHidden = false
     /// The newest effort you've already seen here: anything after it is new.
     @AppStorage("efforts.seenUntil") private var seenUntil: Double = 0
     /// What you'd seen before this visit: efforts after it are new (kept while you look, so they don't vanish
@@ -23,12 +21,6 @@ struct RidesView: View {
     private var visible: [RideSummary] { model.rides.filter { $0.hidden == nil } }
     /// One per effort: its main ride.
     private var efforts: [RideSummary] { visible.filter { $0.effort == nil || $0.effort == $0.rideId } }
-    private var hiddenCount: Int { model.rides.count - visible.count }
-
-    private func folded(_ ride: RideSummary) -> (falseStarts: Int, parts: Int) {
-        let mine = model.rides.filter { $0.effort == ride.rideId && $0.rideId != ride.rideId }
-        return (mine.filter { $0.hidden != nil }.count, mine.filter { $0.hidden == nil }.count)
-    }
 
     /// New this visit, newest first (up to five).
     private var fresh: [RideSummary] {
@@ -55,24 +47,14 @@ struct RidesView: View {
                     if let month = MonthTotal(rides: visible) {
                         MonthStrip(month: month)
                     }
+                    // Today's session or rest, in one line: the Coach tab has the rest (27 Nov 2026).
+                    if let t = model.today, t.state != "no_plan" { NextLine(today: t) }
                     if efforts.isEmpty && model.problem == nil && !model.isLoading {
-                        Text("No rides yet. Connect Apple Health or Garmin in Sources.")
+                        Text("No rides yet. Connect Apple Health or Garmin in You › Sources.")
                             .font(Theme.text(15)).foregroundStyle(Theme.inkMuted)
                             .padding(.vertical, 24)
                     }
-                    if !efforts.isEmpty {
-                        EffortCollection(efforts: showHidden ? model.rides : efforts, showingHidden: showHidden,
-                                         folded: folded, delete: { deleting = $0 })
-                    }
-                    if hiddenCount > 0 {
-                        Toggle(isOn: $showHidden) {
-                            Text("Show \(hiddenCount) false starts and empty recordings")
-                                .font(Theme.text(13)).foregroundStyle(Theme.inkMuted)
-                        }
-                        .tint(Theme.cobalt)
-                        .padding(14)
-                        .surfaceCard(radius: 16)
-                    }
+                    // Your collection lives in You now, folded under the rider card (27 Nov 2026).
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
@@ -97,16 +79,6 @@ struct RidesView: View {
             .onAppear { onScreen = true; markSeen() }
             .onDisappear { onScreen = false }
             .onChange(of: efforts.first?.rideId) { _, _ in markSeen() }
-            .confirmationDialog("Delete this ride?", isPresented: Binding(get: { deleting != nil },
-                                                                          set: { if !$0 { deleting = nil } }),
-                                titleVisibility: .visible, presenting: deleting) { ride in
-                Button("Delete ride", role: .destructive) {
-                    Task { await model.run("Couldn't delete the ride") { try await APIClient().deleteRide(ride.rideId) } }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { ride in
-                Text(DeleteRide.message(ride))
-            }
         }
     }
 
@@ -123,6 +95,48 @@ struct RidesView: View {
             try? await Task.sleep(for: .milliseconds(700))   // after the new card has landed
             withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { celebrateSince = since }
         }
+    }
+}
+
+/// Today's session or rest in one line on Efforts; a tap opens the Coach tab, where the plan lives.
+struct NextLine: View {
+    let today: TrainToday
+
+    var body: some View {
+        Button { TabRouter.shared.tab = 1 } label: {
+            HStack(spacing: 12) {
+                CoachDisc(size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    MonoLabel(label)
+                    Text(text).font(Theme.text(15, .semibold)).foregroundStyle(Theme.ink)
+                        .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.label)
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading).surfaceCard(radius: 18)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens Coach")
+    }
+
+    private var label: String {
+        switch today.state {
+        case "session": return "Today"
+        case "done": return "Today · ride's in"
+        default: return "Today · rest"
+        }
+    }
+
+    private var text: String {
+        if today.state == "session", let s = today.session {
+            return "\(s.title) · \(Int((s.seconds / 60).rounded())) min"
+        }
+        // The first sentence of what comes next ("Tomorrow: Group ride, 75 min.").
+        if let then = today.then, let first = then.split(separator: ".").first, !first.isEmpty {
+            return first.trimmingCharacters(in: .whitespaces) + "."
+        }
+        return today.state == "done" ? "Done for today." : "Rest."
     }
 }
 
@@ -228,6 +242,9 @@ struct RideRow: View {
 struct RideDetailView: View {
     let ride: RideSummary
     @State private var profile: Profile?
+    /// The profiles, moments, climbs and reps (27 Nov 2026); without them the effort chart shows as before.
+    @State private var rideProfile: RideProfile?
+    @State private var scrub = Scrub()
     @StateObject private var card = CardRenderer()
     @State private var confirmShare = false
     @State private var shareImage: UIImage?
@@ -244,9 +261,22 @@ struct RideDetailView: View {
                 // The collectible card first: it's the ride's story, and what gets shared.
                 RideCard(renderer: card, rideId: ride.rideId)
 
-                // What you did: power (or heart rate) with the session's phases, the elevation, the story.
+                // Then the scannable layer and the profiles: drag across them and the card's map follows.
+                if let p = rideProfile, p.count > 1 {
+                    if !p.moments.isEmpty { MomentsRow(profile: p, scrub: $scrub) }
+                    ProfilesPanel(profile: p, scrub: $scrub)
+                    if let z = p.zone2 { Zone2RidePanel(zone: z) }
+                    if !p.reps.isEmpty { RepsPanel(profile: p, scrub: $scrub) }
+                    if !p.climbs.isEmpty { ClimbsPanel(profile: p, scrub: $scrub) }
+                }
+
+                // The coach's read of the ride: what it counted as, one thing to try; ask about it.
+                CoachsRead(rideId: ride.rideId,
+                           label: ride.date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated)))
+
+                // What you did: the session's lines and planned against ridden (its charts when there are no profiles).
                 EffortPanel(rideId: ride.rideId, profile: ride.noDistance ? nil : profile,
-                            outdoor: !ride.noDistance, km: ride.summary.km)
+                            outdoor: !ride.noDistance, km: ride.summary.km, charts: rideProfile == nil)
 
                 if let notes = ride.notes, !notes.isEmpty {
                     NoteList(notes: notes)
@@ -324,10 +354,12 @@ struct RideDetailView: View {
             }
         }
         .task {
-            if profile == nil, let trace = try? await APIClient().trace(ride.rideId) {
+            rideProfile = try? await APIClient().rideProfile(ride.rideId)
+            if rideProfile == nil, profile == nil, let trace = try? await APIClient().trace(ride.rideId) {
                 profile = Profile(trace: trace, km: ride.summary.km)
             }
         }
+        .onChange(of: scrub.idx) { _, i in moveDot(i) }
     }
 
     private var shareCleared: Bool { ride.use["share"]?.allowed ?? false }
@@ -338,7 +370,18 @@ struct RideDetailView: View {
     }
 
     private func share() async {
+        scrub.idx = nil
+        _ = try? await card.webView.evaluateJavaScript("window.kovaScrub && kovaScrub(null)")
         shareImage = await card.image()
+    }
+
+    /// The dot on the card's map, where the ride was at the step you've dragged to (ride_card.py's kovaScrub).
+    private func moveDot(_ i: Int?) {
+        var js = "window.kovaScrub && kovaScrub(null)"
+        if let i, let p = rideProfile, p.lat.indices.contains(i), let la = p.lat[i], let lo = p.lon[i] {
+            js = "window.kovaScrub && kovaScrub(\(la), \(lo))"
+        }
+        card.webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     private var secondary: String? {
@@ -613,6 +656,8 @@ struct EffortPanel: View {
     var profile: Profile? = nil
     var outdoor = false
     var km = 0.0
+    /// The effort and elevation charts: off on the ride page once its profiles show them.
+    var charts = true
     @State private var effort: Effort?
     @State private var failed = false
 
@@ -622,16 +667,16 @@ struct EffortPanel: View {
 
     var body: some View {
         Group {
-            if effort != nil || outdoor {
+            if (charts && (effort != nil || outdoor)) || !(effort?.lines.isEmpty ?? true) || effort?.plan != nil {
                 VStack(alignment: .leading, spacing: 12) {
                     MonoLabel("What you did")
-                    if let part, !part.phases.phases.isEmpty {
+                    if charts, let part, !part.phases.phases.isEmpty {
                         let watts = part.phases.basis == "power"
                         ChartTitle(watts ? "Power" : "Heart rate", unit: watts ? "watts" : "beats per minute")
                         EffortChart(phases: part.phases).frame(height: 132).revealOnFirstSeen(duration: 1.3)
                         PhaseLegend(phases: part.phases.phases)
                     }
-                    if outdoor {
+                    if charts, outdoor {
                         ChartTitle("Elevation", unit: "metres above sea level, by km").padding(.top, 4)
                         ElevationProfile(profile: profile, totalKm: km).frame(height: 110)
                             .revealOnFirstSeen(ready: profile != nil, duration: 1.3)

@@ -1505,6 +1505,9 @@ struct APIClient {
     }
 
     func rideNote(_ rideId: String) async throws -> TrainNote { try await get("v1/train/rides/\(rideId)") }
+    /// The ride page's profiles: every channel in 30-second steps, climbing so far, the track for the card's
+    /// dot, and the climbs, reps, phases, zone 2 and moments to tap.
+    func rideProfile(_ rideId: String) async throws -> RideProfile { try await get("v1/rides/\(rideId)/profile") }
 
     /// The one tap after a ride: easy, good, hard or wrecked, and whether something hurts.
     func setFeel(_ rideId: String, feel: String, hurts: Bool) async throws -> TrainNote {

@@ -85,7 +85,8 @@ def read_rep(p30: list, c30: list, span: tuple[int, int], target: list) -> dict:
         if m < lo:
             dips.append((m, k + 1))
     dips.sort()
-    return {"watts": round(avg), "under_min": round(under_min, 1), "over_min": round(len(over) * STEP_S / 60, 1),
+    return {"start_s": span[0] * STEP_S, "end_s": span[1] * STEP_S,  # where the rep sits in the ride
+            "watts": round(avg), "under_min": round(under_min, 1), "over_min": round(len(over) * STEP_S / 60, 1),
             "minutes": round(len(xs) * STEP_S / 60), "thirds": [round(t) if t is not None else None for t in thirds],
             "lowest": {"watts": round(per_min[low_k]) if per_min else None, "minute": low_k + 1},
             "dips": [{"watts": round(m), "minute": k} for m, k in dips[:2]],

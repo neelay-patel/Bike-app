@@ -167,8 +167,10 @@ def test_indoor_session_without_distance():
     s = summary(ride)
     assert s["km"] == 0 and s["moving_h"] == 0.5 and s["avg_kmh"] is None  # time from the workout, not 0
     html = ride_card(ride, places=[])
-    assert "30 minutes indoors." in html and "· INDOOR<" in html and "DISTANCE" not in html
-    assert "MAX HEART RATE" in html and "indoor ride" in html
+    # The same six numbers as any card (27 Nov 2026): distance and speed read "indoor" without a game's km.
+    assert "30 minutes on the trainer." in html and "DISTANCE" in html and "AVG SPEED" in html
+    assert ">indoor<" in html and "AVG HEART RATE" in html and "on the trainer</h1>" in html
+    assert "The ride's effort" in html   # no track: the map is the effort
 
 
 def test_indoor_mini_card_picture():

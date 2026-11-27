@@ -103,13 +103,12 @@ def trace(ride: Ride, points: int = 48) -> tuple[list[float], str | None]:
     return [], None
 
 
-# Zwift's made-up worlds sit on fake coordinates in the Pacific; the others ride real cities' maps.
-VIRTUAL_WORLDS = [("Watopia", -11.75, -11.6, 166.85, 167.05), ("Makuri Islands", -10.85, -10.7, 165.75, 165.9),
-                  ("France", -21.8, -21.6, 166.1, 166.3)]
-
-
 def virtual_world(lat: float, lon: float) -> str | None:
-    return next((n for n, a, b, c, d in VIRTUAL_WORLDS if a <= lat <= b and c <= lon <= d), None)
+    """The ride game's world a virtual track is in (rideengine/worlds.py): Zwift's made-up worlds sit on
+    coordinates in the Pacific, the others on real cities' maps (New York on Central Park)."""
+    from ..worlds import world_at
+    w = world_at(lat, lon)
+    return w[1] if w else None
 
 
 class Brief:

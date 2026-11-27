@@ -33,15 +33,17 @@ rider's words, progress read from normal riding, an AI coach that explains while
   `effort` (sessions and phases), `headline` (the four numbers), `goals`, `plan` (training plan, .ics, .zwo),
   `train` (what kind of training a ride was, which session it counts as), `today` (today's session or rest),
   `feedback` (one thing to try after each ride), `zone2` (range, time in zone 2, drift check), `collection` (badges, ratings, binder),
-  `simpower` (SIMULATED, prototyping only).
+  `profile` (the ride page's 30-second profiles, climbing so far), `simpower` (SIMULATED, prototyping only).
+  `rideengine/worlds.py`: ride games' worlds from a virtual track (Zwift's New York on Central Park), for indoor cards.
 - `rideengine/routes/` (`docs/routes.md`): GPX routes, our OSM map, the route check, FIT courses, our router, tuning,
   routes from a description. `rideengine/card/`: the ride card (`ride_card.py`), avatar, rider card.
 - `backend/`: FastAPI service (SQLite in dev): `service.py`, `connectors/` (one per provider), `coach.py` and
   `coach_chat.py` (the AI coach: ride words, and the coach you can ask), `insights.py`
   (`docs/insights.md`), `app.py` (HTTP API), `crypto.py`. Dev data in `data/backend/`. Rides' and recordings' JSON is stored compressed (`db.pack`/`unpack`); each
   ride also has a small `brief` the ride list reads (bump `service.BRIEF_VERSION` if `describe()` changes).
-- `ios/RideApp/`: the iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`). Tabs: Efforts, Train (plan and
-  coach, `TrainView.swift`), Routes, You, Sources. `Kova.swift` (mark, opening screen, About), `Theme.swift` (copies `design/tokens.json`; a test checks),
+- `ios/RideApp/`: the iPhone app (SwiftUI, iOS 17+, `com.neelaypatel.rideapp`). Tabs (27 Nov 2026): Efforts,
+  Coach (plan and the coach you can ask, `TrainView.swift`), You (collection; Sources behind the gear), Routes.
+  Ride page profiles: `RideProfileView.swift` (GET /v1/rides/{id}/profile). Tab marks: `TabIcons.swift`. `Kova.swift` (mark, opening screen, About), `Theme.swift` (copies `design/tokens.json`; a test checks),
   `Motion.swift`. Setup: `ios/README.md`. App icon: `swift scripts/make_icon.swift <AppIcon.png> --no-ribbon`.
 - `design/tokens.json` + `docs/design.md`: the look (direction D). `tests/`: synthetic tests always run; tests on
   Neelay's own files skip when `data/` is absent.

@@ -8,10 +8,17 @@ import SwiftUI
 
 private let summit = Theme.stripes[3]
 
+/// The Coach tab (27 Nov 2026, canvas "Third pass"): Train's today, week and goal, and the coach you can ask,
+/// in one place. Today first (session, rest, the ride that's in, or Sunday's review), then the light running
+/// down to what's next, the week, zone 2 and the goal; ideas to ask about; and an ask bar that floats above
+/// the tab bar and folds into the coach's disc while you scroll.
 struct TrainView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var coach = CoachNotifier.shared
     @State private var settingGoal = false
+    @State private var home: CoachHome?
+    @State private var asking: CoachQuestion?
+    @State private var folded = false
 
     var body: some View {
         NavigationStack {
@@ -33,24 +40,20 @@ struct TrainView: View {
                                 NextCard(today: t, text: then, plan: model.plan).arrive(2)
                             }
                         }
-                        if t.state != "done", let note = t.latest { LatestRideCard(note: note).arrive(3) }
-                        CoachCard().arrive(3)
                         if let r = t.review {
                             NavigationLink { ReviewView(week: r.weekStart) } label: { ReviewCardView(card: r) }
-                                .buttonStyle(.plain).arrive(4)
+                                .buttonStyle(.plain).arrive(3)
                         }
-                        if let c = t.changes?.first { PlanChangeLine(change: c).arrive(4) }
                         if let days = t.days, !days.isEmpty {
                             NavigationLink { TrainWeekView() } label: {
                                 WeekStrip(days: days, done: t.done, total: t.total, phase: t.phase)
                             }
                             .buttonStyle(.plain)
-                            .arrive(4)
+                            .arrive(3)
                         }
+                        if let c = t.changes?.first { PlanChangeLine(change: c).arrive(3) }
                         Zone2WeekCard().arrive(4)
-                        if let goal = t.goal { GoalCard(goal: goal).arrive(5) }
-                        Text("Training guidance from your own data, not medical advice.")
-                            .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
+                        if let goal = t.goal { GoalCard(goal: goal).arrive(4) }
                     } else if !model.isLoading {
                         Button { settingGoal = true } label: {
                             VStack(alignment: .leading, spacing: 6) {
@@ -63,15 +66,36 @@ struct TrainView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if let ideas = home?.ideas, !ideas.isEmpty, home?.on == true {
+                        VStack(alignment: .leading, spacing: 8) {
+                            MonoLabel("Ask, or look into something").padding(.horizontal, 4)
+                            IdeaChips(ideas: ideas) { asking = CoachQuestion(text: $0) }
+                        }
+                        .padding(.top, 4)
+                    }
+                    Text("Training guidance from your own data, not medical advice.")
+                        .font(Theme.mono(11)).foregroundStyle(Theme.label).padding(.horizontal, 4)
+                    Color.clear.frame(height: 76)       // room for the ask bar
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
+            .foldsWhileScrolling($folded)
             .background(Theme.ground.ignoresSafeArea())
+            .overlay(alignment: .bottomTrailing) {
+                if home?.on == true {
+                    AskBar(folded: $folded) { asking = CoachQuestion(text: $0) }
+                        .padding(.horizontal, 16).padding(.bottom, 10)
+                }
+            }
             .toolbar(.hidden, for: .navigationBar)
-            .refreshable { await model.refresh() }
+            .refreshable { await model.refresh(); home = try? await APIClient().coachHome() }
             .sheet(isPresented: $settingGoal) { GoalFlow() }
-            .task { await coach.askPermissionOnce() }
-            // A tapped coach notification: the ride's note, or the week; "today" is Train itself.
+            .navigationDestination(item: $asking) { q in CoachView(initial: q.text) }
+            .task {
+                await coach.askPermissionOnce()
+                home = try? await APIClient().coachHome()
+            }
+            // A tapped coach notification: the ride's note, or the week; "today" is the Coach tab itself.
             .navigationDestination(item: Binding(get: { coach.route == .today ? nil : coach.route },
                                                  set: { coach.route = $0 })) { route in
                 switch route {
@@ -86,8 +110,11 @@ struct TrainView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            MonoLabel(headline)
+        HStack(alignment: .center, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                MonoLabel(headline)
+                Text("Coach").font(Theme.heading(44)).foregroundStyle(Theme.ink)
+            }
             Spacer()
             if model.plan != nil {
                 NavigationLink { PlanView(embedded: true) } label: {
@@ -95,6 +122,10 @@ struct TrainView: View {
                 }
                 .accessibilityLabel("The plan ahead")
             }
+            NavigationLink { CoachKnowsView() } label: {
+                Image(systemName: "info.circle").font(.system(size: 20)).frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("What your coach knows")
         }
         .padding(.horizontal, 4).padding(.top, 8)
     }
@@ -106,7 +137,130 @@ struct TrainView: View {
     }
 }
 
-/// The coach's opening line, beside the Kova mark: in ink, so it reads as the coach speaking.
+/// A question for the coach, opened as a conversation.
+struct CoachQuestion: Identifiable, Hashable {
+    let id = UUID()
+    let text: String
+}
+
+/// Things to ask, as chips that wrap.
+struct IdeaChips: View {
+    let ideas: [String]
+    let ask: (String) -> Void
+    var body: some View {
+        FlowLayout(spacing: 8) {
+            ForEach(ideas, id: \.self) { q in
+                Button { ask(q) } label: {
+                    Text(q).font(Theme.text(14, .medium)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .background(Theme.surface, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.line))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// "Ask your coach anything", floating above the tab bar. While you scroll it folds into the coach's disc in
+/// the corner, so it covers less of what you're reading; it opens again when you stop, scroll up or reach
+/// the end, or when you tap the disc (27 Nov 2026, option 2).
+struct AskBar: View {
+    @Binding var folded: Bool
+    let ask: (String) -> Void
+    @State private var draft = ""
+    @FocusState private var typing: Bool
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            if folded {
+                Button { withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { folded = false } } label: {
+                    CoachDisc(size: 44)
+                        .frame(width: 56, height: 56)
+                        .background(Theme.surface, in: Circle())
+                        .overlay(Circle().stroke(Theme.line))
+                        .shadow(color: Theme.ink.opacity(0.14), radius: 10, y: 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ask your coach")
+                .transition(.scale(scale: 0.6, anchor: .trailing).combined(with: .opacity))
+            } else {
+                HStack(spacing: 8) {
+                    TextField("Ask your coach anything", text: $draft)
+                        .font(Theme.text(15)).focused($typing).submitLabel(.send)
+                        .onSubmit(send)
+                    Button(action: send) {
+                        Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white).frame(width: 40, height: 40)
+                            .background(Theme.cobalt, in: Circle())
+                    }
+                    .accessibilityLabel("Send")
+                }
+                .padding(.leading, 18).padding(.trailing, 7).frame(height: 56)
+                .background(Theme.surface, in: Capsule())
+                .overlay(Capsule().stroke(Theme.line))
+                .shadow(color: Theme.ink.opacity(0.10), radius: 12, y: 4)
+                .transition(.scale(scale: 0.2, anchor: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.38, dampingFraction: 0.86), value: folded)
+    }
+
+    private func send() {
+        let q = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { typing = true; return }
+        draft = ""
+        typing = false
+        ask(q)
+    }
+}
+
+extension View {
+    /// Folds the ask bar while the scroll view is moving down, and opens it again when scrolling stops
+    /// (after a moment), goes up, or reaches the end. iOS 18's scroll phases; on iOS 17 it stays open.
+    @ViewBuilder func foldsWhileScrolling(_ folded: Binding<Bool>) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(FoldOnScroll(folded: folded))
+        } else {
+            self
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct FoldOnScroll: ViewModifier {
+    @Binding var folded: Bool
+    @State private var reopen: Task<Void, Never>?
+
+    struct Spot: Equatable { var y: CGFloat; var atEnd: Bool }
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Spot.self) { g in
+                Spot(y: g.contentOffset.y,
+                     atEnd: g.contentOffset.y + g.containerSize.height >= g.contentSize.height - 60)
+            } action: { old, new in
+                if new.atEnd || new.y < 40 { set(false) }
+                else if new.y > old.y + 2 { set(true) }
+                else if new.y < old.y - 6 { set(false) }
+            }
+            .onScrollPhaseChange { _, phase in
+                reopen?.cancel()
+                if phase == .idle {
+                    reopen = Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        if !Task.isCancelled { set(false) }
+                    }
+                }
+            }
+    }
+
+    private func set(_ v: Bool) {
+        guard folded != v else { return }
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { folded = v }
+    }
+}
+
 struct CoachLine: View {
     let text: String
     /// The morning brief's title, when the line is the brief.
@@ -130,12 +284,7 @@ struct CoachMark: View {
     var size: CGFloat = 32
 
     var body: some View {
-        ZStack {
-            Circle().fill(Theme.panel)
-            KovaMark(size: size * 0.5)
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        CoachDisc(size: size)     // the fresh effort on the cobalt disc, as on the Coach tab (27 Nov 2026)
     }
 }
 

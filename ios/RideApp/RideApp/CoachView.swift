@@ -43,6 +43,8 @@ struct CoachView: View {
     /// Opened from a ride: questions are about that ride.
     var rideId: String? = nil
     var rideLabel: String? = nil
+    /// A question to ask straight away (typed in the Coach tab's ask bar, or one of its ideas).
+    var initial: String? = nil
 
     @State private var home: CoachHome?
     @State private var messages: [CoachChatMessage] = []
@@ -101,8 +103,16 @@ struct CoachView: View {
         }
         .navigationDestination(isPresented: $showKnows) { CoachKnowsView() }
         .navigationDestination(isPresented: $showUsage) { CoachUsageView() }
-        .task { await load() }
+        .task {
+            await load()
+            if let q = initial, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !askedInitial {
+                askedInitial = true
+                await send(q)
+            }
+        }
     }
+
+    @State private var askedInitial = false
 
     // MARK: Asking
 

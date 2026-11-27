@@ -580,6 +580,15 @@ def create_app(backend: Optional[Backend] = None) -> FastAPI:
             raise HTTPException(404, "No such ride")
         return e
 
+    @app.get("/v1/rides/{ride_id}/profile")
+    def ride_profile(ride_id: str, uid: int = Depends(user)):
+        """The ride page's profiles: every channel in 30-second steps, climbing so far, the track for the
+        card's scrub dot, and the climbs, reps, phases, zone 2 and moments to tap (service.ride_profile)."""
+        p = be.ride_profile(uid, ride_id)
+        if p is None:
+            raise HTTPException(404, "No such ride")
+        return p
+
     @app.get("/v1/rides/{ride_id}")
     def ride(ride_id: str, samples: bool = False, uid: int = Depends(user)):
         r = be.ride(uid, ride_id)

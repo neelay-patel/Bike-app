@@ -238,30 +238,34 @@ struct StatusLine: View {
     }
 }
 
+/// Which tab is showing, so a screen can send you to another (Efforts' "Next" line opens Coach).
+final class TabRouter: ObservableObject {
+    static let shared = TabRouter()
+    @Published var tab = 0
+}
+
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var tab = 0
+    @ObservedObject private var router = TabRouter.shared
+    private var tab: Int { router.tab }
     /// How many times each tab has been opened: its cards arrive again, and its charts draw in again, each time.
     @State private var visits: [Int: Int] = [:]
     @ObservedObject private var coach = CoachNotifier.shared
 
     var body: some View {
-        TabView(selection: $tab) {
-            // Your own bike: in its colours when you're on Efforts, an outline otherwise.
-            RidesView().tabItem {
-                Label { Text("Efforts") } icon: { Image(uiImage: BikeIcon.image(model.bike, selected: tab == 0)) }
-            }.tag(0).environment(\.tabVisit, visits[0] ?? 0)
-            // Not a trainer or a road bike: indoors or out is the rider's choice (21 Nov 2026). Rising bars, like
-            // the climb in Kova's mark.
-            TrainView().tabItem { Label("Train", systemImage: "chart.bar.xaxis.ascending") }.tag(1)
-                .environment(\.tabVisit, visits[1] ?? 0)
-            RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
-                .environment(\.tabVisit, visits[3] ?? 0)
+        // Efforts · Coach · You · Routes (27 Nov 2026, canvas "Third pass"). Sources lives behind the gear on You.
+        TabView(selection: $router.tab) {
+            // An effort's shape: easy, a push, settle. Your own bike left the tab bar for now.
+            RidesView().tabItem { Label { Text("Efforts") } icon: { Image(uiImage: TabIcons.efforts()) } }
+                .tag(0).environment(\.tabVisit, visits[0] ?? 0)
+            // The plan and the coach in one place: Train's today, week and goal, and the coach you can ask.
+            TrainView().tabItem { Label { Text("Coach") } icon: { Image(uiImage: TabIcons.coach()) } }
+                .tag(1).environment(\.tabVisit, visits[1] ?? 0)
             YouView().tabItem { Label("You", systemImage: "person.crop.circle") }.tag(2)
                 .environment(\.tabVisit, visits[2] ?? 0)
-            ConnectionsView().tabItem { Label("Sources", systemImage: "link") }.tag(4)
-                .environment(\.tabVisit, visits[4] ?? 0)
+            RoutesView().tabItem { Label("Routes", systemImage: "point.topleft.down.to.point.bottomright.curvepath") }.tag(3)
+                .environment(\.tabVisit, visits[3] ?? 0)
         }
         .onChange(of: tab) { _, t in visits[t, default: 0] += 1 }
         .tint(Theme.cobalt)
@@ -274,12 +278,12 @@ struct ContentView: View {
             if phase == .background { coach.scheduleBackgroundRefresh() }
         }
         .onChange(of: coach.route) { _, route in
-            if route != nil { tab = 1 }                  // a tapped coach notification opens Train
+            if route != nil { router.tab = 1 }           // a tapped coach notification opens Coach
         }
         .onOpenURL { url in
             // A GPX shared from Ride with GPS, Komoot or Files: check it in Routes.
             guard url.pathExtension.lowercased() == "gpx" else { return }
-            tab = 3
+            router.tab = 3
             Task { await RouteInbox.shared.add(url) }
         }
         #if DEBUG
